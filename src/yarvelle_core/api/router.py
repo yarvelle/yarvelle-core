@@ -54,7 +54,10 @@ def get_default_router_contributions() -> List[RouterContribution]:
         RouterContribution(attachments_router, pack_id="core"),
         RouterContribution(profiles_router, prefix="/profiles", tags=["profiles"], pack_id="core"),
         RouterContribution(search_router, pack_id="core"),
-        RouterContribution(memory_router, pack_id="core"),
+        RouterContribution(memory_router, prefix="/memory", tags=["memory"], pack_id="core"),
+        RouterContribution(
+            memory_router, prefix="/memories", tags=["memory"], include_in_schema=False, pack_id="core"
+        ),
         RouterContribution(auth_router, prefix="/auth", tags=["auth"], pack_id="core"),
         RouterContribution(admin_router, prefix="/admin", tags=["admin"], pack_id="core"),
     ]
