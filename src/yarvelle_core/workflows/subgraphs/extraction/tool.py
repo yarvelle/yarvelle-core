@@ -1,0 +1,342 @@
+# Yarvelle Core — Domain-Neutral AI Agent Runtime & Execution Engine
+# Copyright 2026 Spectrayan (https://spectrayan.com)
+#
+# Licensed under the PolyForm Noncommercial License 1.0.0 and the
+# Yarvelle Core Additional Terms (see LICENSE and ADDITIONAL-TERMS.md).
+# Personal and household local use only. Commercial use, hosted service
+# offering, rebranding, white-labeling, and redistribution of modified
+# forks are prohibited without a written commercial license from Spectrayan.
+#
+# Required Notice: Copyright 2026 Spectrayan (https://spectrayan.com)
+
+"""Dual-invocation document extraction tool for specialist agents.
+
+Invocable directly as a LangChain tool by specialist agents or as an automated
+ingestion step upon attachment upload. Reads sandboxed attachments, sanitizes PII,
+extracts typed Pydantic dossiers, runs GroundingValidator, and populates AgentState.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import concurrent.futures
+import logging
+from pathlib import Path
+import re
+from typing import Any, Dict, List, Optional, Type, Union
+
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.tools import BaseTool
+from pydantic import BaseModel, Field
+
+from yarvelle_core.config import settings
+from yarvelle_core.constants.agents import TOOL_EXTRACT_DOCUMENT_DOSSIER
+from yarvelle_core.constants.extraction import (
+    DEFAULT_DOSSIER_TYPE,
+    DOSSIER_TYPE_GENERIC,
+)
+from yarvelle_core.constants.paths import ATTACHMENTS_DIR
+from yarvelle_core.tools.attach_read import (
+    execute_attach_read,
+    extract_text_from_pdf_bytes,
+)
+from yarvelle_core.tools.sandbox import SandboxSecurityError
+from yarvelle_core.workflows.state import AgentState
+from yarvelle_core.workflows.subgraphs.extraction.dossiers import (
+    BaseDossier,
+    GenericDocumentDossier,
+    get_dossier_cls,
+)
+from yarvelle_core.workflows.subgraphs.extraction.grounding import GroundingValidator
+from yarvelle_core.workflows.subgraphs.extraction.sanitizer import sanitize_pii
+
+logger = logging.getLogger(__name__)
+
+
+class DocumentSandboxError(SandboxSecurityError, PermissionError):
+    """Raised when an attachment path traversal or sandbox escape is attempted."""
+
+
+class ExtractDocumentDossierInput(BaseModel):
+    """Input argument schema for the extract_document_dossier tool."""
+
+    file_path: Optional[str] = Field(
+        default=None,
+        description="Relative path to file located inside the attachments/ directory.",
+    )
+    document_text: Optional[str] = Field(
+        default=None,
+        description="Raw document text if already loaded or provided directly.",
+    )
+    dossier_type: str = Field(
+        default=DEFAULT_DOSSIER_TYPE,
+        description="Target dossier schema: 'generic' or registered domain schema.",
+    )
+    state: Optional[Any] = Field(
+        default=None,
+        description="Optional state dictionary or AgentState to populate directly.",
+    )
+    workspace_root: Optional[Union[str, Path]] = Field(
+        default=None,
+        description="Optional workspace directory path.",
+    )
+
+
+def _heuristic_dossier_extractor(text: str, dossier_type: str) -> BaseDossier:
+    """Deterministic extractor fallback supporting offline and test environments."""
+    m_sum = re.search(r"summary\s*:\s*([^\n]+)", text, re.I)
+    summary = (
+        m_sum.group(1).strip()
+        if m_sum
+        else text.splitlines()[0]
+        if text.splitlines()
+        else ""
+    )
+
+    nums: Dict[str, str] = {}
+    for match in re.finditer(r"([A-Za-z0-9_ ]+)\s*:\s*(\$?\d+(?:,\d{3})*(?:\.\d+)?%?)", text):
+        k = match.group(1).strip().lower().replace(" ", "_")
+        v = match.group(2).strip()
+        nums[k] = v
+
+    sections: List[str] = []
+    m_sec = re.search(r"sections?\s*:\s*([^\n]+)", text, re.I)
+    if m_sec:
+        raw_secs = [
+            s.strip()
+            for s in m_sec.group(1).split(",")
+            if s.strip()
+        ]
+        if raw_secs:
+            sections = raw_secs
+
+    return GenericDocumentDossier(
+        summary=summary,
+        key_numerical_values=nums,
+        sections=sections,
+    )
+
+
+class ExtractDocumentDossierTool(BaseTool):
+    """LangChain-compatible tool for structured document extraction with PII and grounding.
+
+    Composes SanitizePIITool, ExtractStructuredDataTool, and ValidateGroundingTool
+    while retaining 100% backward compatibility with all existing tests.
+    """
+
+    name: str = TOOL_EXTRACT_DOCUMENT_DOSSIER
+    description: str = (
+        "Extract structured, grounded Pydantic dossiers from documents or summaries. "
+        "Automatically sanitizes PII and verifies numerical figures."
+    )
+    args_schema: Type[BaseModel] = ExtractDocumentDossierInput
+    model: Optional[BaseChatModel] = None
+
+    def __init__(self, model: Optional[BaseChatModel] = None, **kwargs: Any) -> None:
+        super().__init__(model=model, **kwargs)
+
+    def _read_document_content(
+        self,
+        file_path: Optional[str],
+        document_text: Optional[str],
+        workspace_root: Optional[Union[str, Path]] = None,
+    ) -> str:
+        """Resolve document content from raw text or sandboxed attachment file."""
+        if document_text and str(document_text).strip():
+            return str(document_text)
+
+        if not file_path:
+            raise ValueError("Either file_path or document_text must be provided.")
+
+        ws_root = Path(workspace_root) if workspace_root else Path(settings.workspace_root)
+        uploads_dir = settings.get_uploads_dir().resolve()
+        ws_uploads_dir = (ws_root / "uploads").resolve()
+        legacy_att_dir = (ws_root / "attachments").resolve()
+
+        allowed_sandboxes = [uploads_dir, ws_uploads_dir, legacy_att_dir]
+
+        # Reject null bytes or URI schemes
+        clean_path = str(file_path).strip()
+        if any(c in clean_path for c in ("\0", "file://", "http://", "https://")):
+            raise DocumentSandboxError(f"Path traversal forbidden: Invalid path characters in '{file_path}'")
+
+        # 1. Attempt sandboxed execution via attach_read
+        user_id = getattr(self, "user_id", None) or "default_user"
+        profile_id = getattr(self, "profile_id", None) or "default_profile"
+        ctx = type(
+            "ExtractionExecutionContext",
+            (),
+            {
+                "workspace_root": ws_root,
+                "user_id": user_id,
+                "profile_id": profile_id,
+            },
+        )()
+
+        res = None
+        try:
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop and loop.is_running():
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    res = executor.submit(
+                        lambda: asyncio.run(
+                            execute_attach_read({"path": file_path}, ctx)
+                        )
+                    ).result()
+            else:
+                res = asyncio.run(execute_attach_read({"path": file_path}, ctx))
+        except SandboxSecurityError as sec_err:
+            raise DocumentSandboxError(str(sec_err)) from sec_err
+        except Exception as exc:
+            logger.debug("execute_attach_read failed: %s", exc)
+
+        if res is not None:
+            if res.success and res.output and res.output.get("content"):
+                return str(res.output.get("content", ""))
+
+            if not res.success and res.error:
+                err_lower = res.error.lower()
+                # Only raise DocumentSandboxError for genuine path traversal and escape attacks
+                if any(
+                    kw in err_lower
+                    for kw in (
+                        "traversal",
+                        "escape",
+                        "escapes",
+                        "null byte",
+                        "uri scheme",
+                        "cross-profile",
+                    )
+                ):
+                    raise DocumentSandboxError(res.error)
+
+        # 2. Direct path resolution fallbacks across allowed sandboxes
+        candidate_paths = [
+            uploads_dir / file_path,
+            ws_uploads_dir / file_path,
+            legacy_att_dir / file_path,
+        ]
+        if str(file_path).startswith("attachments/") or str(file_path).startswith("uploads/"):
+            candidate_paths.append(ws_root / file_path)
+
+        for p in candidate_paths:
+            try:
+                resolved = p.resolve()
+                if not any(resolved.is_relative_to(sandbox) for sandbox in allowed_sandboxes):
+                    raise DocumentSandboxError(
+                        f"Path traversal forbidden: Path '{file_path}' escapes allowed directory"
+                    )
+                if resolved.is_file():
+                    if resolved.suffix.lower() == ".pdf":
+                        return extract_text_from_pdf_bytes(resolved.read_bytes())
+                    return resolved.read_text(encoding="utf-8", errors="replace")
+            except DocumentSandboxError:
+                raise
+            except Exception:
+                continue
+
+        raise FileNotFoundError(
+            f"Failed to find or read sandboxed attachment '{file_path}'"
+        )
+
+    def _run(
+        self,
+        file_path: Optional[str] = None,
+        document_text: Optional[str] = None,
+        dossier_type: str = DEFAULT_DOSSIER_TYPE,
+        state: Optional[Dict[str, Any]] = None,
+        workspace_root: Optional[Union[str, Path]] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """Execute document extraction, sanitization, grounding, and state update."""
+        raw_text = self._read_document_content(
+            file_path, document_text, workspace_root=workspace_root
+        )
+
+        from yarvelle_core.tools.extraction_tools import (
+            ExtractStructuredDataTool,
+            SanitizePIITool,
+            ValidateGroundingTool,
+        )
+
+        # 1. PII Sanitization via SanitizePIITool
+        sanitizer_tool = SanitizePIITool()
+        sanitized_text = sanitizer_tool._run(raw_text)
+
+        # 2. Schema Extraction via ExtractStructuredDataTool
+        extraction_tool = ExtractStructuredDataTool(model=self.model)
+        serialized_dossier = extraction_tool._run(sanitized_text, schema_type=dossier_type)
+
+        # 3. Grounding Verification against raw source text
+        grounding_tool = ValidateGroundingTool()
+        grounding_dict = grounding_tool._run(serialized_dossier, raw_text)
+
+        # 4. Resolve normalized dossier type
+        dossier_cls = get_dossier_cls(dossier_type)
+        try:
+            resolved_type = dossier_cls().dossier_type
+        except Exception:
+            resolved_type = dossier_type
+
+        # 5. State Population
+        payload = {
+            "dossier_type": resolved_type,
+            "data": serialized_dossier,
+            "grounding": grounding_dict,
+            "source_file": file_path,
+        }
+
+        if state is not None and isinstance(state, dict):
+            state.setdefault("document_dossiers", []).append(payload)
+
+        return {
+            "status": "success",
+            "dossier_type": resolved_type,
+            "dossier": serialized_dossier,
+            "is_grounded": grounding_dict.get("is_grounded", True),
+            "unmatched_values": grounding_dict.get("unmatched_values", []),
+        }
+
+    async def _arun(
+        self,
+        file_path: Optional[str] = None,
+        document_text: Optional[str] = None,
+        dossier_type: str = DEFAULT_DOSSIER_TYPE,
+        state: Optional[Dict[str, Any]] = None,
+        workspace_root: Optional[Union[str, Path]] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """Async execution handler delegating to _run."""
+        return self._run(
+            file_path=file_path,
+            document_text=document_text,
+            dossier_type=dossier_type,
+            state=state,
+            workspace_root=workspace_root,
+            **kwargs,
+        )
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        """Enables direct invocation as a callable Python function."""
+        if args and isinstance(args[0], dict) and not kwargs:
+            return self.invoke(args[0])
+        keys = ["file_path", "document_text", "dossier_type"]
+        for i, a in enumerate(args):
+            if i < len(keys) and keys[i] not in kwargs:
+                kwargs[keys[i]] = a
+        return self.invoke(kwargs)
+
+
+# Canonical singleton tool instance
+extract_document_dossier = ExtractDocumentDossierTool()
+
+__all__ = [
+    "DocumentSandboxError",
+    "ExtractDocumentDossierInput",
+    "ExtractDocumentDossierTool",
+    "extract_document_dossier",
+]

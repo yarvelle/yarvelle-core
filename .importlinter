@@ -1,0 +1,55 @@
+[importlinter]
+root_package = yarvelle_core
+include_external_packages = True
+
+[importlinter:contract:forbidden_packs_and_apps]
+name = yarvelle_core must never import from carefold or any domain pack
+type = forbidden
+source_modules =
+    yarvelle_core
+forbidden_modules =
+    carefold
+    carefold_health
+    finance
+    kids
+    yarvelle
+    fhir
+
+[importlinter:contract:layer_ordering]
+name = Internal layer ordering in yarvelle_core
+type = layers
+layers =
+    yarvelle_core.api
+    yarvelle_core.workflows
+    yarvelle_core.engine
+    yarvelle_core.search | yarvelle_core.memory
+    yarvelle_core.scope
+    yarvelle_core.db | yarvelle_core.storage | yarvelle_core.vault
+ignore_imports =
+    yarvelle_core.audit.logger -> yarvelle_core.api.deps
+    yarvelle_core.engine.tool_exec -> yarvelle_core.api.approvals
+    yarvelle_core.engine.service -> yarvelle_core.workflows.nodes.base
+    yarvelle_core.engine.service -> yarvelle_core.workflows.state
+    yarvelle_core.engine.builder -> yarvelle_core.workflows.state
+    yarvelle_core.engine.builder -> yarvelle_core.workflows.dispatcher
+    yarvelle_core.engine.builder -> yarvelle_core.workflows.nodes
+    yarvelle_core.engine.graph -> yarvelle_core.workflows.nodes.tool_node
+    yarvelle_core.engine.graph -> yarvelle_core.workflows.nodes.agent_node
+    yarvelle_core.engine.graph -> yarvelle_core.workflows.nodes
+    yarvelle_core.engine.graph -> yarvelle_core.workflows.nodes.output_guardrail_node
+    yarvelle_core.engine.graph -> yarvelle_core.workflows.nodes.input_guardrail_node
+    yarvelle_core.engine.graph -> yarvelle_core.workflows.nodes.suggestion_node
+    yarvelle_core.engine.graph -> yarvelle_core.workflows.state
+    yarvelle_core.engine.tool_registry -> yarvelle_core.workflows.subgraphs.extraction.tool
+    yarvelle_core.engine.tool_registry -> yarvelle_core.tools.extraction_tools
+    yarvelle_core.db.scoped_session -> yarvelle_core.scope.context
+    yarvelle_core.db.scoped_session -> yarvelle_core.scope.mixin
+    yarvelle_core.db.models -> yarvelle_core.scope.adapter
+    yarvelle_core.db.models -> yarvelle_core.scope.mixin
+    yarvelle_core.db.models -> yarvelle_core.scope.context
+    yarvelle_core.db.seeding -> yarvelle_core.loaders.agent_loader
+    yarvelle_core.db.seeding -> yarvelle_core.loaders.skill_loader
+    yarvelle_core.vault.dek -> yarvelle_core.db.models
+    yarvelle_core.vault.dek -> yarvelle_core.scope.context
+    yarvelle_core.storage.cas -> yarvelle_core.scope.context
+    yarvelle_core.storage.extract -> yarvelle_core.tools.attach_read

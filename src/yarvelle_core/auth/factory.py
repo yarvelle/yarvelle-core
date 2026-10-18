@@ -1,0 +1,100 @@
+# Yarvelle Core — Domain-Neutral AI Agent Runtime & Execution Engine
+# Copyright 2026 Spectrayan (https://spectrayan.com)
+#
+# Licensed under the PolyForm Noncommercial License 1.0.0 and the
+# Yarvelle Core Additional Terms (see LICENSE and ADDITIONAL-TERMS.md).
+# Personal and household local use only. Commercial use, hosted service
+# offering, rebranding, white-labeling, and redistribution of modified
+# forks are prohibited without a written commercial license from Spectrayan.
+#
+# Required Notice: Copyright 2026 Spectrayan (https://spectrayan.com)
+
+"""Factory and lifecycle management for hexagonal AuthPort adapters."""
+
+from __future__ import annotations
+
+import logging
+import os
+from typing import Optional
+
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from yarvelle_core.auth.adapters.disabled_adapter import DisabledAuthAdapter
+from yarvelle_core.auth.adapters.oidc_adapter import OidcAuthAdapter
+from yarvelle_core.auth.adapters.sql_adapter import SqlAuthAdapter
+from yarvelle_core.auth.ports import AuthPort
+
+logger = logging.getLogger(__name__)
+
+ENV_AUTH_PROVIDER = "CAREFOLD_AUTH_PROVIDER"
+DEFAULT_AUTH_PROVIDER = "local"
+
+_CACHED_AUTH_PORT: Optional[AuthPort] = None
+
+
+def create_auth_port(
+    provider_name: Optional[str] = None,
+    session_factory: Optional[async_sessionmaker[AsyncSession]] = None,
+) -> AuthPort:
+    """Instantiates an AuthPort adapter based on provider name.
+
+    Args:
+        provider_name: Optional provider ('disabled', 'local', 'oidc').
+                       Defaults to CAREFOLD_AUTH_PROVIDER or 'disabled'.
+        session_factory: Optional SQLAlchemy sessionmaker for SQL-backed adapters.
+
+    Returns:
+        Instance implementing AuthPort.
+
+    Raises:
+        ValueError: If provider is unrecognized.
+    """
+    raw_provider = provider_name
+    if raw_provider is None:
+        raw_provider = os.getenv(ENV_AUTH_PROVIDER)
+    if raw_provider is None:
+        try:
+            from yarvelle_core.config import settings
+            raw_provider = getattr(settings, "auth_provider", DEFAULT_AUTH_PROVIDER)
+        except Exception:
+            raw_provider = DEFAULT_AUTH_PROVIDER
+
+    provider = (raw_provider or DEFAULT_AUTH_PROVIDER).lower().strip()
+
+    if provider in ("disabled", "bypass", "none"):
+        return DisabledAuthAdapter()
+    elif provider in ("local", "sql", "sqlite", "postgres"):
+        return SqlAuthAdapter(session_factory=session_factory)
+    elif provider in ("oidc", "sso"):
+        sql_ad = SqlAuthAdapter(session_factory=session_factory)
+        return OidcAuthAdapter(sql_adapter=sql_ad)
+    else:
+        raise ValueError(
+            f"Unsupported auth provider: '{provider}'. "
+            "Supported providers: 'disabled', 'local', 'oidc'."
+        )
+
+
+def get_auth_port() -> AuthPort:
+    """Returns the singleton AuthPort instance, instantiating it on first call."""
+    global _CACHED_AUTH_PORT
+    if _CACHED_AUTH_PORT is None:
+        _CACHED_AUTH_PORT = create_auth_port()
+    return _CACHED_AUTH_PORT
+
+
+def set_auth_port(port: AuthPort) -> None:
+    """Overrides the global AuthPort singleton (useful for testing or dynamic switching)."""
+    global _CACHED_AUTH_PORT
+    _CACHED_AUTH_PORT = port
+
+
+def reset_auth_port() -> None:
+    """Resets the global AuthPort singleton reference to None."""
+    global _CACHED_AUTH_PORT
+    _CACHED_AUTH_PORT = None
+
+
+def reset_auth_ports() -> None:
+    """Alias for reset_auth_port to conform with memory factory conventions."""
+    reset_auth_port()

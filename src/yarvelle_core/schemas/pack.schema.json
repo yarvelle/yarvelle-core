@@ -1,0 +1,422 @@
+{
+  "$defs": {
+    "PackMigrationsSpec": {
+      "description": "Specification of Alembic database migration branch contributed by a pack.",
+      "properties": {
+        "branch": {
+          "description": "Alembic branch label e.g. 'health', 'finance', 'kids'",
+          "title": "Branch",
+          "type": "string"
+        },
+        "version_table": {
+          "description": "Dedicated version tracking table e.g. 'alembic_version_health'",
+          "title": "Version Table",
+          "type": "string"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Relative directory containing migration revisions",
+          "title": "Location"
+        },
+        "depends_on_core": {
+          "default": "core@0010",
+          "description": "Earliest core schema revision required",
+          "title": "Depends On Core",
+          "type": "string"
+        }
+      },
+      "required": [
+        "branch",
+        "version_table"
+      ],
+      "title": "PackMigrationsSpec",
+      "type": "object"
+    },
+    "PackProvidesSpec": {
+      "description": "Declarative manifest entries contributed by a pack on disk.",
+      "properties": {
+        "agents_dir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "agents/",
+          "description": "Directory containing agent definitions",
+          "title": "Agents Dir"
+        },
+        "skills_dir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "skills/",
+          "description": "Directory containing skill definitions",
+          "title": "Skills Dir"
+        },
+        "tools": {
+          "description": "Declared tool contribution entries",
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Tools",
+          "type": "array"
+        },
+        "routers": {
+          "description": "Declared API router contribution entries",
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Routers",
+          "type": "array"
+        },
+        "jobs": {
+          "description": "Declared scheduled job handlers",
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Jobs",
+          "type": "array"
+        },
+        "safety_policy": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Import path to SafetyPolicy implementation",
+          "title": "Safety Policy"
+        },
+        "routing": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Declarative domain routing hints",
+          "title": "Routing"
+        },
+        "prompts_dir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "resources/prompts/",
+          "description": "Prompt templates directory",
+          "title": "Prompts Dir"
+        },
+        "locales_dir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "resources/locales/",
+          "description": "Locale message bundles directory",
+          "title": "Locales Dir"
+        },
+        "connectors_dir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "connectors/",
+          "description": "Connector manifests directory",
+          "title": "Connectors Dir"
+        },
+        "evals": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to evals definition or dataset",
+          "title": "Evals"
+        },
+        "ui": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "UI package slots and routing definitions",
+          "title": "Ui"
+        }
+      },
+      "title": "PackProvidesSpec",
+      "type": "object"
+    },
+    "ReadScopeSpec": {
+      "description": "Specification of a cross-domain scope read by a pack.",
+      "properties": {
+        "id": {
+          "description": "Scope identifier of another pack e.g. 'household.calendar'",
+          "title": "Id",
+          "type": "string"
+        },
+        "level": {
+          "default": "read",
+          "description": "Requested access level",
+          "enum": [
+            "read",
+            "write",
+            "approve"
+          ],
+          "title": "Level",
+          "type": "string"
+        },
+        "purpose": {
+          "default": "",
+          "description": "Functional purpose for requesting cross-scope access",
+          "title": "Purpose",
+          "type": "string"
+        },
+        "optional": {
+          "default": true,
+          "description": "Whether the pack can function if this grant is not given",
+          "title": "Optional",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "ReadScopeSpec",
+      "type": "object"
+    },
+    "ScopeDefinitionSpec": {
+      "description": "Specification of a scope owned by a pack.",
+      "properties": {
+        "id": {
+          "description": "Unique scope identifier e.g. 'health.clinical', 'finance.accounts'",
+          "title": "Id",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "description": "Human-readable description of data protected by this scope",
+          "title": "Description",
+          "type": "string"
+        },
+        "consent": {
+          "default": "optional",
+          "description": "Whether explicit user consent is required before first write",
+          "enum": [
+            "required",
+            "optional"
+          ],
+          "title": "Consent",
+          "type": "string"
+        },
+        "sensitivity": {
+          "default": "internal",
+          "description": "Data sensitivity classification driving encryption and egress policies",
+          "enum": [
+            "public",
+            "internal",
+            "confidential",
+            "phi",
+            "pii"
+          ],
+          "title": "Sensitivity",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "ScopeDefinitionSpec",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Pydantic model representing a pack.yaml manifest file on disk.",
+  "properties": {
+    "pack_api": {
+      "default": 1,
+      "description": "Pack API specification version integer",
+      "title": "Pack Api",
+      "type": "integer"
+    },
+    "id": {
+      "description": "Unique brand-neutral pack slug e.g. 'health', 'finance', 'kids'",
+      "title": "Id",
+      "type": "string"
+    },
+    "name": {
+      "description": "Display name of the pack",
+      "title": "Name",
+      "type": "string"
+    },
+    "version": {
+      "description": "SemVer string of this pack version",
+      "title": "Version",
+      "type": "string"
+    },
+    "domain": {
+      "description": "Primary domain identifier (e.g. 'health', 'finance', 'education', 'household')",
+      "title": "Domain",
+      "type": "string"
+    },
+    "requires_core": {
+      "description": "PEP 440 / SemVer range for yarvelle-core e.g. '>=0.1.0,<0.2.0'",
+      "title": "Requires Core",
+      "type": "string"
+    },
+    "requires_packs": {
+      "description": "Dependencies on other packs",
+      "items": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "type": "object"
+      },
+      "title": "Requires Packs",
+      "type": "array"
+    },
+    "license": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "License expression",
+      "title": "License"
+    },
+    "maintainers": {
+      "description": "Maintainer usernames or teams",
+      "items": {
+        "type": "string"
+      },
+      "title": "Maintainers",
+      "type": "array"
+    },
+    "risk_tier_max": {
+      "default": "T2",
+      "description": "Highest risk tier permitted for any action",
+      "enum": [
+        "T1",
+        "T2",
+        "T3",
+        "T4"
+      ],
+      "title": "Risk Tier Max",
+      "type": "string"
+    },
+    "scopes": {
+      "description": "Scopes owned by this pack",
+      "items": {
+        "$ref": "#/$defs/ScopeDefinitionSpec"
+      },
+      "title": "Scopes",
+      "type": "array"
+    },
+    "reads": {
+      "description": "Scopes of other packs requested for reading",
+      "items": {
+        "$ref": "#/$defs/ReadScopeSpec"
+      },
+      "title": "Reads",
+      "type": "array"
+    },
+    "provides": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PackProvidesSpec"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Contributed runtime artifacts"
+    },
+    "migrations": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PackMigrationsSpec"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Database migration branch spec"
+    },
+    "compat": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Compatibility metadata",
+      "title": "Compat"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "version",
+    "domain",
+    "requires_core"
+  ],
+  "title": "Yarvelle Pack Manifest Schema (Pack API v1)",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.yarvelle.org/v1/pack.schema.json"
+}

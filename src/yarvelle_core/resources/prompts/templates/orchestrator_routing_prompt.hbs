@@ -1,0 +1,12 @@
+{{#if base_prompt}}
+{{{base_prompt}}}
+
+{{/if}}
+## {{heading}}:
+{{{catalog}}}
+
+## Routing & Skill Requirements Contract:
+1. Select the single most appropriate agent_id from the {{target_list_name}}.
+2. Provide concise reasoning and specific instructions for the agent.
+3. If the user request requires specialized domain guidelines, procedures, or reference documents that are missing from the system (or if the target specialist is missing a required skill), specify the missing skill name/ID in 'missing_skill' and describe what is needed in 'missing_skill_description'.
+4. If specific reference documents, checklists, or tracking templates will be needed (e.g. 'symptom_log_template.md', 'checklist.md'), specify them in 'required_docs'. The hidden Skill Generator agent will proactively prepare and mount them before the specialist runs.

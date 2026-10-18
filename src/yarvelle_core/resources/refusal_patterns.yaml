@@ -1,0 +1,8 @@
+# Domain-neutral fallback refusal patterns for Yarvelle Core
+refusal_categories:
+  unauthorized_tool: "Attempting to invoke an unauthorized tool"
+  unauthorized_domain: "Attempting to access an unauthorized domain"
+
+keyword_patterns: {}
+regex_patterns: {}
+forbidden_intents: []

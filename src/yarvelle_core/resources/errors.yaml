@@ -1,0 +1,189 @@
+# ============================================================================
+# Carefold Standardized Error Messages and Status Codes
+# ============================================================================
+
+errors:
+  # HTTP 400 Bad Request / Validation Errors
+  prompt_empty:
+    status_code: 400
+    message: "Parameter 'prompt' must not be empty."
+    description: "Submitted user chat prompt was empty or whitespace"
+
+  invalid_input:
+    status_code: 400
+    message: "Invalid request parameter: {detail}"
+    description: "General parameter validation failure"
+
+  validation_error:
+    status_code: 400
+    message: "Request validation failed: {detail}"
+    description: "Parameter or payload validation error"
+
+  manifest_validation_error:
+    status_code: 400
+    message: "Manifest validation failed: {detail}"
+    description: "Agent or skill manifest failed schema validation"
+
+  tool_validation_error:
+    status_code: 400
+    message: "Tool validation error: {detail}"
+    description: "Undeclared tool or tool outside Phase 0 registry"
+
+  malformed_yaml:
+    status_code: 400
+    message: "Malformed YAML in '{path}': {error}"
+    description: "YAML syntax parsing failure"
+
+  # HTTP 403 Forbidden
+  clinical_consent_required:
+    status_code: 403
+    message: "Agent '{agent_id}' is a clinical_assist agent. Explicit user consent (allow_clinical=true) is required."
+    description: "Access to clinical assist agent denied without explicit consent parameter"
+
+  clinical_execution_forbidden:
+    status_code: 403
+    message: "Agent '{agent_id}' is classified as clinical_assist. Execution is forbidden without explicit clinical consent (allow_clinical=True)."
+    description: "Execution blocked for clinical assist agent"
+
+  tool_forbidden:
+    status_code: 403
+    message: "Tool '{tool_name}' execution denied: undeclared tool for agent '{agent_id}'."
+    description: "Agent attempted to call a tool outside its allowed union"
+
+  sandbox_access_denied:
+    status_code: 403
+    message: "Access denied: path '{path}' is outside sandboxed workspace."
+    description: "Tool attempted path traversal outside permitted directory"
+
+  # HTTP 404 Not Found
+  not_found:
+    status_code: 404
+    message: "Requested resource not found: {detail}"
+    description: "General resource not found error"
+
+  agent_not_found:
+    status_code: 404
+    message: "Agent '{agent_id}' not found."
+    description: "Requested agent ID directory does not exist"
+
+  skill_not_found:
+    status_code: 404
+    message: "Skill '{skill_id}' not found."
+    description: "Requested skill ID directory does not exist"
+
+  thread_not_found:
+    status_code: 404
+    message: "Thread '{thread_id}' not found."
+    description: "Requested conversation thread has no checkpoint record"
+
+  checkpoints_not_found:
+    status_code: 404
+    message: "No checkpoints found for thread '{thread_id}'."
+    description: "Checkpoints database file or record does not exist"
+
+  attachment_not_found:
+    status_code: 404
+    message: "Attachment '{filename}' not found in attachments directory."
+    description: "Referenced attachment file does not exist"
+
+  note_not_found:
+    status_code: 404
+    message: "Note '{note_id}' not found in workspace notes."
+    description: "Referenced note does not exist"
+
+  # HTTP 500 Internal Server Error
+  internal_error:
+    status_code: 500
+    message: "An internal server error occurred: {detail}"
+    description: "Internal runtime error"
+
+  agent_load_failed:
+    status_code: 500
+    message: "Failed to load agent: {error}"
+    description: "Unexpected exception loading agent"
+
+  skill_load_failed:
+    status_code: 500
+    message: "Failed to load skill: {error}"
+    description: "Unexpected exception loading skill"
+
+  thread_load_failed:
+    status_code: 500
+    message: "Failed to load thread: {error}"
+    description: "Unexpected exception reading checkpoints"
+
+  stream_execution_error:
+    status_code: 500
+    message: "Unexpected error during chat stream execution: {error}"
+    description: "Unhandled error during LangGraph agent execution"
+
+  # Model & Provider Errors
+  missing_api_key:
+    status_code: 500
+    message: "API key for provider '{provider}' is missing. Please specify an API key in the request settings or set {env_vars} on the server."
+    description: "Model provider API key not supplied"
+
+  missing_configuration:
+    status_code: 500
+    message: "Configuration for provider '{provider}' is missing: {detail}"
+    description: "Required configuration parameter (e.g. base_url) missing"
+
+  unsupported_provider:
+    status_code: 400
+    message: "Unsupported model provider '{provider}'. Supported providers: {supported}."
+    description: "Unrecognized provider identifier"
+
+  model_timeout:
+    status_code: 504
+    message: "Model request timed out after {timeout} seconds."
+    description: "Upstream model call timed out"
+
+  model_server_error:
+    status_code: 502
+    message: "Model server error (HTTP {status_code}): {detail}"
+    description: "Upstream model provider returned error"
+
+  # Safety Refusal Errors
+  safety_refusal:
+    status_code: 200
+    message: "Request intercepted by safety refusal guardrail: {reason}"
+    description: "Clinical safety refusal triggered by deterministic classifier"
+
+  refusal_error:
+    status_code: 200
+    message: "Request refused: {reason}"
+    description: "Standard refusal event"
+
+  # Workflow & Extraction Errors
+  max_reflections_exceeded:
+    status_code: 422
+    message: "Max self-correction reflection iterations ({max_reflections}) reached."
+    description: "Reflection loop exceeded retry limit"
+
+  grounding_validation_failed:
+    status_code: 422
+    message: "Extracted dossier failed grounding validation: numerical mismatch with source text."
+    description: "Extracted numerical claim not grounded in raw document text"
+
+  pii_sanitization_error:
+    status_code: 500
+    message: "PII sanitization failed during attachment processing: {error}"
+    description: "Failure during automated PII masking"
+
+schemas:
+  error_response:
+    type: "object"
+    required: ["error", "message", "status_code"]
+    properties:
+      error:
+        type: "string"
+        description: "Machine-readable error key"
+      message:
+        type: "string"
+        description: "Human-readable formatted error message"
+      status_code:
+        type: "integer"
+        description: "HTTP status code"
+      detail:
+        type: "object"
+        description: "Optional structured detail dictionary"

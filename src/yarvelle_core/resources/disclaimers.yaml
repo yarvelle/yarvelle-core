@@ -1,0 +1,25 @@
+# ============================================================================
+# Yarvelle Core Safety Disclaimers and Intended Use Notices
+# ============================================================================
+
+intended_use:
+  description: >-
+    Yarvelle Core agents provide AI computational assistance and navigation support.
+    They do not provide licensed professional advice.
+  mandatory_lines: []
+
+safe_refusal_template: >-
+  I am an AI computational assistant. I cannot execute unsafe or unauthorized operations. Please review the relevant documentation or consult a human administrator.
+
+disclaimer_header_text: >-
+  Yarvelle Core agents provide automated computational assistance. Outputs should be verified before taking action.
+
+mandatory_intended_use_lines: []
+
+standard_refusal_clauses:
+  not_professional: "AI computational assistant, not a licensed professional."
+  verification_notice: "Verify important decisions with qualified professionals."
+
+refusal_reasons:
+  unauthorized_action: "Action is unauthorized or exceeds granted permissions"
+  safety_violation: "Action violates domain safety policy"

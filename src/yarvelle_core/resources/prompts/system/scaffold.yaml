@@ -1,0 +1,6 @@
+persona_section_header: "# AGENT PERSONA & INSTRUCTIONS"
+capabilities_section_header: "# AVAILABLE CAPABILITIES"
+skills_section_header: "# SKILL INSTRUCTION PACKS"
+tools_summary_sandboxed: "Available Tools (Sandboxed): {tools}"
+tools_summary_none: "Available Tools: None (Conversational Only)"
+skill_section_format: "### Skill: {name} ({id})\n{instructions}"

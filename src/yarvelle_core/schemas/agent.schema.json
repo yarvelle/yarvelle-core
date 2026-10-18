@@ -1,0 +1,301 @@
+{
+  "$defs": {
+    "AgentDomain": {
+      "enum": [
+        "wellness",
+        "clinical",
+        "therapy",
+        "navigation",
+        "education",
+        "finance",
+        "retail",
+        "operations",
+        "general"
+      ],
+      "title": "AgentDomain",
+      "type": "string"
+    },
+    "AgentMaturity": {
+      "enum": [
+        "draft",
+        "beta",
+        "stable",
+        "deprecated"
+      ],
+      "title": "AgentMaturity",
+      "type": "string"
+    },
+    "AgentModelConfig": {
+      "properties": {
+        "provider": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "temperature": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Temperature"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "AgentModelConfig",
+      "type": "object"
+    },
+    "AgentPersonaObject": {
+      "properties": {
+        "role": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role"
+        },
+        "tone": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tone"
+        },
+        "instructions": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Instructions"
+        }
+      },
+      "title": "AgentPersonaObject",
+      "type": "object"
+    },
+    "RiskClass": {
+      "enum": [
+        "wellness",
+        "admin",
+        "education",
+        "clinical_assist"
+      ],
+      "title": "RiskClass",
+      "type": "string"
+    }
+  },
+  "properties": {
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "title": {
+      "title": "Title",
+      "type": "string"
+    },
+    "version": {
+      "default": "0.1.0",
+      "title": "Version",
+      "type": "string"
+    },
+    "license": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "License"
+    },
+    "risk_class": {
+      "$ref": "#/$defs/RiskClass",
+      "default": "wellness"
+    },
+    "domain": {
+      "$ref": "#/$defs/AgentDomain",
+      "default": "wellness"
+    },
+    "category": {
+      "default": "",
+      "title": "Category",
+      "type": "string"
+    },
+    "care_stages": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Care Stages",
+      "type": "array"
+    },
+    "target_audience": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Target Audience",
+      "type": "array"
+    },
+    "tags": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Tags",
+      "type": "array"
+    },
+    "icon": {
+      "default": "Shield",
+      "title": "Icon",
+      "type": "string"
+    },
+    "maturity": {
+      "$ref": "#/$defs/AgentMaturity",
+      "default": "stable"
+    },
+    "model": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/$defs/AgentModelConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Model"
+    },
+    "can_delegate": {
+      "default": false,
+      "title": "Can Delegate",
+      "type": "boolean"
+    },
+    "max_iterations": {
+      "default": 3,
+      "title": "Max Iterations",
+      "type": "integer"
+    },
+    "description": {
+      "default": "",
+      "title": "Description",
+      "type": "string"
+    },
+    "hidden": {
+      "default": false,
+      "title": "Hidden",
+      "type": "boolean"
+    },
+    "skills": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Skills",
+      "type": "array"
+    },
+    "tools": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Tools",
+      "type": "array"
+    },
+    "forbidden": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Forbidden",
+      "type": "array"
+    },
+    "persona": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/$defs/AgentPersonaObject"
+        }
+      ],
+      "title": "Persona"
+    },
+    "persona_file": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Persona File"
+    },
+    "prompt_template": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Prompt Template"
+    },
+    "suggestions": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Suggestions"
+    }
+  },
+  "required": [
+    "id",
+    "title",
+    "persona"
+  ],
+  "title": "Yarvelle Agent Manifest Schema",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.yarvelle.org/v1/agent.schema.json"
+}

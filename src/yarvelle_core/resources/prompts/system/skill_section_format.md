@@ -1,0 +1,2 @@
+### Skill: {name} ({id})
+{instructions}

@@ -1,0 +1,575 @@
+# Yarvelle Core — Domain-Neutral AI Agent Runtime & Execution Engine
+# Copyright 2026 Spectrayan (https://spectrayan.com)
+#
+# Licensed under the PolyForm Noncommercial License 1.0.0 and the
+# Yarvelle Core Additional Terms (see LICENSE and ADDITIONAL-TERMS.md).
+# Personal and household local use only. Commercial use, hosted service
+# offering, rebranding, white-labeling, and redistribution of modified
+# forks are prohibited without a written commercial license from Spectrayan.
+#
+# Required Notice: Copyright 2026 Spectrayan (https://spectrayan.com)
+
+"""LangGraph stateful execution graph for Yarvelle Core specialist health agents.
+
+Integrates:
+- Unified AgentState schema from workflows.state
+- Discrete BaseNode classes from workflows.nodes (InputGuardrail, AgentNode, OutputGuardrail, ToolNode, SuggestionNode, AuditNode)
+- Backward-compatible SQLite checkpointing (SqliteSaver and AsyncSqliteSaver)
+- Compatibility facade preserving 100% test passing rate across test_engine.py, test_api.py, test_fake_model_integration.py
+"""
+
+from __future__ import annotations
+
+import asyncio
+from contextlib import asynccontextmanager
+import inspect
+import json
+import logging
+import operator
+import os
+from pathlib import Path
+import time
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Any,
+    AsyncIterator,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Union,
+)
+
+import aiosqlite
+from langchain_core.callbacks.manager import adispatch_custom_event
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from langgraph.graph import END, START, StateGraph
+from langgraph.graph.message import add_messages
+from langgraph.graph.state import CompiledStateGraph
+from langgraph.store.base import BaseStore
+
+from yarvelle_core.audit.logger import record_audit
+from yarvelle_core.config import settings
+from yarvelle_core.constants.api import (
+    SSE_EVENT_REFUSAL,
+    SSE_EVENT_SUGGESTIONS,
+    SSE_EVENT_TOOL_END,
+    SSE_EVENT_TOOL_START,
+)
+from yarvelle_core.constants.defaults import (
+    MAX_TOOL_ITERATIONS,
+    SQLITE_BUSY_TIMEOUT_MS,
+    SQLITE_CONNECT_TIMEOUT_SECONDS,
+    SQLITE_JOURNAL_MODE,
+)
+from yarvelle_core.constants.paths import (
+    CHATS_DIR,
+    DEFAULT_AUDIT_LOG_FILE,
+    DEFAULT_CHECKPOINTS_DB,
+    ENV_DB_PATH,
+    LOGS_DIR,
+)
+from yarvelle_core.resources.loader import get_resource_loader
+from yarvelle_core.engine.safety_policy import get_default_safety_policy
+from yarvelle_core.schemas.audit import AuditEvent
+from yarvelle_core.tools.registry import CLOSED_TOOL_DEFINITIONS, execute_tool
+if TYPE_CHECKING:
+    from yarvelle_core.workflows.nodes import (
+        AgentNode,
+        AuditNode,
+        InputGuardrailNode,
+        OutputGuardrailNode,
+        SuggestionNode,
+        ToolNode,
+        ToolValidatorNode,
+    )
+from yarvelle_core.workflows.state import AgentState
+
+logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# 1. Contextual Follow-Up Suggestions Engine
+# ============================================================================
+
+def generate_follow_up_suggestions(
+    agent_id: str,
+    prompt: str = "",
+    completion: str = "",
+    tools_used: Optional[List[str]] = None,
+) -> List[str]:
+    """Generates 2-3 contextual follow-up question chips based on agent persona and discussion topic."""
+    return get_resource_loader().get_follow_up_suggestions(
+        agent_id=agent_id,
+        prompt=prompt,
+        completion=completion,
+        tools_used=tools_used,
+    )
+
+
+# ============================================================================
+# 2. Graph Nodes
+# ============================================================================
+
+async def safety_guard_node(
+    state: AgentState,
+    *,
+    store: Optional[BaseStore] = None,
+) -> Dict[str, Any]:
+    """Pre-generation safety refusal gate.
+
+    Delegates to InputGuardrailNode while maintaining SSE dispatch and legacy keys.
+    """
+    from yarvelle_core.workflows.nodes.input_guardrail_node import InputGuardrailNode
+
+    node = InputGuardrailNode()
+    sig = inspect.signature(node.execute)
+    if "store" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+        res = await node.execute(state, store=store)  # type: ignore[arg-type]
+    else:
+        res = await node.execute(state)  # type: ignore[arg-type]
+
+    if res.get("is_refusal"):
+        reason = res.get("refusal_reason") or state.get("default_refusal_reason") or "forbidden_intent:policy_prohibited"
+        refuse_event = {
+            "agent_id": state.get("agent_id") or state.get("current_agent", "unknown"),
+            "event": "refuse",
+            "allowed": False,
+            "reason": reason,
+            "duration_ms": 0,
+        }
+
+        refusal_msg = get_default_safety_policy().get_refusal_template(reason)
+        # Dispatch real-time SSE refusal notification
+        try:
+            await adispatch_custom_event(
+                SSE_EVENT_REFUSAL,
+                {
+                    "type": SSE_EVENT_REFUSAL,
+                    "reason": reason,
+                    "message": refusal_msg,
+                },
+            )
+        except Exception:
+            pass
+
+        return {
+            "messages": [AIMessage(content=refusal_msg)],
+            "refused": True,
+            "is_refusal": True,
+            "refusal_reason": reason,
+            "refusal_message": refusal_msg,
+            "audit_events": [refuse_event],
+            "next_step": "refusal",
+        }
+
+    return {"refused": False, "is_refusal": False}
+
+
+def create_agent_node(bound_model: BaseChatModel) -> Callable[[AgentState], Any]:
+    """Creates the agent_node callable with the model bound to tool definitions."""
+    from yarvelle_core.workflows.nodes.agent_node import AgentNode
+
+    agent_node_instance = AgentNode(model=bound_model)
+
+    async def agent_node(state: AgentState) -> Dict[str, Any]:
+        messages = list(state.get("messages", []))
+        system_prompt = state.get("system_prompt")
+
+        # Inject system prompt at head if not already present
+        if system_prompt and not (messages and isinstance(messages[0], SystemMessage)):
+            messages = [SystemMessage(content=system_prompt)] + messages
+
+        raw_model = bound_model
+        while hasattr(raw_model, "bound") and getattr(raw_model, "bound", None) is not None:
+            raw_model = raw_model.bound
+
+        try:
+            response = await bound_model.ainvoke(messages)
+        except Exception as exc:
+            exc_str = str(exc).lower()
+            if bound_model is not raw_model and any(
+                p in exc_str
+                for p in (
+                    "does not support tools",
+                    "does not support tool",
+                    "tools not supported",
+                    "tools are not supported",
+                    "tool calling not supported",
+                    "tool calling is not supported",
+                    "function calling not supported",
+                    "function calling is not supported",
+                )
+            ):
+                logger.warning("Model does not support tools (%s); invoking without tools", exc)
+                response = await raw_model.ainvoke(messages)
+            else:
+                raise
+
+        return {"messages": [response]}
+
+    return agent_node
+
+
+async def post_safety_node(
+    state: AgentState,
+    *,
+    store: Optional[BaseStore] = None,
+) -> Dict[str, Any]:
+    """Post-generation safety refusal gate.
+
+    Delegates to OutputGuardrailNode while maintaining SSE dispatch and legacy keys.
+    """
+    from yarvelle_core.workflows.nodes.output_guardrail_node import OutputGuardrailNode
+
+    node = OutputGuardrailNode()
+    res = await node.execute(state)  # type: ignore[arg-type]
+
+    if res.get("is_refusal"):
+        reason = res.get("refusal_reason") or state.get("default_refusal_reason") or "forbidden_intent:policy_prohibited"
+        refuse_event = {
+            "agent_id": state.get("agent_id") or state.get("current_agent", "unknown"),
+            "event": "refuse",
+            "allowed": False,
+            "reason": reason,
+            "duration_ms": 0,
+        }
+
+        refusal_msg = get_default_safety_policy().get_refusal_template(reason)
+        try:
+            await adispatch_custom_event(
+                SSE_EVENT_REFUSAL,
+                {
+                    "type": SSE_EVENT_REFUSAL,
+                    "reason": reason,
+                    "message": refusal_msg,
+                },
+            )
+        except Exception:
+            pass
+
+        messages = state.get("messages", [])
+        last_ai = next((m for m in reversed(messages) if isinstance(m, AIMessage)), None)
+        safe_ai = AIMessage(
+            content=refusal_msg,
+            id=getattr(last_ai, "id", None) if last_ai else None,
+            tool_calls=[],
+        )
+        return {
+            "messages": [safe_ai],
+            "refused": True,
+            "is_refusal": True,
+            "refusal_reason": reason,
+            "refusal_message": refusal_msg,
+            "audit_events": [refuse_event],
+            "next_step": "refusal",
+        }
+
+    return {
+        "refused": False,
+        "is_refusal": False,
+        "boundary_warning": res.get("boundary_warning", False),
+        "boundary_reason": res.get("boundary_reason"),
+        "output": res.get("output"),
+    }
+
+
+async def tools_node(state: AgentState) -> Dict[str, Any]:
+    """Closed tool sandbox execution compatibility helper delegating to ToolNode and execute_tool_call."""
+    from yarvelle_core.workflows.nodes.tool_node import ToolNode
+
+    effective_tools = state.get("effective_tools", [])
+    node = ToolNode(allowed_tools=effective_tools)
+    res = await node.execute(state)
+    agent_id = str(state.get("current_agent") or state.get("agent_id") or "carefold-agent")
+    audit_events = [
+        {
+            "agent_id": agent_id,
+            "event": "tool",
+            "tool": tr.get("tool"),
+            "allowed": tr.get("allowed", True),
+            "reason": tr.get("error") if not tr.get("allowed", True) else None,
+            "duration_ms": tr.get("duration_ms", 0),
+        }
+        for tr in res.get("tool_traces", [])
+    ]
+    res["audit_events"] = audit_events
+    res["iteration_count"] = state.get("iteration_count", 0) + 1
+    return res
+
+
+def create_suggestion_node(model: Optional[BaseChatModel] = None):
+    """Factory creating suggestion_node with optional bound chat model for dynamic chips."""
+    async def _suggestion_node(state: AgentState) -> Dict[str, Any]:
+        from yarvelle_core.workflows.nodes.suggestion_node import SuggestionNode
+
+        node = SuggestionNode(model=model)
+        res = await node.execute(state)  # type: ignore[arg-type]
+        suggestions = res.get("follow_up_suggestions", [])
+
+        try:
+            await adispatch_custom_event(
+                SSE_EVENT_SUGGESTIONS,
+                {"type": SSE_EVENT_SUGGESTIONS, "suggestions": suggestions},
+            )
+        except Exception:
+            pass
+
+        return {"follow_up_suggestions": suggestions}
+
+    return _suggestion_node
+
+
+async def suggestion_node(state: AgentState) -> Dict[str, Any]:
+    """Generates 2-3 contextual follow-up question chips for the user interface."""
+    return await create_suggestion_node(None)(state)
+
+
+async def audit_node(state: AgentState) -> Dict[str, Any]:
+    """Flushes recorded audit events to the append-only JSONL log."""
+    ws_root = state.get("workspace_root") or settings.workspace_root
+    store_bodies = state.get("store_bodies")
+    accumulated_events = list(state.get("audit_events", []))
+
+    # If run completed cleanly without refusal and graph-level run audit is requested
+    if not state.get("refused") and not state.get("is_refusal") and state.get("record_graph_run_audit"):
+        messages = state.get("messages", [])
+        last_human = next((m for m in reversed(messages) if isinstance(m, HumanMessage)), None)
+        last_ai = next((m for m in reversed(messages) if isinstance(m, AIMessage)), None)
+
+        run_ev = {
+            "agent_id": state.get("agent_id") or state.get("current_agent", "unknown"),
+            "event": "run",
+            "allowed": True,
+            "prompt": str(last_human.content) if last_human else "",
+            "completion": str(last_ai.content) if last_ai else "",
+        }
+        accumulated_events.append(run_ev)
+
+    resolved_log_path = settings.audit_log_path if settings.audit_log_path else (Path(ws_root) / LOGS_DIR / DEFAULT_AUDIT_LOG_FILE)
+
+    # Flush all events to disk
+    for ev in accumulated_events:
+        try:
+            await record_audit(
+                event=AuditEvent(**ev),
+                log_path=resolved_log_path,
+                store_bodies=store_bodies,
+            )
+        except Exception as err:
+            logger.warning("Failed to flush audit event: %s", err)
+
+    return {"audit_events": accumulated_events}
+
+
+# ============================================================================
+# 3. Routing Logic
+# ============================================================================
+
+def route_safety_guard(state: AgentState) -> str:
+    """Conditional edge from safety_guard_node."""
+    if state.get("refused") or state.get("is_refusal"):
+        return "audit_node"
+    return "agent_node"
+
+
+def route_post_safety(state: AgentState) -> str:
+    """Conditional edge from post_safety_node."""
+    if state.get("refused") or state.get("is_refusal"):
+        return "audit_node"
+
+    messages = state.get("messages", [])
+    last_ai = next((m for m in reversed(messages) if isinstance(m, AIMessage)), None)
+    tool_calls = getattr(last_ai, "tool_calls", []) if last_ai else []
+
+    if tool_calls and state.get("iteration_count", 0) < MAX_TOOL_ITERATIONS:
+        return "tools_node"
+
+    return "suggestion_node"
+
+
+# ============================================================================
+# 4. Graph Builder
+# ============================================================================
+
+def create_agent_graph(
+    model: BaseChatModel,
+    execution_context: Optional[Any] = None,
+    checkpointer: Optional[BaseCheckpointSaver] = None,
+    system_prompt: Optional[str] = None,
+    store: Optional[BaseStore] = None,
+    **kwargs: Any,
+) -> CompiledStateGraph:
+    """Builds and compiles the Yarvelle Core LangGraph stateful execution graph.
+
+    Delegates directly to GraphBuilder (engine/builder.py) as the sole execution graph.
+    """
+    from yarvelle_core.engine.builder import create_agent_graph as builder_create_agent_graph
+
+    return builder_create_agent_graph(
+        model=model,
+        execution_context=execution_context,
+        checkpointer=checkpointer,
+        system_prompt=system_prompt,
+        store=store,
+        **kwargs,
+    )
+
+
+# ============================================================================
+# 5. SQLite Persistence Helpers
+# ============================================================================
+
+def resolve_checkpointer_path(
+    workspace_root: Optional[Union[str, Path]] = None,
+) -> Path:
+    """Resolves and ensures the parent directory exists for the SQLite checkpointer.
+
+    Precedence:
+    1. settings.db_path if explicitly set
+    2. CAREFOLD_DB_PATH environment variable
+    3. Explicit non-repository workspace_root parameter or existing workspace checkpoints file
+    4. Canonical home directory: settings.get_checkpointer_path() (~/.carefold/checkpoints.db)
+    """
+    if settings.db_path is not None:
+        db_path = settings.db_path.resolve()
+    elif os.getenv(ENV_DB_PATH) and os.getenv(ENV_DB_PATH).strip():
+        db_path = Path(os.getenv(ENV_DB_PATH).strip()).resolve()
+    elif workspace_root is not None and not (Path(workspace_root) / "backend").is_dir():
+        ws = Path(workspace_root)
+        db_path = ws / CHATS_DIR / DEFAULT_CHECKPOINTS_DB
+    else:
+        db_path = settings.get_checkpointer_path()
+
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    return db_path
+
+
+# Initialization cache and locks for SQLite checkpointers to prevent DDL lock contention
+_INITIALIZED_DBS: Set[str] = set()
+_DB_LOCKS: Dict[str, asyncio.Lock] = {}
+
+
+def _get_db_lock(canon_path: str) -> asyncio.Lock:
+    """Retrieves or creates an asyncio.Lock for single-flight database initialization."""
+    if canon_path not in _DB_LOCKS:
+        _DB_LOCKS[canon_path] = asyncio.Lock()
+    return _DB_LOCKS[canon_path]
+
+
+def reset_db_init_cache() -> None:
+    """Resets the initialization cache for testing purposes."""
+    _INITIALIZED_DBS.clear()
+    _DB_LOCKS.clear()
+
+
+def create_sqlite_saver(db_path: Union[str, Path]) -> SqliteSaver:
+    """Creates a synchronous SqliteSaver instance with WAL mode and busy timeout."""
+    import sqlite3
+
+    path = Path(db_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    canon_path = str(path.resolve())
+
+    conn = sqlite3.connect(str(path), check_same_thread=False, timeout=SQLITE_CONNECT_TIMEOUT_SECONDS)
+    conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS};")
+    saver = SqliteSaver(conn)
+
+    cursor = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='checkpoints';")
+    table_exists = cursor.fetchone() is not None
+
+    if canon_path not in _INITIALIZED_DBS or not table_exists:
+        conn.execute(f"PRAGMA journal_mode={SQLITE_JOURNAL_MODE};")
+        saver.setup()
+        _INITIALIZED_DBS.add(canon_path)
+
+    saver.is_setup = True
+    return saver
+
+
+@asynccontextmanager
+async def create_async_sqlite_saver(
+    db_path: Union[str, Path],
+) -> AsyncIterator[AsyncSqliteSaver]:
+    """Async context manager creating an AsyncSqliteSaver for FastAPI SSE streams.
+
+    Features:
+    - Enables WAL journal mode (PRAGMA journal_mode=WAL;) for concurrent reader/writer access.
+    - Configures 10-second busy timeout (PRAGMA busy_timeout=10000;) to eliminate lock errors.
+    - Single-flight initialization guard (asyncio.Lock + table verification) preventing concurrent DDL setup.
+    - Explicitly sets saver.is_setup = True to prevent redundant executescript DDL on checkpoint reads/writes.
+    """
+    path = Path(db_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    canon_path = str(path.resolve())
+
+    async with aiosqlite.connect(str(path), timeout=SQLITE_CONNECT_TIMEOUT_SECONDS) as conn:
+        await conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS};")
+        saver = AsyncSqliteSaver(conn)
+
+        async with _get_db_lock(canon_path):
+            async with conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='checkpoints';"
+            ) as cursor:
+                row = await cursor.fetchone()
+                table_exists = row is not None
+
+            if canon_path not in _INITIALIZED_DBS or not table_exists:
+                await conn.execute(f"PRAGMA journal_mode={SQLITE_JOURNAL_MODE};")
+                await saver.setup()
+                _INITIALIZED_DBS.add(canon_path)
+
+        saver.is_setup = True
+        yield saver
+
+
+async def get_thread_history(
+    thread_id: str,
+    checkpointer: Union[AsyncSqliteSaver, SqliteSaver],
+) -> List[BaseMessage]:
+    """Retrieves full conversation message history from the SQLite checkpointer for a given thread."""
+    config = {"configurable": {"thread_id": thread_id}}
+    if isinstance(checkpointer, AsyncSqliteSaver):
+        checkpoint_tuple = await checkpointer.aget_tuple(config)
+    else:
+        checkpoint_tuple = checkpointer.get_tuple(config)
+
+    if checkpoint_tuple and checkpoint_tuple.checkpoint:
+        channel_values = checkpoint_tuple.checkpoint.get("channel_values", {})
+        return channel_values.get("messages", [])
+    return []
+
+
+__all__ = [
+    "AgentState",
+    "CLOSED_TOOL_DEFINITIONS",
+    "create_agent_graph",
+    "safety_guard_node",
+    "create_agent_node",
+    "post_safety_node",
+    "tools_node",
+    "suggestion_node",
+    "audit_node",
+    "route_safety_guard",
+    "route_post_safety",
+    "generate_follow_up_suggestions",
+    "resolve_checkpointer_path",
+    "create_sqlite_saver",
+    "create_async_sqlite_saver",
+    "reset_db_init_cache",
+    "get_thread_history",
+    "MAX_TOOL_ITERATIONS",
+]
