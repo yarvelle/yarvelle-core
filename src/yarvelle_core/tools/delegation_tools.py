@@ -98,12 +98,7 @@ class ListAgentsTool(BaseTool):
         except Exception as exc:
             logger.debug("ListAgentsTool fallback discovery note: %s", exc)
 
-        return (
-            "- **visit-steward**: Prepares for appointments, organizes questions, tracks symptoms.\n"
-            "- **benefits-guide**: Health insurance navigation, copays, deductibles, prior authorization.\n"
-            "- **habit-companion**: Wellness habit tracking, hydration, sleep, lifestyle routines.\n"
-            "- **document-extractor**: Analyzes attachments, sanitizes PII, extracts typed structured dossiers."
-        )
+        return "No agents registered. Domain packs register specialist agents via Pack API v1."
 
     async def _arun(self, **kwargs: Any) -> str:
         """Asynchronous execution delegating to _run."""
@@ -119,7 +114,7 @@ class DelegateToAgentInput(BaseModel):
 
     agent_id: str = Field(
         ...,
-        description="The unique identifier of the target specialist agent (e.g. 'benefits-guide', 'visit-steward', 'document-extractor').",
+        description="The unique identifier of the target specialist agent to delegate to.",
     )
     instructions: str = Field(
         default="",
@@ -136,8 +131,8 @@ class DelegateToAgentTool(BaseTool):
 
     name: str = TOOL_DELEGATE_TO_AGENT
     description: str = (
-        "Delegate the user's request to a specialist agent by ID, providing instructions. "
-        "Available specialists include: 'visit-steward', 'benefits-guide', 'habit-companion', 'document-extractor'."
+        "Signal LangGraph to dynamically route execution to a specific specialist agent "
+        "registered in the active catalog or pack."
     )
     args_schema: Type[BaseModel] = DelegateToAgentInput
 

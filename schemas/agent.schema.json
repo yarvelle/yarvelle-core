@@ -3,7 +3,7 @@
     "AgentDomain": {
       "enum": [
         "wellness",
-        "clinical",
+        "care",
         "therapy",
         "navigation",
         "education",

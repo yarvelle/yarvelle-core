@@ -56,7 +56,7 @@ class MemoryPort(ABC):
             key: Unique identifier for the memory within the namespace.
             value: Memory payload (string, dict, or serializable structure).
             tier: Cognitive memory tier (WORKING, EPISODIC, SEMANTIC, PROCEDURAL).
-            namespace: Isolation namespace (e.g. 'agent:visit-steward', 'user:patient_1').
+            namespace: Isolation namespace (e.g. 'agent:household-steward', 'user:profile_1').
             metadata: Optional dictionary of attributes, tags, or provenance.
         """
         ...

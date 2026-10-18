@@ -101,7 +101,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 minversion = "8.0"
-addopts = "-ra -q --asyncio-mode=auto --disable-warnings"
+addopts = "-ra --asyncio-mode=auto"
 testpaths = ["tests"]
 pythonpath = ["src"]
 filterwarnings = [

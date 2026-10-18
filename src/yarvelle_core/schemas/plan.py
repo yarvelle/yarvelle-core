@@ -108,7 +108,7 @@ class ExecutionPlan(BaseModel):
     )
     intent: Optional[str] = Field(
         default=None,
-        description="Optional high-level user intent (e.g. visit_prep, log_vitals, remind_me).",
+        description="Optional high-level user intent (e.g. task_prep, log_metrics, remind_me).",
     )
     parameters: Dict[str, Any] = Field(
         default_factory=dict,

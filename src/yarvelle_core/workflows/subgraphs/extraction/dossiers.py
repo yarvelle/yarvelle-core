@@ -9,10 +9,10 @@
 #
 # Required Notice: Copyright 2026 Spectrayan (https://spectrayan.com)
 
-"""Structured document extraction dossiers for Carefold (Requirement R2).
+"""Structured document extraction dossiers for Yarvelle Core.
 
-Implements typed Pydantic models for structured document and insurance
-data extraction from ingested attachments, supporting strict validation,
+Implements typed Pydantic models for structured document extraction
+from ingested attachments, supporting strict validation,
 convenience serialization methods, and grounding verification.
 """
 
@@ -88,66 +88,8 @@ class BaseDossier(BaseModel):
         return numerical_values
 
 
-class InsuranceBenefitsDossier(BaseDossier):
-    """Structured extraction dossier for health insurance summary and EOB documents."""
-
-    deductible: str = Field(
-        default="",
-        description="Annual deductible amount (e.g. '$1,500').",
-    )
-    copays: Dict[str, str] = Field(
-        default_factory=dict,
-        description="Copayment amounts mapped by service type (e.g. {'primary_care': '$25'}).",
-    )
-    coinsurance: str = Field(
-        default="",
-        description="Coinsurance cost-sharing percentage (e.g. '20%').",
-    )
-    out_of_pocket_maximum: str = Field(
-        default="",
-        description="Maximum annual out-of-pocket liability (e.g. '$6,000').",
-    )
-    in_out_network_rules: str = Field(
-        default="",
-        description="Rules, coverage rates, and referral requirements for in- vs out-of-network.",
-    )
-    prior_authorization_flags: List[str] = Field(
-        default_factory=list,
-        description="List of medical procedures or services requiring pre-authorization.",
-    )
-
-    @property
-    def dossier_type(self) -> str:
-        return "insurance_benefits"
-
-
-class ClinicalVisitDossier(BaseDossier):
-    """Structured extraction dossier for physician encounter notes and visit summaries."""
-
-    reason_for_visit: str = Field(
-        default="",
-        description="Primary encounter chief reason or purpose.",
-    )
-    physician_instructions: List[str] = Field(
-        default_factory=list,
-        description="Care instructions, lifestyle advice, or physician directives.",
-    )
-    follow_up_timeline: str = Field(
-        default="",
-        description="Scheduled follow-up timing or interval (e.g. '4 weeks').",
-    )
-    questions_to_ask: List[str] = Field(
-        default_factory=list,
-        description="Suggested or user-prepared questions for future sessions.",
-    )
-
-    @property
-    def dossier_type(self) -> str:
-        return "clinical_visit"
-
-
 class GenericDocumentDossier(BaseDossier):
-    """Fallback extraction dossier for unclassified health and administrative documents."""
+    """Fallback extraction dossier for unclassified documents and text."""
 
     summary: str = Field(
         default="",
@@ -167,29 +109,32 @@ class GenericDocumentDossier(BaseDossier):
         return "generic_document"
 
 
-# Union type of all structured extraction dossiers
-DocumentDossier = Union[
-    InsuranceBenefitsDossier,
-    ClinicalVisitDossier,
-    GenericDocumentDossier,
-]
+# Union type of all structured extraction dossiers in core
+DocumentDossier = Union[GenericDocumentDossier, BaseDossier]
 
-# Lookup registry mapping shorthand type strings to dossier classes
+# Extensible registry mapping shorthand type strings to dossier classes
 DOSSIER_REGISTRY: Dict[str, type[BaseDossier]] = {
-    "insurance": InsuranceBenefitsDossier,
-    "insurance_benefits": InsuranceBenefitsDossier,
-    "records": ClinicalVisitDossier, "clinical_visit": ClinicalVisitDossier,
-    "clinical_visit": ClinicalVisitDossier,
     "generic": GenericDocumentDossier,
     "generic_document": GenericDocumentDossier,
 }
+
+
+def register_dossier_type(dossier_type: str, dossier_cls: type[BaseDossier]) -> None:
+    """Register a dynamic dossier model from a domain pack.
+
+    Args:
+        dossier_type: Shorthand or canonical type identifier.
+        dossier_cls: Subclass of BaseDossier to handle extraction.
+    """
+    normalized = dossier_type.lower().strip().replace("-", "_")
+    DOSSIER_REGISTRY[normalized] = dossier_cls
 
 
 def get_dossier_cls(dossier_type: str) -> type[BaseDossier]:
     """Resolve a dossier class from a string identifier.
 
     Args:
-        dossier_type: Type identifier (e.g. 'insurance', 'records', 'generic').
+        dossier_type: Type identifier (e.g. 'generic', or pack-registered identifier).
 
     Returns:
         The matching BaseDossier subclass, defaulting to GenericDocumentDossier.
@@ -200,10 +145,9 @@ def get_dossier_cls(dossier_type: str) -> type[BaseDossier]:
 
 __all__ = [
     "BaseDossier",
-    "ClinicalVisitDossier",
     "DOSSIER_REGISTRY",
     "DocumentDossier",
     "GenericDocumentDossier",
-    "InsuranceBenefitsDossier",
     "get_dossier_cls",
+    "register_dossier_type",
 ]

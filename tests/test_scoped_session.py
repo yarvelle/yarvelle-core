@@ -26,6 +26,7 @@ from yarvelle_core.scope.mixin import ScopedMixin
 
 
 class TestScopedEntity(Base, ScopedMixin):
+    __test__ = False
     __tablename__ = "test_scoped_entities"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)

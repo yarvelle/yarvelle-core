@@ -19,12 +19,11 @@ from __future__ import annotations
 
 from yarvelle_core.workflows.subgraphs.extraction.dossiers import (
     BaseDossier,
-    ClinicalVisitDossier,
     DOSSIER_REGISTRY,
     DocumentDossier,
     GenericDocumentDossier,
-    InsuranceBenefitsDossier,
     get_dossier_cls,
+    register_dossier_type,
 )
 from yarvelle_core.workflows.subgraphs.extraction.grounding import (
     GroundingValidationResult,
@@ -58,7 +57,6 @@ from yarvelle_core.workflows.subgraphs.extraction.tool import (
 
 __all__ = [
     "BaseDossier",
-    "ClinicalVisitDossier",
     "DEFAULT_ADDRESS_TAG",
     "DEFAULT_EMAIL_TAG",
     "DEFAULT_MRN_TAG",
@@ -72,7 +70,6 @@ __all__ = [
     "GenericDocumentDossier",
     "GroundingValidationResult",
     "GroundingValidator",
-    "InsuranceBenefitsDossier",
     "PIISanitizer",
     "SanitizationResult",
     "build_extraction_subgraph",
@@ -83,6 +80,7 @@ __all__ = [
     "extract_numeric_tokens",
     "get_dossier_cls",
     "mask_pii",
+    "register_dossier_type",
     "sanitize_pii",
     "sanitize_pii_with_metadata",
 ]

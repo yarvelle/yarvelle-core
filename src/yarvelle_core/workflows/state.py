@@ -39,15 +39,15 @@ class AgentState(TypedDict, total=False):
         messages: Chat history with automatic LangGraph message reducer (add_messages).
         thread_id: Conversation session identifier for persistence & checkpointing.
         user_id: User identifier for access control and multi-tenant partitioning.
-        current_agent: Active agent identifier (e.g. 'supervisor', 'visit-steward', 'benefits-guide').
+        current_agent: Active agent identifier (e.g. 'supervisor', 'household-steward', 'document-extractor').
         next_step: Target next step / router destination (e.g. 'agent', 'tools', 'refusal', 'reflection', 'done').
-        routed_subgraph: Active specialist subgraph if routed (e.g. 'visit-steward', 'benefits-guide', 'extraction').
-        document_dossiers: Structured Pydantic extraction dossiers (Insurance, Records, Generic).
+        routed_subgraph: Active specialist subgraph if routed (e.g. 'household-steward', 'extraction').
+        document_dossiers: Structured Pydantic extraction dossiers (Generic or pack-registered).
         tool_traces: Recorded tool invocations, inputs, and sanitization/execution outputs.
         reflection_count: Current self-correction reflection loop iteration count.
         max_reflections: Maximum allowed reflection attempts before fallback/halting.
         is_refusal: Flag indicating whether input or output violated safety guardrails.
-        refusal_reason: Categorized safety refusal code (e.g. 'clinical_diagnosis', 'emergency_care').
+        refusal_reason: Categorized safety refusal code (e.g. 'safety_policy_violation', 'emergency_care').
         safety_metadata: Structured safety classification and policy check details.
         follow_up_suggestions: AI-generated follow-up next question chips.
         error: Standardized error message or code for user-facing graceful response.

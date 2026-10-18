@@ -235,7 +235,7 @@
       "description": "Specification of a scope owned by a pack.",
       "properties": {
         "id": {
-          "description": "Unique scope identifier e.g. 'health.clinical', 'finance.accounts'",
+          "description": "Unique scope identifier e.g. 'health.records', 'finance.accounts'",
           "title": "Id",
           "type": "string"
         },

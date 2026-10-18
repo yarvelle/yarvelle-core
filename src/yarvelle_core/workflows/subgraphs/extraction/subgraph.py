@@ -34,9 +34,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from yarvelle_core.constants.agents import AGENT_DOCUMENT_EXTRACTOR
 from yarvelle_core.constants.extraction import (
-    DOSSIER_TYPE_CLINICAL,
     DOSSIER_TYPE_GENERIC,
-    DOSSIER_TYPE_INSURANCE,
     EXTRACTION_STEP_DONE,
     EXTRACTION_STEP_SANITIZE,
     MSG_EXTRACTION_COMPLETED,
@@ -113,12 +111,7 @@ def create_extraction_node(
             except Exception:
                 matched = None
 
-            if matched == "insurance":
-                dossier_type = DOSSIER_TYPE_INSURANCE
-            elif matched == "records" or matched == "clinical_visit":
-                dossier_type = DOSSIER_TYPE_CLINICAL
-            else:
-                dossier_type = DOSSIER_TYPE_GENERIC
+            dossier_type = matched if matched else DOSSIER_TYPE_GENERIC
 
 
         dossiers = list(state.get("document_dossiers", []))

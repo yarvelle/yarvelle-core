@@ -35,17 +35,14 @@ from yarvelle_core.constants.agents import (
 )
 from yarvelle_core.constants.extraction import (
     DEFAULT_DOSSIER_TYPE,
-    PROMPT_EXTRACTION_CLINICAL_KEY,
     PROMPT_EXTRACTION_GENERIC_KEY,
-    PROMPT_EXTRACTION_INSURANCE_KEY,
 )
 from yarvelle_core.resources.loader import get_resource_loader
 from yarvelle_core.workflows.subgraphs.extraction.dossiers import (
     BaseDossier,
-    ClinicalVisitDossier,
     GenericDocumentDossier,
-    InsuranceBenefitsDossier,
     get_dossier_cls,
+    register_dossier_type,
 )
 from yarvelle_core.workflows.subgraphs.extraction.grounding import (
     GroundingValidationResult,
@@ -108,7 +105,7 @@ class ExtractStructuredDataInput(BaseModel):
     )
     schema_type: str = Field(
         default=DEFAULT_DOSSIER_TYPE,
-        description="Target dossier schema: 'insurance' (benefits), 'records' (visit notes), or 'generic'.",
+        description="Target dossier schema type identifier (defaults to 'generic' or registered pack schema).",
     )
 
 
@@ -121,8 +118,8 @@ class ExtractStructuredDataTool(BaseTool):
 
     name: str = TOOL_EXTRACT_STRUCTURED_DATA
     description: str = (
-        "Extract structured data from text into a typed Pydantic schema ('insurance', "
-        "'records', or 'generic'). Returns the extracted dossier as a dictionary."
+        "Extract structured data from text into a typed Pydantic schema ('generic' "
+        "or registered pack schema). Returns the extracted dossier as a dictionary."
     )
     args_schema: Type[BaseModel] = ExtractStructuredDataInput
     model: Optional[BaseChatModel] = None
@@ -131,20 +128,16 @@ class ExtractStructuredDataTool(BaseTool):
         super().__init__(model=model, **kwargs)
 
     def _get_extraction_prompt(self, schema_type: str) -> str:
-        """Resolves system extraction prompt from prompts.yaml."""
-        norm_type = schema_type.lower().strip()
+        """Resolves system extraction prompt from prompts.yaml or registered pack prompt."""
+        norm_type = schema_type.lower().strip().replace("-", "_")
         key_map = {
-            "insurance": PROMPT_EXTRACTION_INSURANCE_KEY,
-            "insurance_benefits": PROMPT_EXTRACTION_INSURANCE_KEY,
-            "records": PROMPT_EXTRACTION_CLINICAL_KEY,
-            "clinical_visit": PROMPT_EXTRACTION_CLINICAL_KEY,
             "generic": PROMPT_EXTRACTION_GENERIC_KEY,
             "generic_document": PROMPT_EXTRACTION_GENERIC_KEY,
         }
-        prompt_key = key_map.get(norm_type, PROMPT_EXTRACTION_GENERIC_KEY)
+        prompt_key = key_map.get(norm_type, norm_type)
         try:
             prompts = get_resource_loader().get_prompts().get("extraction", {})
-            return str(prompts.get(prompt_key, ""))
+            return str(prompts.get(prompt_key, prompts.get(PROMPT_EXTRACTION_GENERIC_KEY, "")))
         except Exception as exc:
             logger.debug("Could not load extraction prompt from ResourceLoader: %s", exc)
             return "Extract structured data matching the target schema."
@@ -232,8 +225,8 @@ class ValidateGroundingInput(BaseModel):
 class ValidateGroundingTool(BaseTool):
     """LangChain tool wrapping GroundingValidator for deterministic numerical verification.
 
-    Verifies that all copays, deductibles, coinsurance, dates, and key measurements
-    in the extracted dossier are grounded in the source text.
+    Verifies that all extracted numerical figures, amounts, percentages, dates,
+    and key measurements in the extracted dossier are grounded in the source text.
     """
 
     name: str = TOOL_VALIDATE_GROUNDING
