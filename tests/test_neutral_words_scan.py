@@ -48,6 +48,9 @@ ALLOWLIST = {
     "vault/dek.py": {"health"},
     # Historical Alembic migrations preserving pre-split schema baseline
     "db/migrations/versions/0001_baseline_schema.py": {"clinical"},
+    "db/migrations/versions/0005_clinical_domain_records.py": {"clinical", "clinic"},
+    "db/migrations/versions/0006_preventive_and_school_forms.py": {"clinical"},
+    "db/migrations/versions/0009_companion_and_handover.py": {"clinical"},
     "db/migrations/versions/0011_scopes.py": {"clinical"},
     "db/session.py": {"clinical"},
     # Dual-write backward compatibility for legacy profile access fields (PROJECT.md R2)
