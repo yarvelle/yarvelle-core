@@ -567,11 +567,15 @@ class McpDatabaseToolbox:
             # Evaluate acute vitals red flags
             red_flags: List[Dict[str, Any]] = []
             try:
+                import importlib
+                check_vitals_red_flags = None
                 try:
-                    from carefold_health.safety.vitals import check_vitals_red_flags
+                    _vh = importlib.import_module("carefold_health.safety.vitals")
+                    check_vitals_red_flags = getattr(_vh, "check_vitals_red_flags", None)
                 except ImportError:
                     try:
-                        from carefold.clinical.vitals import check_vitals_red_flags
+                        _vc = importlib.import_module("carefold.clinical.vitals")
+                        check_vitals_red_flags = getattr(_vc, "check_vitals_red_flags", None)
                     except ImportError:
                         check_vitals_red_flags = None
 
