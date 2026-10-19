@@ -84,7 +84,7 @@ yarvelle-core = "yarvelle_core.cli:main"
 [project.entry-points."yarvelle.packs"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/yarvelle_core"]
+packages = ["src/yarvelle_core", "src/connectors"]
 artifacts = ["src/yarvelle_core/_content"]
 
 [tool.hatch.build.targets.wheel.hooks.custom]

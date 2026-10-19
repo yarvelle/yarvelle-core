@@ -160,12 +160,15 @@ def list_connector_manifests() -> List[ConnectorManifest]:
         manifests_by_id[manifest.id] = manifest
 
     try:
+        from connectors.loader import _extra_manifest_dirs
+
         pkg_root = Path(connectors.__file__).resolve().parent
-        manifests_dir = pkg_root / "starters" / "manifests"
-        if manifests_dir.is_dir():
-            for yaml_path in sorted(manifests_dir.glob("*.yaml")):
-                loaded = ConnectorManifest.from_yaml(yaml_path)
-                manifests_by_id[loaded.id] = loaded
+        search_dirs = [pkg_root / "starters" / "manifests", *_extra_manifest_dirs()]
+        for manifests_dir in search_dirs:
+            if manifests_dir.is_dir():
+                for yaml_path in sorted(manifests_dir.glob("*.yaml")):
+                    loaded = ConnectorManifest.from_yaml(yaml_path)
+                    manifests_by_id[loaded.id] = loaded
     except Exception:
         pass
 

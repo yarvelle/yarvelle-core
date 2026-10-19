@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["DOM", "DOM.Iterable", "ES2022"],
+    "lib": [
+      "DOM",
+      "DOM.Iterable",
+      "ES2022"
+    ],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "jsx": "react-jsx",
@@ -17,9 +21,20 @@
     "isolatedModules": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": [
+        "src/*"
+      ]
     }
   },
-  "include": ["src/**/*", "tokens/**/*", "tests/**/*"],
-  "exclude": ["node_modules", "dist"]
+  "include": [
+    "src/**/*",
+    "tokens/**/*",
+    "tests/**/*",
+    "stories/**/*",
+    ".storybook/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
 }
