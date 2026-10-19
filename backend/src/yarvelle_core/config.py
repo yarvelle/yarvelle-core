@@ -277,12 +277,32 @@ class Settings(BaseSettings):
         return self.home_dir / LOGS_DIR / DEFAULT_AUDIT_LOG_FILE
 
     def get_agents_dir(self) -> Path:
-        """Returns bundled agent definition directory (in repository)."""
-        return self.workspace_root / AGENTS_DIR
+        """Returns bundled agent definition directory (in repository or packaged _content)."""
+        candidate = self.workspace_root / AGENTS_DIR
+        if candidate.is_dir():
+            return candidate
+        try:
+            import importlib.resources
+            packaged = Path(str(importlib.resources.files("yarvelle_core").joinpath("_content/agents")))
+            if packaged.is_dir():
+                return packaged
+        except Exception:
+            pass
+        return candidate
 
     def get_skills_dir(self) -> Path:
-        """Returns bundled skill packs directory (in repository)."""
-        return self.workspace_root / SKILLS_DIR
+        """Returns bundled skill packs directory (in repository or packaged _content)."""
+        candidate = self.workspace_root / SKILLS_DIR
+        if candidate.is_dir():
+            return candidate
+        try:
+            import importlib.resources
+            packaged = Path(str(importlib.resources.files("yarvelle_core").joinpath("_content/skills")))
+            if packaged.is_dir():
+                return packaged
+        except Exception:
+            pass
+        return candidate
 
     def get_attachments_dir(self) -> Path:
         """Returns attachments directory. In Phase1, aliases to get_uploads_dir()."""

@@ -62,6 +62,8 @@ def test_wheel_contains_all_content_and_entry_points(tmp_path: Path):
         missing = [f for f in required_content_files if f not in names]
         assert not missing, f"Built wheel is missing required force-included files: {missing}"
 
+        assert "yarvelle_core/cli.py" in names, "Built wheel is missing yarvelle_core/cli.py module"
+
         # Inspect entry_points.txt in .dist-info
         entry_points_files = [n for n in names if n.endswith(".dist-info/entry_points.txt")]
         assert len(entry_points_files) == 1, f"Expected 1 entry_points.txt file, found: {entry_points_files}"
@@ -69,3 +71,31 @@ def test_wheel_contains_all_content_and_entry_points(tmp_path: Path):
 
         assert "[console_scripts]" in ep_content
         assert "yarvelle-core = yarvelle_core.cli:main" in ep_content
+
+    # 1. Test direct import and invocation of main entrypoint
+    from yarvelle_core.cli import main
+    assert main(["--version"]) == 0
+
+    # 2. Test isolated virtual environment installation and console script invocation
+    venv_dir = tmp_path / "venv"
+    subprocess.run([sys.executable, "-m", "venv", str(venv_dir)], check=True)
+    pip_bin = venv_dir / "bin" / "pip"
+    cli_bin = venv_dir / "bin" / "yarvelle-core"
+
+    install_proc = subprocess.run(
+        [str(pip_bin), "install", str(wheel_path), "--no-deps", "--force-reinstall"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert install_proc.returncode == 0, f"pip install failed:\n{install_proc.stderr}"
+
+    cli_proc = subprocess.run(
+        [str(cli_bin), "--version"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert cli_proc.returncode == 0, f"yarvelle-core script execution failed:\n{cli_proc.stderr}"
+    output = cli_proc.stdout + cli_proc.stderr
+    assert "yarvelle-core 0.1.0" in output

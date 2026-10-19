@@ -16,12 +16,14 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from yarvelle_core.api.deps import get_current_user
+from yarvelle_core.api.deps import get_current_user, resolve_owner_user_id
+from yarvelle_core.auth.adapters.disabled_adapter import DEFAULT_STEWARD_USER
 from yarvelle_core.auth.ports import UserProfile
+from yarvelle_core.config import settings
 from yarvelle_core.db.models import Profile, ProfileAccess, ProfileUiPreference, ScopeGrant, utc_now
 from yarvelle_core.db.session import get_db
 from yarvelle_core.schemas.profiles import (
@@ -61,8 +63,8 @@ def _is_admin_or_steward(user: UserProfile) -> bool:
     return (
         getattr(user, "role", None) == "admin"
         or getattr(user, "username", None) == "steward"
-        or user.id == DEFAULT_STEWARD_USER.id
-        or user.id == "steward"
+        or getattr(user, "id", None) == DEFAULT_STEWARD_USER.id
+        or getattr(user, "id", None) == "steward"
     )
 
 
@@ -73,6 +75,9 @@ async def _resolve_target_profile(
 ) -> Profile:
     """Resolves and validates access to the target profile."""
     is_admin = _is_admin_or_steward(current_user)
+    owner_id = resolve_owner_user_id(current_user)
+    effective_user_id = owner_id or current_user.id
+
     if profile_id:
         res = await db.execute(select(Profile).where(Profile.id == profile_id))
         profile = res.scalar_one_or_none()
@@ -82,30 +87,47 @@ async def _resolve_target_profile(
                 detail=f"Profile '{profile_id}' not found",
             )
         # Validate authorization if user is not steward/admin
-        if not is_admin and profile.user_id != current_user.id:
-            access_res = await db.execute(
-                select(ProfileAccess).where(
-                    ProfileAccess.profile_id == profile_id,
-                    ProfileAccess.user_id == current_user.id,
+        if not is_admin:
+            is_owner = (profile.user_id == effective_user_id) or (owner_id is None and profile.user_id is None)
+            if not is_owner:
+                access_res = await db.execute(
+                    select(ProfileAccess).where(
+                        ProfileAccess.profile_id == profile_id,
+                        ProfileAccess.user_id == effective_user_id,
+                    )
                 )
-            )
-            if access_res.scalar_one_or_none() is None:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Access to profile denied",
-                )
+                if access_res.scalar_one_or_none() is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Access to profile denied",
+                    )
         return profile
 
     # Default profile resolution when profile_id is not specified
     stmt = select(Profile)
     if not is_admin:
-        stmt = stmt.where(Profile.user_id == current_user.id)
-    stmt = stmt.order_by(Profile.role == "self", Profile.id)
+        if owner_id:
+            stmt = stmt.where(Profile.user_id == owner_id)
+        elif effective_user_id:
+            stmt = stmt.where(Profile.user_id == effective_user_id)
+        else:
+            stmt = stmt.where(Profile.user_id.is_(None))
+    stmt = stmt.order_by(Profile.is_primary.desc(), Profile.role == "self", Profile.id)
     res = await db.execute(stmt)
     profile = res.scalars().first()
 
-    if profile is None:
-        # Fallback to any profile accessible in single-user/local environment
+    if profile is None and not is_admin:
+        # Check shared profiles where user has access
+        shared_res = await db.execute(
+            select(Profile)
+            .join(ProfileAccess, Profile.id == ProfileAccess.profile_id)
+            .where(ProfileAccess.user_id == effective_user_id)
+            .order_by(Profile.id)
+        )
+        profile = shared_res.scalars().first()
+
+    if profile is None and (is_admin or (owner_id is None and getattr(settings, "auth_provider", "local") == "disabled")):
+        # Fallback to any profile in single-user/local environment or admin
         any_res = await db.execute(select(Profile).order_by(Profile.id))
         profile = any_res.scalars().first()
 
@@ -124,11 +146,17 @@ async def _resolve_target_profile(
 )
 async def get_ui_context(
     profile_id: Optional[str] = Query(default=None, description="Target profile UUID"),
+    x_profile_id: Optional[str] = Header(
+        default=None,
+        alias="X-Profile-ID",
+        description="Target profile UUID passed via header",
+    ),
     current_user: UserProfile = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ProfileUiContextResponse:
     """Returns active scopes, hidden panels, and audience classification for the active profile."""
-    profile = await _resolve_target_profile(profile_id, current_user, db)
+    target_id = profile_id or x_profile_id
+    profile = await _resolve_target_profile(target_id, current_user, db)
 
     # 1. Resolve granted scopes for this profile
     scopes: List[str] = []

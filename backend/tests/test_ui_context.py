@@ -22,7 +22,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from yarvelle_core.api.deps import get_current_user
 from yarvelle_core.api.router import api_router
 from yarvelle_core.auth.adapters.disabled_adapter import DEFAULT_STEWARD_USER
-from yarvelle_core.db.models import Base, Profile, ProfileUiPreference, ScopeGrant, User
+from yarvelle_core.auth.ports import UserProfile
+from yarvelle_core.db.models import Base, Profile, ProfileAccess, ProfileUiPreference, ScopeGrant, User
 from yarvelle_core.db.scoped_session import ScopedAsyncSession
 from yarvelle_core.db.session import get_db
 
@@ -159,3 +160,188 @@ async def test_ui_context_lifecycle(test_app_and_client):
     # 9. Test unknown profile returns 404
     res_404 = await client.get("/api/v1/me/profiles/p-unknown/ui-prefs")
     assert res_404.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_ui_context_regular_member_user_and_headers(test_app_and_client):
+    """Verifies that non-admin/regular members do NOT hit NameError (HTTP 500) and headers resolve correctly."""
+    client, session_factory = test_app_and_client
+    app = client._transport.app
+
+    now = datetime.now(timezone.utc)
+    alice_user = UserProfile(
+        id="user_alice",
+        username="alice",
+        email="alice@example.com",
+        role="member",
+        created_at=now,
+        updated_at=now,
+    )
+    bob_user = UserProfile(
+        id="user_bob",
+        username="bob",
+        email="bob@example.com",
+        role="member",
+        created_at=now,
+        updated_at=now,
+    )
+
+    async with session_factory() as session:
+        p_alice_1 = Profile(
+            id="p-alice-primary",
+            user_id="user_alice",
+            name="Alice Self",
+            role="self",
+            is_primary=True,
+            date_of_birth="1992-04-12",
+        )
+        p_alice_2 = Profile(
+            id="p-alice-secondary",
+            user_id="user_alice",
+            name="Alice Child",
+            role="guardian",
+            is_primary=False,
+            date_of_birth="2018-09-01",
+        )
+        p_bob_1 = Profile(
+            id="p-bob-primary",
+            user_id="user_bob",
+            name="Bob Self",
+            role="self",
+            is_primary=True,
+            date_of_birth="1988-11-20",
+        )
+        session.add_all([p_alice_1, p_alice_2, p_bob_1])
+
+        # Scope grants for Alice's primary profile
+        session.add(
+            ScopeGrant(
+                profile_id="p-alice-primary",
+                user_id="user_alice",
+                scope="health.records",
+                access_level="read",
+            )
+        )
+        await session.commit()
+
+    # Authenticate as regular member Alice
+    app.dependency_overrides[get_current_user] = lambda: alice_user
+
+    # 1. Accessing own profile with query param succeeds without NameError
+    res_param = await client.get("/api/v1/me/ui-context?profile_id=p-alice-primary")
+    assert res_param.status_code == 200, f"Expected 200 but got {res_param.status_code}: {res_param.text}"
+    data = res_param.json()
+    assert data["profile_id"] == "p-alice-primary"
+    assert "health.records" in data["scopes"]
+
+    # 2. Accessing without profile_id resolves Alice's primary profile
+    res_default = await client.get("/api/v1/me/ui-context")
+    assert res_default.status_code == 200
+    assert res_default.json()["profile_id"] == "p-alice-primary"
+
+    # 3. Resolving via X-Profile-ID header (uppercase)
+    res_header_upper = await client.get(
+        "/api/v1/me/ui-context",
+        headers={"X-Profile-ID": "p-alice-secondary"},
+    )
+    assert res_header_upper.status_code == 200
+    assert res_header_upper.json()["profile_id"] == "p-alice-secondary"
+
+    # 4. Resolving via x-profile-id header (lowercase)
+    res_header_lower = await client.get(
+        "/api/v1/me/ui-context",
+        headers={"x-profile-id": "p-alice-secondary"},
+    )
+    assert res_header_lower.status_code == 200
+    assert res_header_lower.json()["profile_id"] == "p-alice-secondary"
+
+    # 5. Query param takes precedence over header if both are supplied
+    res_both = await client.get(
+        "/api/v1/me/ui-context?profile_id=p-alice-primary",
+        headers={"X-Profile-ID": "p-alice-secondary"},
+    )
+    assert res_both.status_code == 200
+    assert res_both.json()["profile_id"] == "p-alice-primary"
+
+    # 6. Accessing Bob's profile returns 403 Forbidden
+    res_forbidden = await client.get("/api/v1/me/ui-context?profile_id=p-bob-primary")
+    assert res_forbidden.status_code == 403
+    assert "Access to profile denied" in res_forbidden.json()["detail"]
+
+    # 7. Updating prefs for Bob's profile returns 403 Forbidden
+    put_forbidden = await client.put(
+        "/api/v1/me/profiles/p-bob-primary/ui-prefs",
+        json={"hidden_panels": ["health.vitals"]},
+    )
+    assert put_forbidden.status_code == 403
+
+    # 8. Updating prefs for own profile succeeds
+    put_own = await client.put(
+        "/api/v1/me/profiles/p-alice-primary/ui-prefs",
+        json={"hidden_panels": ["finance.budget"], "theme_preference": "dark"},
+    )
+    assert put_own.status_code == 200
+    assert put_own.json()["hidden_panels"] == ["finance.budget"]
+
+
+@pytest.mark.asyncio
+async def test_ui_context_multiuser_isolation_empty_profiles(test_app_and_client):
+    """Verifies that a member user with no profiles does NOT inadvertently see other users' profiles."""
+    client, session_factory = test_app_and_client
+    app = client._transport.app
+
+    now = datetime.now(timezone.utc)
+    charlie_user = UserProfile(
+        id="user_charlie_isolated",
+        username="charlie",
+        email="charlie@example.com",
+        role="member",
+        created_at=now,
+        updated_at=now,
+    )
+
+    # Charlie has no profiles
+    app.dependency_overrides[get_current_user] = lambda: charlie_user
+
+    res = await client.get("/api/v1/me/ui-context")
+    assert res.status_code == 404
+    assert "No profile found" in res.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_ui_context_shared_profile_access(test_app_and_client):
+    """Verifies that a user granted access via ProfileAccess can retrieve UI context."""
+    client, session_factory = test_app_and_client
+    app = client._transport.app
+
+    now = datetime.now(timezone.utc)
+    dan_user = UserProfile(
+        id="user_dan",
+        username="dan",
+        email="dan@example.com",
+        role="member",
+        created_at=now,
+        updated_at=now,
+    )
+
+    async with session_factory() as session:
+        p_shared = Profile(
+            id="p-shared-target",
+            user_id="user_owner_other",
+            name="Shared Profile",
+            role="self",
+        )
+        access = ProfileAccess(
+            profile_id="p-shared-target",
+            user_id="user_dan",
+            access_level="view",
+        )
+        session.add_all([p_shared, access])
+        await session.commit()
+
+    app.dependency_overrides[get_current_user] = lambda: dan_user
+
+    res = await client.get("/api/v1/me/ui-context?profile_id=p-shared-target")
+    assert res.status_code == 200
+    assert res.json()["profile_id"] == "p-shared-target"
+
