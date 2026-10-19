@@ -34,7 +34,6 @@ from yarvelle_core.memory.ports.catalog_port import CatalogPort
 from yarvelle_core.schemas.manifest import AgentDomain, AgentManifest, SkillManifest
 
 _DEFAULT_CANONICAL = ["general", "therapy", "wellness", "navigation", "education"]
-CANONICAL_DOMAINS = list(_DEFAULT_CANONICAL)
 
 
 def get_canonical_domains() -> List[str]:
@@ -47,6 +46,16 @@ def get_canonical_domains() -> List[str]:
     if primary_domain != "general":
         return [primary_domain, "therapy", "wellness", "navigation", "education"]
     return list(_DEFAULT_CANONICAL)
+
+
+def __getattr__(name: str) -> Any:
+    if name == "CANONICAL_DOMAINS":
+        return get_canonical_domains()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals().keys()) | {"CANONICAL_DOMAINS"})
 
 
 async def _run_write_with_retry(
