@@ -56,3 +56,8 @@ attachments/
 *.db
 *.sqlite
 *.sqlite3
+
+# Node / Frontend
+node_modules/
+frontend/dist/
+.import_linter_cache/

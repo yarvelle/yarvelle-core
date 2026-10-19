@@ -1,0 +1,6 @@
+[
+  "Extract structured insurance benefits data from my uploaded summary of benefits.",
+  "Extract clinical visit notes and action items from my uploaded visit note.",
+  "Sanitize personal information and extract numerical values from my uploaded medical bill.",
+  "Validate grounding for the extracted dossier against the original source attachment."
+]

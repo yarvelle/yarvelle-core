@@ -1,0 +1,22 @@
+id: suggestion-generator
+title: Suggestion Generator
+version: 0.1.0
+license: Apache-2.0
+risk_class: admin
+model: llama3.2
+can_delegate: false
+max_iterations: 1
+hidden: true
+description: >-
+  Intelligent follow-up question chip generator. Analyzes user intent,
+  conversation history, and assistant responses to propose 2-3 concise,
+  non-clinical next question suggestions guiding care navigation.
+skills: []
+tools: []
+forbidden:
+  - diagnose
+  - prescribe
+  - dose
+  - replace_emergency_care
+  - instruct_stop_medication
+persona: persona.md

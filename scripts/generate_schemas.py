@@ -19,7 +19,9 @@ import sys
 
 # Ensure src is in pythonpath
 repo_root = Path(__file__).resolve().parent.parent
-src_dir = repo_root / "src"
+src_dir = repo_root / "backend" / "src"
+if not src_dir.exists():
+    src_dir = repo_root / "src"
 if str(src_dir) not in sys.path:
     sys.path.insert(0, str(src_dir))
 
@@ -28,7 +30,7 @@ from yarvelle_core.schemas.generator import emit_canonical_schemas
 
 def main() -> None:
     targets = [
-        repo_root / "src" / "yarvelle_core" / "schemas",
+        src_dir / "yarvelle_core" / "schemas",
         repo_root / "schemas",
     ]
     schemas = emit_canonical_schemas(targets)

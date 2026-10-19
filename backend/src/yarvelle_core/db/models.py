@@ -968,6 +968,13 @@ class Profile(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+    ui_preference: Mapped[Optional["ProfileUiPreference"]] = sa_relationship(
+        "ProfileUiPreference",
+        back_populates="profile",
+        uselist=False,
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
     def __repr__(self) -> str:
         return f"<Profile id={self.id!r} name={self.name!r} relationship={self.relationship!r} role={self.role!r}>"
@@ -1111,6 +1118,47 @@ class ProfileConsent(Base):
 
     def __repr__(self) -> str:
         return f"<ProfileConsent profile_id={self.profile_id!r} allow_clinical={self.allow_clinical}>"
+
+
+class ProfileUiPreference(Base):
+    """UI preferences and layout customizations for a specific profile."""
+
+    __tablename__ = "profile_ui_preferences"
+
+    profile_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("profiles.id", ondelete="CASCADE"),
+        primary_key=True,
+        doc="Profile identifier",
+    )
+    hidden_panels: Mapped[List[str]] = mapped_column(
+        JSON,
+        default=list,
+        nullable=False,
+        doc="List of hidden panel slot contribution IDs",
+    )
+    theme_preference: Mapped[Optional[str]] = mapped_column(
+        String(32),
+        nullable=True,
+        default=None,
+        doc="Optional profile-specific theme preference override ('light', 'dark', 'system')",
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        onupdate=utc_now,
+        nullable=False,
+        doc="Last updated timestamp (UTC)",
+    )
+
+    # Relationships
+    profile: Mapped[Profile] = sa_relationship(
+        "Profile",
+        back_populates="ui_preference",
+    )
+
+    def __repr__(self) -> str:
+        return f"<ProfileUiPreference profile_id={self.profile_id!r} hidden={len(self.hidden_panels)}>"
 
 
 class ScopeGrant(Base):

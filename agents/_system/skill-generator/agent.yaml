@@ -1,0 +1,23 @@
+id: skill-generator
+title: Skill Generator
+version: 0.1.0
+license: Apache-2.0
+risk_class: admin
+model: llama3.2
+can_delegate: false
+max_iterations: 1
+hidden: true
+description: >-
+  Dynamic on-demand skill generation agent. Identifies missing domain
+  knowledge, guidelines, and reference documentation required for clinical
+  navigation or administrative tasks. Synthesizes structured skill manifests
+  and references to empower downstream specialist agents.
+skills: []
+tools: []
+forbidden:
+  - diagnose
+  - prescribe
+  - dose
+  - replace_emergency_care
+  - instruct_stop_medication
+persona: persona.md

@@ -82,10 +82,11 @@ def test_canonical_schemas_committed_freshness():
     authoritative Pydantic models, ensuring developers must run scripts/generate_schemas.py
     whenever models or enums change.
     """
-    repo_root = Path(__file__).resolve().parent.parent
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    backend_dir = Path(__file__).resolve().parent.parent
     target_dirs = [
         repo_root / "schemas",
-        repo_root / "src" / "yarvelle_core" / "schemas",
+        backend_dir / "src" / "yarvelle_core" / "schemas",
     ]
 
     schema_specs = [

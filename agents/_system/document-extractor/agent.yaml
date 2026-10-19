@@ -1,0 +1,27 @@
+id: document-extractor
+title: Document Extractor
+version: 0.1.0
+license: Apache-2.0
+risk_class: admin
+model: llama3.2
+can_delegate: false
+max_iterations: 3
+hidden: true
+description: >-
+  Document analysis and structured data extraction agent. Reads uploaded
+  PDFs, text files, and tables. Extracts structured dossiers for insurance
+  benefits, clinical visit notes, and generic documents. Sanitizes PII
+  before processing. Validates extracted data against source text.
+skills: []
+tools:
+  - attach-read
+  - sanitize_pii
+  - extract_structured_data
+  - validate_grounding
+forbidden:
+  - diagnose
+  - prescribe
+  - dose
+  - replace_emergency_care
+  - instruct_stop_medication
+persona: persona.md

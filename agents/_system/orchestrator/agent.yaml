@@ -1,0 +1,24 @@
+id: orchestrator
+title: Orchestrator
+version: 0.1.0
+license: Apache-2.0
+risk_class: admin
+model: llama3.2
+can_delegate: true
+max_iterations: 5
+hidden: true
+description: >-
+  General-purpose planning and routing agent. Analyzes user intent,
+  selects the best specialist agent to handle the request, and
+  coordinates multi-step workflows. Domain-agnostic.
+skills: []
+tools:
+  - delegate_to_agent
+  - list_agents
+forbidden:
+  - diagnose
+  - prescribe
+  - dose
+  - replace_emergency_care
+  - instruct_stop_medication
+persona: persona.md

@@ -25,6 +25,7 @@ from yarvelle_core.api.connections import router as connections_router
 from yarvelle_core.api.email_drafts import router as email_drafts_router
 from yarvelle_core.api.health import router as health_router
 from yarvelle_core.api.i18n import router as i18n_router
+from yarvelle_core.api.me import router as me_router
 from yarvelle_core.api.memory import router as memory_router
 from yarvelle_core.api.models import router as models_router
 from yarvelle_core.api.profiles import router as profiles_router
@@ -52,6 +53,7 @@ def get_default_router_contributions() -> List[RouterContribution]:
         RouterContribution(chat_router, pack_id="core"),
         RouterContribution(models_router, pack_id="core"),
         RouterContribution(attachments_router, pack_id="core"),
+        RouterContribution(me_router, prefix="/me", tags=["me"], pack_id="core"),
         RouterContribution(profiles_router, prefix="/profiles", tags=["profiles"], pack_id="core"),
         RouterContribution(search_router, pack_id="core"),
         RouterContribution(memory_router, prefix="/memory", tags=["memory"], pack_id="core"),

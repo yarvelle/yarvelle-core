@@ -148,9 +148,31 @@ class ViewerInviteAcceptResponse(BaseModel):
     access_id: str
 
 
+AudienceBand = Literal["adult", "teen", "child", "viewer"]
+
+
+class ProfileUiContextResponse(BaseModel):
+    profile_id: str = Field(..., description="Target profile UUID")
+    scopes: List[str] = Field(default_factory=list, description="Active scopes granted to the user for this profile")
+    hidden_panels: List[str] = Field(default_factory=list, description="Panel contribution IDs hidden for this profile")
+    audience: AudienceBand = Field(default="adult", description="Audience classification based on age band and role")
+
+
+class ProfileUiPreferenceResponse(BaseModel):
+    profile_id: str = Field(..., description="Target profile UUID")
+    hidden_panels: List[str] = Field(default_factory=list, description="Hidden panel contribution IDs")
+    theme_preference: Optional[str] = Field(default=None, description="Optional theme preference override")
+
+
+class ProfileUiPreferenceUpdate(BaseModel):
+    hidden_panels: List[str] = Field(default_factory=list, description="Hidden panel contribution IDs")
+    theme_preference: Optional[str] = Field(default=None, description="Optional theme preference override")
+
+
 __all__ = [
     "ProfileRole",
     "AccessLevel",
+    "AudienceBand",
     "ProfileCreate",
     "ProfileUpdate",
     "ProfileConsentResponse",
@@ -160,6 +182,9 @@ __all__ = [
     "ProfileSummaryResponse",
     "ProfileDetailResponse",
     "ProfileResponse",
+    "ProfileUiContextResponse",
+    "ProfileUiPreferenceResponse",
+    "ProfileUiPreferenceUpdate",
     "ViewerInviteCreate",
     "ViewerInviteResponse",
     "ViewerInviteAcceptRequest",
