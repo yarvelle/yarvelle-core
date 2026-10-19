@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend-lint:
+    name: Backend Lint & Hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v2
+
+      - name: Check No Git Dependencies
+        run: python3 scripts/check_no_git_deps.py
+
+      - name: Check License Headers
+        run: python3 scripts/check_licenses.py
+
+      - name: Install backend dependencies
+        run: |
+          cd backend
+          uv sync
+
+      - name: Run Import Linter
+        run: |
+          cd backend
+          PYTHONPATH=src uv run lint-imports
+
+  backend-test:
+    name: Backend Test Suite
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.12']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v2
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          uv sync
+
+      - name: Run Pytest
+        run: |
+          PYTHONPATH=backend/src uv run --project backend pytest backend/tests/
+
+  packaging-test:
+    name: Wheel Packaging Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v2
+
+      - name: Run Wheel Contents Test
+        run: |
+          cd backend
+          uv sync
+          PYTHONPATH=src uv run pytest tests/packaging/test_wheel_contents.py
+
+  frontend:
+    name: Frontend Quality & Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 12
+
+      - name: Install dependencies
+        run: |
+          cd frontend
+          pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: |
+          pnpm --dir frontend run typecheck
+
+      - name: Vitest Suite (GU3 Token Lint & Contrast)
+        run: |
+          pnpm --dir frontend test
+
+      - name: Build Package
+        run: |
+          pnpm --dir frontend run build

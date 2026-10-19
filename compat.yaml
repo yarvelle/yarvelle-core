@@ -1,0 +1,25 @@
+# Yarvelle Core Compatibility Matrix
+# Defines supported pairings of core, @yarvelle/ui, and pack_api versions.
+
+matrix:
+  - core: "0.1.0"
+    ui: "0.1.0"
+    pack_api: 1
+    python: ">=3.12"
+    node: ">=20.0.0"
+    status: "active"
+    notes: "Initial domain-neutral core runtime and UI tokens release"
+
+  - core: "0.3.0"
+    ui: "0.3.0"
+    pack_api: 1
+    python: ">=3.12"
+    node: ">=20.0.0"
+    status: "planned"
+    notes: "Full monorepo transition release with carefold-health pack"
+
+rules:
+  lockstep_major_minor: true
+  supported_pack_apis: [1]
+  minimum_python: "3.12.0"
+  minimum_node: "20.0.0"
