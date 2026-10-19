@@ -13,6 +13,8 @@
 
 from __future__ import annotations
 
+import yarvelle_core  # noqa: F401
+
 from pathlib import Path
 import sys
 

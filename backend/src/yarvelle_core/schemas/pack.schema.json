@@ -1,34 +1,5 @@
 {
   "$defs": {
-    "PackA2UiSpec": {
-      "additionalProperties": true,
-      "description": "Specification reserving agent-to-UI declarative rendering catalog.",
-      "properties": {
-        "catalog_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Allowlisted component catalog identifier",
-          "title": "Catalog Id"
-        },
-        "surfaces": {
-          "description": "Supported A2UI surface identifiers",
-          "items": {
-            "type": "string"
-          },
-          "title": "Surfaces",
-          "type": "array"
-        }
-      },
-      "title": "PackA2UiSpec",
-      "type": "object"
-    },
     "PackMigrationsSpec": {
       "description": "Specification of Alembic database migration branch contributed by a pack.",
       "properties": {
@@ -203,68 +174,9 @@
           "default": null,
           "description": "Path to evals definition or dataset",
           "title": "Evals"
-        },
-        "ui": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/PackUiSpec"
-            },
-            {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "UI package slots and routing definitions",
-          "title": "Ui"
         }
       },
       "title": "PackProvidesSpec",
-      "type": "object"
-    },
-    "PackUiSpec": {
-      "additionalProperties": true,
-      "description": "Specification of UI slots, contributions, and optional A2UI reservation.",
-      "properties": {
-        "package": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Published npm package name e.g. '@carefold/health-ui'",
-          "title": "Package"
-        },
-        "contributions": {
-          "description": "Slot contributions declared by this pack",
-          "items": {
-            "additionalProperties": true,
-            "type": "object"
-          },
-          "title": "Contributions",
-          "type": "array"
-        },
-        "a2ui": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/PackA2UiSpec"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Reserved A2UI declarative UI catalog spec (Plan 08)"
-        }
-      },
-      "title": "PackUiSpec",
       "type": "object"
     },
     "ReadScopeSpec": {
@@ -454,23 +366,6 @@
         }
       ],
       "description": "Contributed runtime artifacts"
-    },
-    "ui": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/PackUiSpec"
-        },
-        {
-          "additionalProperties": true,
-          "type": "object"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "description": "UI package slots, contributions, and A2UI reservation",
-      "title": "Ui"
     },
     "migrations": {
       "anyOf": [

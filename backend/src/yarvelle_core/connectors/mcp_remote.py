@@ -42,7 +42,7 @@ from yarvelle_core.db.models import (
 )
 from yarvelle_core.engine.tool_exec import TaintFlag, UntrustedResult
 from yarvelle_core.engine.tool_registry import ToolSpec
-from connectors.manifest import ConnectorManifest, McpToolAllowlistEntry
+from yarvelle_core.connectors.manifest import ConnectorManifest, McpToolAllowlistEntry
 
 CURATED_REMOTE_MCP_IDS = ("google-workspace-gmail",)
 

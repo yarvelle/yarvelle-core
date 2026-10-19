@@ -100,25 +100,6 @@ class PackMigrationsSpec(BaseModel):
     depends_on_core: str = Field(default="core@0010", description="Earliest core schema revision required")
 
 
-class PackA2UiSpec(BaseModel):
-    """Specification reserving agent-to-UI declarative rendering catalog."""
-
-    model_config = ConfigDict(extra="allow")
-
-    catalog_id: Optional[str] = Field(default=None, description="Allowlisted component catalog identifier")
-    surfaces: List[str] = Field(default_factory=list, description="Supported A2UI surface identifiers")
-
-
-class PackUiSpec(BaseModel):
-    """Specification of UI slots, contributions, and optional A2UI reservation."""
-
-    model_config = ConfigDict(extra="allow")
-
-    package: Optional[str] = Field(default=None, description="Published npm package name e.g. '@carefold/health-ui'")
-    contributions: List[Dict[str, Any]] = Field(default_factory=list, description="Slot contributions declared by this pack")
-    a2ui: Optional[PackA2UiSpec] = Field(default=None, description="Reserved A2UI declarative UI catalog spec (Plan 08)")
-
-
 class PackProvidesSpec(BaseModel):
     """Declarative manifest entries contributed by a pack on disk."""
 
@@ -133,7 +114,6 @@ class PackProvidesSpec(BaseModel):
     locales_dir: Optional[str] = Field(default="resources/locales/", description="Locale message bundles directory")
     connectors_dir: Optional[str] = Field(default="connectors/", description="Connector manifests directory")
     evals: Optional[str] = Field(default=None, description="Path to evals definition or dataset")
-    ui: Optional[Union[PackUiSpec, Dict[str, Any]]] = Field(default=None, description="UI package slots and routing definitions")
 
 
 class PackManifest(BaseModel):
@@ -154,7 +134,6 @@ class PackManifest(BaseModel):
     scopes: List[ScopeDefinitionSpec] = Field(default_factory=list, description="Scopes owned by this pack")
     reads: List[ReadScopeSpec] = Field(default_factory=list, description="Scopes of other packs requested for reading")
     provides: Optional[PackProvidesSpec] = Field(default_factory=PackProvidesSpec, description="Contributed runtime artifacts")
-    ui: Optional[Union[PackUiSpec, Dict[str, Any]]] = Field(default=None, description="UI package slots, contributions, and A2UI reservation")
     migrations: Optional[PackMigrationsSpec] = Field(default=None, description="Database migration branch spec")
     compat: Optional[Dict[str, Any]] = Field(default=None, description="Compatibility metadata")
 
@@ -200,7 +179,6 @@ class PackSpec(BaseModel):
     routing_hints: Optional[RoutingHints] = Field(default=None, description="Dynamic routing hints for orchestrator")
     scoped_models: List[Any] = Field(default_factory=list, description="SQLAlchemy model classes extending ScopedMixin")
     jobs: List[Any] = Field(default_factory=list, description="Job handlers contributed by the pack")
-    ui: Optional[Union[PackUiSpec, Dict[str, Any]]] = Field(default=None, description="UI package slots and routing definitions")
     manifest_path: Optional[str] = Field(default=None, description="Filesystem path to source pack.yaml")
 
     @field_validator("id", "domain")

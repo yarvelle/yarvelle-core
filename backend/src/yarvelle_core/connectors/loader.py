@@ -17,10 +17,10 @@ import importlib
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
-from connectors.base import Connector
-from connectors.errors import ConnectorError
-from connectors.manifest import ConnectorManifest
-from connectors.starters.calendar import CalDavConnector, GoogleCalendarConnector
+from yarvelle_core.connectors.base import Connector
+from yarvelle_core.connectors.errors import ConnectorError
+from yarvelle_core.connectors.manifest import ConnectorManifest
+from yarvelle_core.connectors.starters.calendar import CalDavConnector, GoogleCalendarConnector
 
 _STARTER_MANIFESTS_DIR = Path(__file__).resolve().parent / "starters" / "manifests"
 
@@ -30,38 +30,41 @@ def _build_starter_factories() -> Dict[str, Callable[[ConnectorManifest], Connec
         "google-calendar": lambda manifest: GoogleCalendarConnector(manifest=manifest),
         "caldav": lambda manifest: CalDavConnector(manifest=manifest),
     }
-    try:
-        epic_mod = importlib.import_module("carefold_health.connectors.starters.epic_smart")
-        withings_mod = importlib.import_module("carefold_health.connectors.starters.withings")
-        ehr_mod = importlib.import_module("carefold_health.connectors.starters.ehr_smart_v2")
-        wear_mod = importlib.import_module("carefold_health.connectors.starters.wearables_v2")
-        zocdoc_mod = importlib.import_module("carefold_health.connectors.starters.zocdoc")
-        factories.update({
-            "withings": lambda manifest: withings_mod.WithingsConnector(manifest=manifest),
-            "epic-smart": lambda manifest: epic_mod.EpicSmartConnector(manifest=manifest),
-            "zocdoc": lambda manifest: zocdoc_mod.ZocdocConnector(manifest=manifest),
-            "oracle-health": lambda manifest: ehr_mod.OracleHealthConnector(manifest=manifest),
-            "athenahealth": lambda manifest: ehr_mod.AthenahealthConnector(manifest=manifest),
-            "cms-blue-button": lambda manifest: ehr_mod.CmsBlueButtonConnector(manifest=manifest),
-            "oura": lambda manifest: wear_mod.OuraConnector(manifest=manifest),
-            "google-health": lambda manifest: wear_mod.GoogleHealthConnector(manifest=manifest),
-            "microsoft-graph": lambda manifest: wear_mod.MicrosoftGraphCalendarConnector(manifest=manifest),
-        })
-    except ImportError:
-        pass
+    for pkg_prefix in ("carefold", "carefold_health"):
+        try:
+            epic_mod = importlib.import_module(f"{pkg_prefix}.connectors.starters.epic_smart")
+            withings_mod = importlib.import_module(f"{pkg_prefix}.connectors.starters.withings")
+            ehr_mod = importlib.import_module(f"{pkg_prefix}.connectors.starters.ehr_smart_v2")
+            wear_mod = importlib.import_module(f"{pkg_prefix}.connectors.starters.wearables_v2")
+            zocdoc_mod = importlib.import_module(f"{pkg_prefix}.connectors.starters.zocdoc")
+            factories.update({
+                "withings": lambda manifest, m=withings_mod: m.WithingsConnector(manifest=manifest),
+                "epic-smart": lambda manifest, m=epic_mod: m.EpicSmartConnector(manifest=manifest),
+                "zocdoc": lambda manifest, m=zocdoc_mod: m.ZocdocConnector(manifest=manifest),
+                "oracle-health": lambda manifest, m=ehr_mod: m.OracleHealthConnector(manifest=manifest),
+                "athenahealth": lambda manifest, m=ehr_mod: m.AthenahealthConnector(manifest=manifest),
+                "cms-blue-button": lambda manifest, m=ehr_mod: m.CmsBlueButtonConnector(manifest=manifest),
+                "oura": lambda manifest, m=wear_mod: m.OuraConnector(manifest=manifest),
+                "google-health": lambda manifest, m=wear_mod: m.GoogleHealthConnector(manifest=manifest),
+                "microsoft-graph": lambda manifest, m=wear_mod: m.MicrosoftGraphCalendarConnector(manifest=manifest),
+            })
+            break
+        except ImportError:
+            continue
     return factories
 
 
 def _extra_manifest_dirs() -> List[Path]:
     dirs: List[Path] = []
-    try:
-        mod = importlib.import_module("carefold_health.connectors.starters")
-        if getattr(mod, "__file__", None):
-            cand = Path(mod.__file__).resolve().parent / "manifests"
-            if cand.is_dir():
-                dirs.append(cand)
-    except ImportError:
-        pass
+    for pkg_prefix in ("carefold", "carefold_health"):
+        try:
+            mod = importlib.import_module(f"{pkg_prefix}.connectors.starters")
+            if getattr(mod, "__file__", None):
+                cand = Path(mod.__file__).resolve().parent / "manifests"
+                if cand.is_dir() and cand not in dirs:
+                    dirs.append(cand)
+        except ImportError:
+            continue
     return dirs
 
 

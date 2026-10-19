@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 import uuid
 
-from connectors.base import (
+from yarvelle_core.connectors.base import (
     Connector,
     NormalisedRecord,
     Page,
@@ -28,8 +28,8 @@ from connectors.base import (
     ToolContext,
     ToolSpec,
 )
-from connectors.http import ScopedHttp
-from connectors.manifest import ConnectorManifest
+from yarvelle_core.connectors.http import ScopedHttp
+from yarvelle_core.connectors.manifest import ConnectorManifest
 
 _GOOGLE_MANIFEST_PATH = Path(__file__).resolve().parent / "manifests" / "google_calendar.yaml"
 _CALDAV_MANIFEST_PATH = Path(__file__).resolve().parent / "manifests" / "caldav.yaml"

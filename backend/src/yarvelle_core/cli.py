@@ -82,9 +82,6 @@ def _run_packs() -> int:
             print(f"  Name:   {pack.name}")
             print(f"  Domain: {pack.domain}")
             print(f"  Scopes: {', '.join(sorted(pack.owned_scopes))}")
-            if pack.ui:
-                slots = [s.slot_id for s in pack.ui.slots]
-                print(f"  UI Slots: {', '.join(slots)}")
     except Exception as err:
         print(f"Error discovering packs: {err}")
         return 1

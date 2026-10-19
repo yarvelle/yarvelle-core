@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 from pydantic import BaseModel, Field, ValidationError, model_validator
 import yaml
 
-from connectors.errors import ManifestValidationError
+from yarvelle_core.connectors.errors import ManifestValidationError
 
 
 class DataFlowSpec(BaseModel):

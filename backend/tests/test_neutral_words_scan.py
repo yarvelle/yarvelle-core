@@ -86,6 +86,9 @@ ALLOWLIST = {
     "tools/registry.py": {"clinical"},
     "tools/web_search.py": {"clinical"},
     "platform/email_drafts.py": {"clinical"},
+    "connectors/base.py": {"patient", "clinical"},
+    "connectors/manifest.py": {"clinical"},
+    "connectors/starters/calendar.py": {"clinic", "clinical", "doctor"},
 }
 
 

@@ -19,18 +19,19 @@ from pathlib import Path
 from typing import Any
 
 # Extend __path__ with installed pack starter directories so submodule imports
-# like `from connectors.starters.zocdoc import ...` resolve natively.
-try:
-    _spec = importlib.util.find_spec("carefold_health")
-    if _spec and _spec.submodule_search_locations:
-        for _loc in _spec.submodule_search_locations:
-            _pack_starters = Path(_loc) / "connectors" / "starters"
-            if _pack_starters.is_dir() and str(_pack_starters) not in __path__:
-                __path__.append(str(_pack_starters))
-except Exception:
-    pass
+# like `from yarvelle_core.connectors.starters.zocdoc import ...` resolve natively.
+for _pkg_name in ("carefold", "carefold_health"):
+    try:
+        _spec = importlib.util.find_spec(_pkg_name)
+        if _spec and _spec.submodule_search_locations:
+            for _loc in _spec.submodule_search_locations:
+                _pack_starters = Path(_loc) / "connectors" / "starters"
+                if _pack_starters.is_dir() and str(_pack_starters) not in __path__:
+                    __path__.append(str(_pack_starters))
+    except Exception:
+        pass
 
-from connectors.starters.calendar import (
+from yarvelle_core.connectors.starters.calendar import (
     CalDavConnector,
     GoogleCalendarConnector,
     sanitize_calendar_event_title,

@@ -30,8 +30,8 @@ from typing import (
 )
 
 if TYPE_CHECKING:
-    from connectors.http import ScopedHttp
-    from connectors.manifest import ConnectorManifest
+    from yarvelle_core.connectors.http import ScopedHttp
+    from yarvelle_core.connectors.manifest import ConnectorManifest
 
 
 @dataclass(frozen=True)

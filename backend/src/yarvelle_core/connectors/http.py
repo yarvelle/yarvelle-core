@@ -17,7 +17,7 @@ import ipaddress
 from typing import Any, Mapping, Optional, Sequence, Set, Union
 import httpx
 
-from connectors.errors import EgressBlockedError
+from yarvelle_core.connectors.errors import EgressBlockedError
 
 METADATA_IPS: Set[str] = {
     "169.254.169.254",  # AWS/GCP/Azure/OpenStack instance metadata

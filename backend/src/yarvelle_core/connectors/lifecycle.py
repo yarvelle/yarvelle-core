@@ -52,7 +52,7 @@ from yarvelle_core.db.models import (
 )
 from yarvelle_core.tools.web_search import DEFAULT_ALLOWED_SEARCH_HOSTS
 import connectors
-from connectors.manifest import ConnectorManifest
+from yarvelle_core.connectors.manifest import ConnectorManifest
 
 UNDER_13_MONTHS: int = 13 * 12  # 156 months
 CONSECUTIVE_FAILURES_DEGRADED_THRESHOLD: int = 3
@@ -160,7 +160,7 @@ def list_connector_manifests() -> List[ConnectorManifest]:
         manifests_by_id[manifest.id] = manifest
 
     try:
-        from connectors.loader import _extra_manifest_dirs
+        from yarvelle_core.connectors.loader import _extra_manifest_dirs
 
         pkg_root = Path(connectors.__file__).resolve().parent
         search_dirs = [pkg_root / "starters" / "manifests", *_extra_manifest_dirs()]
