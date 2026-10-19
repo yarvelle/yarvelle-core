@@ -68,9 +68,9 @@ def is_hit_untrusted(hit: SearchResult) -> bool:
         return True
 
     # 4. Strict provenance fallback: if source is non-empty and not in recognized trusted set
-    if hit_source and hit_source not in TRUSTED_SOURCES and hit_source not in ("search",):
+    if hit_source and hit_source not in TRUSTED_SOURCES and not hit_source.endswith("note") and hit_source not in ("search",):
         return True
-    if meta_source and meta_source not in TRUSTED_SOURCES and meta_source not in ("search",):
+    if meta_source and meta_source not in TRUSTED_SOURCES and not meta_source.endswith("note") and meta_source not in ("search",):
         return True
 
     return False

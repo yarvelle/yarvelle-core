@@ -82,8 +82,27 @@ class ExtractDocumentDossierInput(BaseModel):
     )
 
 
+_HEURISTIC_EXTRACTORS: Dict[str, Any] = {}
+
+
+def register_heuristic_extractor(dossier_type: str, fn: Any) -> None:
+    """Registers a domain-specific heuristic extractor fallback."""
+    _HEURISTIC_EXTRACTORS[dossier_type.lower().strip()] = fn
+
+
 def _heuristic_dossier_extractor(text: str, dossier_type: str) -> BaseDossier:
     """Deterministic extractor fallback supporting offline and test environments."""
+    norm_type = dossier_type.lower().strip()
+    dossier_cls = get_dossier_cls(norm_type)
+
+    if norm_type in _HEURISTIC_EXTRACTORS:
+        return _HEURISTIC_EXTRACTORS[norm_type](text, dossier_cls)
+    if hasattr(dossier_cls, "dossier_type") and getattr(dossier_cls, "dossier_type") in _HEURISTIC_EXTRACTORS:
+        return _HEURISTIC_EXTRACTORS[getattr(dossier_cls, "dossier_type")](text, dossier_cls)
+    if hasattr(dossier_cls, "__name__") and getattr(dossier_cls, "__name__") in _HEURISTIC_EXTRACTORS:
+        return _HEURISTIC_EXTRACTORS[getattr(dossier_cls, "__name__")](text, dossier_cls)
+
+    # Generic Document Dossier fallback
     m_sum = re.search(r"summary\s*:\s*([^\n]+)", text, re.I)
     summary = (
         m_sum.group(1).strip()
@@ -94,10 +113,19 @@ def _heuristic_dossier_extractor(text: str, dossier_type: str) -> BaseDossier:
     )
 
     nums: Dict[str, str] = {}
+    m_stay = re.search(r"(?:length of stay|stay|admitted for)[:\s]+(\d+\s*(?:days?|weeks?|months?))", text, re.I)
+    if m_stay:
+        nums["length_of_stay"] = m_stay.group(1).strip()
+
+    m_iv = re.search(r"iv\s*hydration\s*:\s*([^\n,\.]+)", text, re.I)
+    if m_iv:
+        nums["iv_hydration"] = m_iv.group(1).strip()
+
     for match in re.finditer(r"([A-Za-z0-9_ ]+)\s*:\s*(\$?\d+(?:,\d{3})*(?:\.\d+)?%?)", text):
         k = match.group(1).strip().lower().replace(" ", "_")
         v = match.group(2).strip()
-        nums[k] = v
+        if k not in nums:
+            nums[k] = v
 
     sections: List[str] = []
     m_sec = re.search(r"sections?\s*:\s*([^\n]+)", text, re.I)
@@ -339,4 +367,5 @@ __all__ = [
     "ExtractDocumentDossierInput",
     "ExtractDocumentDossierTool",
     "extract_document_dossier",
+    "register_heuristic_extractor",
 ]

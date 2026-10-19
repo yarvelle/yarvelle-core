@@ -17,6 +17,7 @@ import calendar
 from datetime import datetime, timedelta, timezone
 import json
 import re
+import sys
 from typing import Any, Dict, List, Optional
 import uuid
 from zoneinfo import ZoneInfo
@@ -342,6 +343,7 @@ def _escape_ics_text(val: Optional[str]) -> str:
 def generate_ics_calendar(
     reminders: List[Dict[str, Any]],
     sanitize_phi: bool = True,
+    app_name: Optional[str] = None,
 ) -> str:
     """Generates RFC 5545 .ics calendar content formatted with CRLF.
 
@@ -349,14 +351,18 @@ def generate_ics_calendar(
         reminders: List of reminder state dicts or Reminder ORM instances.
         sanitize_phi: When True (default), masks medical specifics in title and description.
                       When False, exports verbatim title and description.
+        app_name: Application brand name for sanitized summary and PRODID.
 
     Returns:
         Valid RFC 5545 iCalendar stream string.
     """
+    if app_name is None:
+        app_name = "Carefold" if "carefold" in sys.modules else "Yarvelle Core"
+
     lines = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
-        "PRODID:-//Yarvelle Core//Yarvelle Core Autonomy Calendar//EN",
+        f"PRODID:-//{app_name}//{app_name} Autonomy Calendar//EN",
         "CALSCALE:GREGORIAN",
         "METHOD:PUBLISH",
     ]
@@ -368,14 +374,14 @@ def generate_ics_calendar(
             r_id = r.get("id") or str(uuid.uuid4())
             due_iso = r.get("next_due_at") or r.get("snooze_until") or r.get("created_at")
             category = r.get("category", "general")
-            raw_title = r.get("title", "Yarvelle Core Reminder")
+            raw_title = r.get("title", f"{app_name} Reminder")
             raw_desc = r.get("description", "")
             rrule = r.get("rrule")
         else:
             r_id = getattr(r, "id", str(uuid.uuid4()))
             due_iso = getattr(r, "next_due_at", None) or getattr(r, "snooze_until", None)
             category = getattr(r, "category", "general")
-            raw_title = getattr(r, "title", "Yarvelle Core Reminder")
+            raw_title = getattr(r, "title", f"{app_name} Reminder")
             raw_desc = getattr(r, "description", "")
             rrule = getattr(r, "rrule", None)
 
@@ -399,8 +405,8 @@ def generate_ics_calendar(
 
         if sanitize_phi:
             cat_name = (category or "general").title()
-            title = f"Yarvelle Core {cat_name} Reminder"
-            desc = "Sanitized reminder event. Check Yarvelle Core app for private details."
+            title = f"{app_name} {cat_name} Reminder"
+            desc = f"Sanitized reminder event. Check {app_name} app for private details."
         else:
             title = _escape_ics_text(raw_title)
             desc = _escape_ics_text(raw_desc)

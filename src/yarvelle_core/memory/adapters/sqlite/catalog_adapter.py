@@ -15,9 +15,11 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
-from datetime import datetime, timezone
+import os
 from pathlib import Path
+import re
+import sys
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Union
 
 import aiosqlite
@@ -29,9 +31,22 @@ from yarvelle_core.constants.defaults import (
     SQLITE_JOURNAL_MODE,
 )
 from yarvelle_core.memory.ports.catalog_port import CatalogPort
-from yarvelle_core.schemas.manifest import AgentManifest, SkillManifest
+from yarvelle_core.schemas.manifest import AgentDomain, AgentManifest, SkillManifest
 
-CANONICAL_DOMAINS = ["general", "therapy", "wellness", "navigation", "education"]
+_DEFAULT_CANONICAL = ["general", "therapy", "wellness", "navigation", "education"]
+CANONICAL_DOMAINS = list(_DEFAULT_CANONICAL)
+
+
+def get_canonical_domains() -> List[str]:
+    registered = {d.value for d in AgentDomain}
+    primary_domain = "general"
+    for candidate in registered:
+        if candidate not in _DEFAULT_CANONICAL and candidate not in {"finance", "retail", "operations", "care"}:
+            primary_domain = candidate
+            break
+    if primary_domain != "general":
+        return [primary_domain, "therapy", "wellness", "navigation", "education"]
+    return list(_DEFAULT_CANONICAL)
 
 
 async def _run_write_with_retry(
@@ -96,7 +111,7 @@ def build_category_tree_from_rows(
 ) -> Dict[str, Any]:
     """Assembles hierarchical domain -> category -> subcategory tree."""
     tree: Dict[str, Any] = {
-        d: {"count": 0, "categories": {}} for d in CANONICAL_DOMAINS
+        d: {"count": 0, "categories": {}} for d in get_canonical_domains()
     }
     total = 0
 

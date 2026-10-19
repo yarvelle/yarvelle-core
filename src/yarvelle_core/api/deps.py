@@ -86,7 +86,8 @@ async def get_current_user(
             token = auth_header.strip()
 
     if not token:
-        token = request.cookies.get("yarvelle_session")
+        token = request.cookies.get("yarvelle_session") or request.cookies.get("carefold_session")
+
 
     if not token:
         raise HTTPException(

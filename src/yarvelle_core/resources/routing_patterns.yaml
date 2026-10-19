@@ -1,3 +1,12 @@
 # Domain-neutral routing patterns for Yarvelle Core
 routing_rules: []
 domain_keywords: {}
+
+dossier_types:
+  insurance:
+    - '\b(insurance|benefit|deductible|copay|co-pay|coverage)\b'
+  clinical:
+    - '\b(visit|physician|doctor|appointment|checklist|symptoms?)\b'
+  generic:
+    - '\b(summary|overview|document|notes?)\b'
+

@@ -18,8 +18,10 @@ Enforces authenticated agent authorization and sandbox path boundary isolation.
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 import re
+import sys
 from typing import Any, Dict, List, Optional, Set
 
 from yarvelle_core.constants.defaults import ALLOWED_SKILL_DOC_EXTENSIONS
@@ -109,6 +111,7 @@ def synthesize_missing_skill_doc(
             f"Prepare a concise 2-minute summary of your goals to ensure all priorities are addressed.\n"
         )
 
+    app_brand = "Carefold" if "carefold" in sys.modules or os.environ.get("CAREFOLD_HOME") else "Yarvelle Core"
     return (
         f"# {clean_stem}\n\n"
         f"**Skill Domain**: {skill_title}  \n"
@@ -116,7 +119,7 @@ def synthesize_missing_skill_doc(
         f"---\n\n"
         f"{archetype_content}\n"
         f"---\n\n"
-        f"## ⚠️ Yarvelle Core Operational Boundary & Safety Disclosures\n\n"
+        f"## ⚠️ {app_brand} Boundary & Safety Disclosures\n\n"
         f"> **INFORMATIONAL AID**: This reference document is an educational and organizational resource. "
         f"It does **NOT** provide authoritative binding determinations or replace licensed professional judgment.\n"
     )

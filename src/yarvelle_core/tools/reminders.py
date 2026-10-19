@@ -29,7 +29,12 @@ from yarvelle_core.schemas.tool import ToolResult
 
 logger = logging.getLogger("yarvelle_core.tools.reminders")
 
-VALID_REMINDER_CATEGORIES = frozenset({"task", "event", "prep", "general"})
+VALID_REMINDER_CATEGORIES = {"task", "event", "prep", "general", "medication", "appointment"}
+
+
+def register_reminder_category(category: str) -> None:
+    """Registers an additional domain-specific reminder category."""
+    VALID_REMINDER_CATEGORIES.add(category.strip().lower())
 
 
 async def execute_create_reminder(args: Dict[str, Any], ctx: Any = None) -> ToolResult:
@@ -74,10 +79,11 @@ async def execute_create_reminder(args: Dict[str, Any], ctx: Any = None) -> Tool
 
     category = str(args.get("category", "general")).strip().lower() if isinstance(args, dict) else "general"
     if category not in VALID_REMINDER_CATEGORIES:
+        allowed_cats = ", ".join(sorted(VALID_REMINDER_CATEGORIES))
         return ToolResult(
             success=False,
             output=None,
-            error=f"Invalid reminder category '{category}'. Allowed categories: task, event, prep, general.",
+            error=f"Invalid reminder category '{category}'. Allowed categories: {allowed_cats}.",
         )
 
     tz_str = str(args.get("timezone", "UTC")).strip() if isinstance(args, dict) else "UTC"
@@ -260,6 +266,7 @@ async def execute_list_reminders(args: Dict[str, Any], ctx: Any = None) -> ToolR
 
 __all__ = [
     "VALID_REMINDER_CATEGORIES",
+    "register_reminder_category",
     "execute_create_reminder",
     "execute_list_reminders",
 ]

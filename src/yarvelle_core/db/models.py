@@ -1393,6 +1393,8 @@ class Note(ScopedMixin, Base):
     user: Mapped[Optional[User]] = relationship("User", back_populates="notes")
     profile: Mapped[Profile] = relationship("Profile", back_populates="notes")
 
+
+
     @property
     def tags(self) -> List[str]:
         """List of tags deserialized from tags_json."""

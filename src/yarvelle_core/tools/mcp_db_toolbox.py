@@ -567,17 +567,25 @@ class McpDatabaseToolbox:
             # Evaluate acute vitals red flags
             red_flags: List[Dict[str, Any]] = []
             try:
-                
-                rf_result = check_vitals_red_flags(vitals_eval_input)
-                if getattr(rf_result, "triggered", False):
-                    red_flags.append({
-                        "triggered": True,
-                        "category": rf_result.category,
-                        "severity": rf_result.severity,
-                        "directive": rf_result.directive,
-                        "prompt_recheck": rf_result.prompt_recheck,
-                        "details": rf_result.details,
-                    })
+                try:
+                    from carefold_health.safety.vitals import check_vitals_red_flags
+                except ImportError:
+                    try:
+                        from carefold.clinical.vitals import check_vitals_red_flags
+                    except ImportError:
+                        check_vitals_red_flags = None
+
+                if check_vitals_red_flags is not None:
+                    rf_result = check_vitals_red_flags(vitals_eval_input)
+                    if getattr(rf_result, "triggered", False):
+                        red_flags.append({
+                            "triggered": True,
+                            "category": rf_result.category,
+                            "severity": rf_result.severity,
+                            "directive": rf_result.directive,
+                            "prompt_recheck": rf_result.prompt_recheck,
+                            "details": rf_result.details,
+                        })
             except Exception as exc:
                 logger.debug("Red flag check skipped: %s", exc)
 

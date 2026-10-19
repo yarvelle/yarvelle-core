@@ -98,13 +98,19 @@ def create_extraction_node(
         # Only auto-infer dossier_type from prompt patterns if not explicitly provided
         if not dossier_type:
             prompt = get_last_user_prompt_text(state).lower()
+            combined_text = f"{prompt}\n{doc_text[:1000] if doc_text else ''}"
             matched = None
             try:
                 patterns = get_resource_loader().get_routing_patterns().get("dossier_types", {})
-                for dtype, pat_list in patterns.items():
-                    for pat in pat_list:
-                        if re.search(pat, prompt, re.IGNORECASE):
-                            matched = dtype
+                if not patterns:
+                    patterns = {}
+                for target in (prompt, combined_text):
+                    for dtype, pat_list in patterns.items():
+                        for pat in pat_list:
+                            if re.search(pat, target, re.IGNORECASE):
+                                matched = dtype
+                                break
+                        if matched:
                             break
                     if matched:
                         break
@@ -112,6 +118,7 @@ def create_extraction_node(
                 matched = None
 
             dossier_type = matched if matched else DOSSIER_TYPE_GENERIC
+
 
 
         dossiers = list(state.get("document_dossiers", []))

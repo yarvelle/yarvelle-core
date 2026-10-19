@@ -21,8 +21,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 import re
+import sys
 from typing import Any, Dict, List, Optional, Union
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -280,6 +282,7 @@ class SkillGeneratorNode(BaseNode):
 
         context_section = f"\n## Operational Context & User Inquiry\n{user_query}\n\n" if user_query else "\n"
 
+        app_brand = "Carefold" if "carefold" in sys.modules or os.environ.get("CAREFOLD_HOME") else "Yarvelle Core"
         return (
             f"# {clean_stem}\n\n"
             f"**Skill Domain**: {skill_title}  \n"
@@ -287,7 +290,7 @@ class SkillGeneratorNode(BaseNode):
             f"---{context_section}"
             f"{body}\n"
             f"---\n\n"
-            f"## ⚠️ Yarvelle Core Boundary & Safety Disclosures\n\n"
+            f"## ⚠️ {app_brand} Boundary & Safety Disclosures\n\n"
             f"> **INFORMATIONAL AID**: This reference document is an educational and organizational resource. "
             f"It does **NOT** provide authoritative binding determinations or replace professional advice.\n"
             f"> \n"
