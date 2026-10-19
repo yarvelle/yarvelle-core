@@ -38,6 +38,18 @@ function flattenTokens(obj, prefix = '') {
 // 1. Build tokens.css
 const cssLines = [];
 cssLines.push('/*');
+cssLines.push(' * Yarvelle Core — Domain-Neutral AI Agent Runtime & Execution Engine');
+cssLines.push(' * Copyright 2026 Spectrayan (https://spectrayan.com)');
+cssLines.push(' *');
+cssLines.push(' * Licensed under the PolyForm Noncommercial License 1.0.0 and the');
+cssLines.push(' * Yarvelle Core Additional Terms (see LICENSE and ADDITIONAL-TERMS.md).');
+cssLines.push(' * Personal and household local use only. Commercial use, hosted service');
+cssLines.push(' * offering, rebranding, white-labeling, and redistribution of modified');
+cssLines.push(' * forks are prohibited without a written commercial license from Spectrayan.');
+cssLines.push(' *');
+cssLines.push(' * Required Notice: Copyright 2026 Spectrayan (https://spectrayan.com)');
+cssLines.push(' */');
+cssLines.push('/*');
 cssLines.push(' * Yarvelle Core UI Design Tokens');
 cssLines.push(' * Emitted automatically by scripts/build-tokens.mjs — DO NOT EDIT DIRECTLY');
 cssLines.push(' */');
@@ -242,6 +254,17 @@ console.log(`Generated tokens.css at ${tokensCssPath}`);
 
 // 2. Build names.d.ts
 const namesLines = [
+  '// Yarvelle Core — Domain-Neutral AI Agent Runtime & Execution Engine',
+  '// Copyright 2026 Spectrayan (https://spectrayan.com)',
+  '//',
+  '// Licensed under the PolyForm Noncommercial License 1.0.0 and the',
+  '// Yarvelle Core Additional Terms (see LICENSE and ADDITIONAL-TERMS.md).',
+  '// Personal and household local use only. Commercial use, hosted service',
+  '// offering, rebranding, white-labeling, and redistribution of modified',
+  '// forks are prohibited without a written commercial license from Spectrayan.',
+  '//',
+  '// Required Notice: Copyright 2026 Spectrayan (https://spectrayan.com)',
+  '',
   '// Emitted automatically by scripts/build-tokens.mjs — DO NOT EDIT DIRECTLY',
   '',
   'export type UiColorToken =',
@@ -270,7 +293,18 @@ fs.writeFileSync(namesDtsPath, namesLines.join('\n'));
 console.log(`Generated names.d.ts at ${namesDtsPath}`);
 
 // 3. Build tailwind-preset.ts
-const tailwindPresetContent = `// Emitted automatically by scripts/build-tokens.mjs — DO NOT EDIT DIRECTLY
+const tailwindPresetContent = `// Yarvelle Core — Domain-Neutral AI Agent Runtime & Execution Engine
+// Copyright 2026 Spectrayan (https://spectrayan.com)
+//
+// Licensed under the PolyForm Noncommercial License 1.0.0 and the
+// Yarvelle Core Additional Terms (see LICENSE and ADDITIONAL-TERMS.md).
+// Personal and household local use only. Commercial use, hosted service
+// offering, rebranding, white-labeling, and redistribution of modified
+// forks are prohibited without a written commercial license from Spectrayan.
+//
+// Required Notice: Copyright 2026 Spectrayan (https://spectrayan.com)
+
+// Emitted automatically by scripts/build-tokens.mjs — DO NOT EDIT DIRECTLY
 import type { Config } from 'tailwindcss';
 
 export const yarvellePreset: Config = {
