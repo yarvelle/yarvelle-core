@@ -1,0 +1,86 @@
+{
+  "color": {
+    "bg": {
+      "canvas": { "$type": "color", "$value": "#0b1220", "$description": "Dark page background" },
+      "surface": { "$type": "color", "$value": "#111a2b", "$description": "Dark cards and panels" },
+      "surface2": { "$type": "color", "$value": "#16213a", "$description": "Dark inset areas and composer tray" },
+      "surface3": { "$type": "color", "$value": "#1d2a45", "$description": "Dark hover and selected state" },
+      "rail": { "$type": "color", "$value": "#0e1726", "$description": "Dark left navigation rail" },
+      "overlay": { "$type": "color", "$value": "rgba(2, 6, 23, 0.60)", "$description": "Dark backdrop overlay" }
+    },
+    "fg": {
+      "default": { "$type": "color", "$value": "#e2e8f0", "$description": "Primary text on dark surface: 14.12:1" },
+      "muted": { "$type": "color", "$value": "#94a3b8", "$description": "Secondary text on dark: 6.79:1" },
+      "subtle": { "$type": "color", "$value": "#8291a7", "$description": "Metadata text on dark: 5.44:1" },
+      "onPrimary": { "$type": "color", "$value": "#04201a", "$description": "Dark ink on primary mint: 6.75:1" },
+      "link": { "$type": "color", "$value": "#34d399", "$description": "Link color on dark: 9.05:1" }
+    },
+    "border": {
+      "default": { "$type": "color", "$value": "#1f2c44", "$description": "Decorative lines on dark" },
+      "strong": { "$type": "color", "$value": "#5b6e8a", "$description": "Inputs and checkboxes on dark: 3.35:1" }
+    },
+    "action": {
+      "primary": {
+        "bg": { "$type": "color", "$value": "#10b981", "$description": "Primary mint button on dark" },
+        "bgHover": { "$type": "color", "$value": "#34d399", "$description": "Primary button hover on dark" },
+        "fg": { "$type": "color", "$value": "#04201a", "$description": "Dark ink on primary mint" },
+        "softBg": { "$type": "color", "$value": "rgba(16, 185, 129, 0.12)", "$description": "Soft primary background on dark" },
+        "softFg": { "$type": "color", "$value": "#6ee7b7", "$description": "Soft primary text on dark" }
+      }
+    },
+    "status": {
+      "info": {
+        "bg": { "$type": "color", "$value": "rgba(99, 102, 241, 0.14)" },
+        "fg": { "$type": "color", "$value": "#c7d2fe" },
+        "border": { "$type": "color", "$value": "rgba(129, 140, 248, 0.35)" }
+      },
+      "warn": {
+        "bg": { "$type": "color", "$value": "rgba(245, 158, 11, 0.12)" },
+        "fg": { "$type": "color", "$value": "#fcd34d" },
+        "border": { "$type": "color", "$value": "rgba(245, 158, 11, 0.35)" }
+      },
+      "danger": {
+        "bg": { "$type": "color", "$value": "rgba(239, 68, 68, 0.12)" },
+        "fg": { "$type": "color", "$value": "#fca5a5" },
+        "border": { "$type": "color", "$value": "rgba(239, 68, 68, 0.35)" }
+      },
+      "success": {
+        "bg": { "$type": "color", "$value": "rgba(16, 185, 129, 0.12)" },
+        "fg": { "$type": "color", "$value": "#6ee7b7" },
+        "border": { "$type": "color", "$value": "rgba(16, 185, 129, 0.35)" }
+      }
+    },
+    "emergency": {
+      "bg": { "$type": "color", "$value": "#b91c1c" },
+      "fg": { "$type": "color", "$value": "#ffffff" }
+    },
+    "focus": {
+      "ring": { "$type": "color", "$value": "#34d399", "$description": "Focus ring on dark: 9.74:1" },
+      "offset": { "$type": "color", "$value": "#0b1220" }
+    },
+    "member": {
+      "1": { "bg": { "$type": "color", "$value": "#064e3b" }, "fg": { "$type": "color", "$value": "#a7f3d0" } },
+      "2": { "bg": { "$type": "color", "$value": "#3b2a6e" }, "fg": { "$type": "color", "$value": "#ddd6fe" } },
+      "3": { "bg": { "$type": "color", "$value": "#5a3410" }, "fg": { "$type": "color", "$value": "#fde68a" } },
+      "4": { "bg": { "$type": "color", "$value": "#0c3a55" }, "fg": { "$type": "color", "$value": "#bae6fd" } },
+      "5": { "bg": { "$type": "color", "$value": "#5b1426" }, "fg": { "$type": "color", "$value": "#fecdd3" } }
+    },
+    "scope": {
+      "health": { "bg": { "$type": "color", "$value": "rgba(16, 185, 129, 0.15)" }, "fg": { "$type": "color", "$value": "#6ee7b7" } },
+      "finance": { "bg": { "$type": "color", "$value": "rgba(6, 182, 212, 0.15)" }, "fg": { "$type": "color", "$value": "#67e8f9" } },
+      "education": { "bg": { "$type": "color", "$value": "rgba(217, 70, 239, 0.15)" }, "fg": { "$type": "color", "$value": "#f0abfc" } },
+      "household": { "bg": { "$type": "color", "$value": "rgba(245, 158, 11, 0.15)" }, "fg": { "$type": "color", "$value": "#fde68a" } }
+    },
+    "risk": {
+      "low": { "bg": { "$type": "color", "$value": "rgba(16, 185, 129, 0.12)" }, "fg": { "$type": "color", "$value": "#6ee7b7" }, "border": { "$type": "color", "$value": "rgba(16, 185, 129, 0.35)" } },
+      "medium": { "bg": { "$type": "color", "$value": "rgba(245, 158, 11, 0.12)" }, "fg": { "$type": "color", "$value": "#fcd34d" }, "border": { "$type": "color", "$value": "rgba(245, 158, 11, 0.35)" } },
+      "high": { "bg": { "$type": "color", "$value": "rgba(249, 115, 22, 0.12)" }, "fg": { "$type": "color", "$value": "#fdba74" }, "border": { "$type": "color", "$value": "rgba(249, 115, 22, 0.35)" } },
+      "critical": { "bg": { "$type": "color", "$value": "rgba(239, 68, 68, 0.12)" }, "fg": { "$type": "color", "$value": "#fca5a5" }, "border": { "$type": "color", "$value": "rgba(239, 68, 68, 0.35)" } }
+    }
+  },
+  "shadow": {
+    "1": { "$type": "shadow", "$value": "0 1px 2px rgb(0 0 0 / 0.30)" },
+    "2": { "$type": "shadow", "$value": "0 8px 20px -4px rgb(0 0 0 / 0.50)" },
+    "3": { "$type": "shadow", "$value": "0 24px 48px -12px rgb(0 0 0 / 0.60)" }
+  }
+}

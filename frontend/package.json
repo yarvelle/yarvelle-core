@@ -1,0 +1,67 @@
+{
+  "name": "@yarvelle/ui",
+  "version": "0.1.0",
+  "description": "Domain-neutral UI component library and design system for Yarvelle and Carefold",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./tokens": {
+      "types": "./dist/tokens/index.d.ts",
+      "import": "./dist/tokens/index.js"
+    },
+    "./tailwind-preset": {
+      "types": "./dist/tokens/tailwind-preset.d.ts",
+      "import": "./dist/tokens/tailwind-preset.js"
+    },
+    "./slots": {
+      "types": "./dist/slots/index.d.ts",
+      "import": "./dist/slots/index.js"
+    },
+    "./lib/*": {
+      "types": "./dist/lib/*.d.ts",
+      "import": "./dist/lib/*.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "import": "./dist/testing/index.js"
+    },
+    "./styles.css": "./dist/styles.css"
+  },
+  "bin": {
+    "yarvelle-ui-codegen": "./bin/yarvelle-ui-codegen.js"
+  },
+  "scripts": {
+    "build:tokens": "node scripts/build-tokens.mjs",
+    "build": "node scripts/build-tokens.mjs && tsup && cp src/tokens/tokens.css dist/styles.css",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "react": ">=18.2.0 || >=19.0.0",
+    "react-dom": ">=18.2.0 || >=19.0.0"
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.475.0",
+    "tailwind-merge": "^3.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "happy-dom": "^20.9.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "tailwindcss": "^3.4.17",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.3",
+    "vitest": "^4.1.11"
+  }
+}
