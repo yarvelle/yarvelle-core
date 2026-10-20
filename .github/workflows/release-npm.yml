@@ -37,6 +37,11 @@ jobs:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
       - name: Build and Publish @yarvelle/ui
         working-directory: frontend
         env:
@@ -53,8 +58,8 @@ jobs:
             VERSION="${VERSION#v}"
             npm version "$VERSION" --no-git-tag-version --allow-same-version
           fi
-          npm install
-          npm run build
+          pnpm install --no-frozen-lockfile
+          pnpm run build
           EXTRA_FLAGS=""
           if [ "${{ github.event.inputs.dryRun }}" = "true" ]; then
             EXTRA_FLAGS="--dry-run"
