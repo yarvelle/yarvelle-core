@@ -557,6 +557,18 @@ async def execute_tool_call(
     t0 = time.time()
 
     # 1. Fail-closed ToolContext Validation
+    global ConnectorToolContext, ConnectorToolSpec
+    if ConnectorToolContext == ():
+        try:
+            from yarvelle_core.connectors.base import (
+                ToolContext as _CTC,
+                ToolSpec as _CTS,
+            )
+            ConnectorToolContext = _CTC
+            ConnectorToolSpec = _CTS
+        except ImportError:
+            pass
+
     if not isinstance(ctx, (ToolContext, ConnectorToolContext)):
         return ToolResult(
             success=False,
