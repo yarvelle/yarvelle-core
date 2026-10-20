@@ -62,3 +62,7 @@ attachments/
 node_modules/
 frontend/dist/
 .import_linter_cache/
+
+# Local planning notes
+/yarvelle-core-plan/
+
