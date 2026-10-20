@@ -1,0 +1,70 @@
+name: Release Python Package to PyPI
+
+on:
+  push:
+    tags:
+      - 'v*'
+      - 'core-v*'
+  workflow_dispatch:
+    inputs:
+      dryRun:
+        description: 'Dry run — build and check only (do not publish)'
+        required: false
+        default: false
+        type: boolean
+      version:
+        description: 'Override version (e.g. 0.1.0). Leave empty to use tag or pyproject.toml'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build-and-publish:
+    name: Build and publish yarvelle-core to PyPI
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/yarvelle-core
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine hatchling
+
+      - name: Build sdist and wheel
+        run: |
+          cd backend
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          elif [[ "$GITHUB_REF_NAME" =~ ^(core-)?v?[0-9] ]]; then
+            VERSION="${GITHUB_REF_NAME#core-}"
+            VERSION="${VERSION#v}"
+          else
+            VERSION=""
+          fi
+          if [ -n "$VERSION" ]; then
+            PEP440_VERSION=$(echo "$VERSION" | sed -E 's/-beta\.?([0-9]*)/b\1/' | sed -E 's/-alpha\.?([0-9]*)/a\1/' | sed -E 's/-rc\.?([0-9]*)/rc\1/')
+            sed -i -E "s/^version = .*/version = \"$PEP440_VERSION\"/" pyproject.toml
+          fi
+          python -m build
+          twine check dist/*
+
+      - name: Publish to PyPI
+        if: ${{ github.event.inputs.dryRun != true }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: backend/dist/
+          skip-existing: true

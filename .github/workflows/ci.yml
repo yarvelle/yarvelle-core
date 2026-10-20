@@ -30,12 +30,12 @@ jobs:
       - name: Install backend dependencies
         run: |
           cd backend
-          uv sync
+          uv sync --extra dev --prerelease=allow
 
       - name: Run Import Linter
         run: |
           cd backend
-          PYTHONPATH=src uv run lint-imports
+          PYTHONPATH=src uv run --extra dev --prerelease=allow lint-imports
 
   backend-test:
     name: Backend Test Suite
@@ -57,11 +57,11 @@ jobs:
       - name: Install dependencies
         run: |
           cd backend
-          uv sync
+          uv sync --extra dev --prerelease=allow
 
       - name: Run Pytest
         run: |
-          PYTHONPATH=backend/src uv run --project backend pytest backend/tests/
+          PYTHONPATH=backend/src uv run --project backend --extra dev --prerelease=allow pytest backend/tests/
 
   packaging-test:
     name: Wheel Packaging Test
@@ -80,8 +80,8 @@ jobs:
       - name: Run Wheel Contents Test
         run: |
           cd backend
-          uv sync
-          PYTHONPATH=src uv run pytest tests/packaging/test_wheel_contents.py
+          uv sync --extra dev --prerelease=allow
+          PYTHONPATH=src uv run --extra dev --prerelease=allow pytest tests/packaging/test_wheel_contents.py
 
   frontend:
     name: Frontend Quality & Tests
@@ -92,17 +92,17 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v3
+        uses: pnpm/action-setup@v4
         with:
-          version: 12
+          version: 10
 
       - name: Install dependencies
         run: |
           cd frontend
-          pnpm install --frozen-lockfile
+          pnpm install
 
       - name: Typecheck
         run: |

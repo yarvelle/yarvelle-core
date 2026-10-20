@@ -1,0 +1,67 @@
+name: Release NPM Packages
+
+on:
+  push:
+    tags:
+      - 'v*'
+      - 'ui-v*'
+  workflow_dispatch:
+    inputs:
+      dryRun:
+        description: 'Dry run — build and package only (do not publish to registry)'
+        required: false
+        default: false
+        type: boolean
+      version:
+        description: 'Override version (e.g. 0.1.0). Leave empty to use tag or package.json'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish-npm:
+    name: Build & Publish @yarvelle/ui to NPM
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Build and Publish @yarvelle/ui
+        working-directory: frontend
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ "${{ github.event.inputs.dryRun }}" != "true" ] && [ -z "${NODE_AUTH_TOKEN}" ]; then
+            echo "Error: NPM_TOKEN secret is not configured." >&2
+            exit 1
+          fi
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            npm version "${{ github.event.inputs.version }}" --no-git-tag-version --allow-same-version
+          elif [[ "$GITHUB_REF_NAME" =~ ^(ui-)?v?[0-9] ]]; then
+            VERSION="${GITHUB_REF_NAME#ui-}"
+            VERSION="${VERSION#v}"
+            npm version "$VERSION" --no-git-tag-version --allow-same-version
+          fi
+          npm install
+          npm run build
+          EXTRA_FLAGS=""
+          if [ "${{ github.event.inputs.dryRun }}" = "true" ]; then
+            EXTRA_FLAGS="--dry-run"
+          fi
+          CURRENT_VER=$(node -p "require('./package.json').version")
+          if [ "${{ github.event.inputs.dryRun }}" != "true" ] && npm view "@yarvelle/ui@$CURRENT_VER" version >/dev/null 2>&1; then
+            echo "Version $CURRENT_VER of @yarvelle/ui is already published on npm. Skipping publish."
+          else
+            npm publish --access public $EXTRA_FLAGS
+          fi
