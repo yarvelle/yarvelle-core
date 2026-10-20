@@ -68,5 +68,11 @@ jobs:
           if [ "${{ github.event.inputs.dryRun }}" != "true" ] && npm view "@yarvelle/ui@$CURRENT_VER" version >/dev/null 2>&1; then
             echo "Version $CURRENT_VER of @yarvelle/ui is already published on npm. Skipping publish."
           else
-            npm publish --access public $EXTRA_FLAGS
+            npm publish --access public $EXTRA_FLAGS 2>&1 | tee /tmp/npm-publish.log || {
+              if grep -qE "E409|EPUBLISHCONFLICT|previously published|previously staged" /tmp/npm-publish.log; then
+                echo "Version $CURRENT_VER of @yarvelle/ui is already staged/published on npm. Skipping."
+              else
+                exit 1
+              fi
+            }
           fi
