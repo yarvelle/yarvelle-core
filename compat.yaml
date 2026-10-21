@@ -2,12 +2,20 @@
 # Defines supported pairings of core, @yarvelle/ui, and pack_api versions.
 
 matrix:
+  - core: "0.1.1"
+    ui: "0.1.1"
+    pack_api: 1
+    python: ">=3.12"
+    node: ">=20.0.0"
+    status: "active"
+    notes: "Security hardening, scope guards, untrusted tool fencing, and atomic profile lifecycle release"
+
   - core: "0.1.0"
     ui: "0.1.0"
     pack_api: 1
     python: ">=3.12"
     node: ">=20.0.0"
-    status: "active"
+    status: "supported"
     notes: "Initial domain-neutral core runtime and UI tokens release"
 
   - core: "0.3.0"

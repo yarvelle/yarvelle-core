@@ -88,7 +88,7 @@ SQLITE_JOURNAL_MODE: str = "WAL"
 
 DEFAULT_HOST: str = "127.0.0.1"
 DEFAULT_PORT: int = 8010
-DEFAULT_VERSION: str = "0.1.0"
+DEFAULT_VERSION: str = "0.1.1"
 APP_TITLE: str = "Yarvelle Core Local-First AI Runtime"
 APP_DESCRIPTION: str = (
     "Local-first agentic runtime, tools sandbox, safety refusal, and audit logging for health specialists."

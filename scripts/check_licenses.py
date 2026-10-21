@@ -45,7 +45,7 @@ def main() -> int:
     root = Path(__file__).resolve().parent.parent
     violations = []
     for p in root.rglob("*.py"):
-        if any(skip in p.parts for skip in [".venv", "venv", "__pycache__", ".git", "build", "dist", ".tox", ".nox"]):
+        if any(skip in p.parts for skip in [".venv", "venv", "__pycache__", ".git", "build", "dist", ".tox", ".nox", "yarvelle-core-plan"]):
             continue
         if not check_file(p):
             violations.append(str(p.relative_to(root)))

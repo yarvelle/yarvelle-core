@@ -73,6 +73,7 @@ def test_wheel_contains_all_content_and_entry_points(tmp_path: Path):
         assert "yarvelle-core = yarvelle_core.cli:main" in ep_content
 
     # 1. Test direct import and invocation of main entrypoint
+    from yarvelle_core import __version__
     from yarvelle_core.cli import main
     assert main(["--version"]) == 0
 
@@ -98,4 +99,4 @@ def test_wheel_contains_all_content_and_entry_points(tmp_path: Path):
     )
     assert cli_proc.returncode == 0, f"yarvelle-core script execution failed:\n{cli_proc.stderr}"
     output = cli_proc.stdout + cli_proc.stderr
-    assert "yarvelle-core 0.1.0" in output
+    assert f"yarvelle-core {__version__}" in output

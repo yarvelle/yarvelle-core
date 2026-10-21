@@ -1,6 +1,6 @@
 {
   "name": "@yarvelle/ui",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Domain-neutral UI component library and design system for Yarvelle and Carefold",
   "license": "PolyForm-Noncommercial-1.0.0",
   "type": "module",
