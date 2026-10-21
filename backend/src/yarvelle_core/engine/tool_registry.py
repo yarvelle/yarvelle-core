@@ -43,6 +43,7 @@ from typing import (
 
 logger = logging.getLogger("yarvelle_core.engine.tool_registry")
 
+from yarvelle_core.schemas.age_band import CHILD_UNDER_13, canonical_age_band
 from yarvelle_core.scope.context import DEFAULT_SCOPE
 
 RiskTier = Literal["read", "write_local", "write_external", "irreversible"]
@@ -241,7 +242,7 @@ class ToolSpecRegistry:
         3. Capability restrictions:
            - If a tool specifies 'required_capabilities' in metadata, the profile must possess them.
         """
-        effective_age_band = (age_band or "adult").strip().lower()
+        effective_age_band = canonical_age_band(age_band)
         effective_consents = consents or {}
         has_guardian_consent = bool(effective_consents.get("guardian_consent") is True)
         enabled_caps = set(capabilities or ())
@@ -256,7 +257,7 @@ class ToolSpecRegistry:
                     continue
 
             # 2. Child under 13 Gate
-            if effective_age_band == "child_under_13":
+            if effective_age_band == CHILD_UNDER_13:
                 # External writes strictly forbidden for children under 13
                 if spec.risk_tier == "write_external":
                     continue

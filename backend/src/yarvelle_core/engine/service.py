@@ -1074,6 +1074,7 @@ class AgentExecutionService:
         """Resumes an interrupted LangGraph thread with human steward approval or rejection decision."""
         from langgraph.types import Command
         from yarvelle_core.db.session import get_session_factory
+        from yarvelle_core.audit.redaction import contains_redaction_placeholder
         from yarvelle_core.db.models import Approval
         from sqlalchemy import select
 
@@ -1118,7 +1119,12 @@ class AgentExecutionService:
                         )
                         return
 
-                    eff_args = edited_args or approval_record.args_dict
+                    # The stored copy is redacted for display; never replay it as
+                    # execution arguments when it carries redaction placeholders.
+                    stored_args = approval_record.args_dict
+                    eff_args = edited_args or (
+                        None if contains_redaction_placeholder(stored_args) else stored_args
+                    )
                     rec_profile_id = approval_record.profile_id
                     rec_payload_hash = approval_record.payload_hash
                     rec_status = approval_record.status

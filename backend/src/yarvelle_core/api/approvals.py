@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from yarvelle_core.api.deps import get_current_user, get_db
 from yarvelle_core.api.profiles import get_user_profile_access
+from yarvelle_core.audit.redaction import contains_redaction_placeholder, redact_tool_args
 from yarvelle_core.auth.ports import UserProfile
 from yarvelle_core.db.models import Approval, Profile
 from yarvelle_core.engine.tool_exec import (
@@ -317,8 +318,13 @@ async def decide_approval(
 
     # 6. If approved with edited arguments, recompute payload hash and canonical JSON
     if normalized_decision == "approved" and payload.edited_args is not None:
+        if contains_redaction_placeholder(payload.edited_args):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Edited arguments still contain redacted placeholders; supply the full values.",
+            )
         approval.payload_hash = compute_payload_hash(payload.edited_args)
-        approval.args_redacted = canonical_json(payload.edited_args)
+        approval.args_redacted = canonical_json(redact_tool_args(payload.edited_args))
 
     await db.commit()
     await db.refresh(approval)
@@ -344,8 +350,16 @@ async def consume_approval_atomic(
     db: AsyncSession,
     approval_id: str,
     current_args: Dict[str, Any],
+    *,
+    profile_id: Optional[str] = None,
+    tool_name: Optional[str] = None,
 ) -> str:
     """Atomically consumes an approved tool approval token during workflow resume.
+
+    When ``profile_id`` / ``tool_name`` are supplied (the execution choke point
+    always supplies both), the approval must have been issued for exactly that
+    profile and tool; an approval for one profile or tool can never authorize
+    another, even with an identical payload.
 
     Enforces the single-use token lifecycle invariant:
         UPDATE approvals
@@ -374,6 +388,11 @@ async def consume_approval_atomic(
         raise ValueError(
             f"Approval is in status '{approval.status}', cannot consume (fail-closed)."
         )
+
+    if profile_id is not None and approval.profile_id != profile_id:
+        raise ValueError("Approval was issued for a different profile (fail-closed).")
+    if tool_name is not None and approval.tool_name != tool_name:
+        raise ValueError("Approval was issued for a different tool (fail-closed).")
 
     now = datetime.now(timezone.utc)
     if ensure_utc(approval.expires_at) <= now:

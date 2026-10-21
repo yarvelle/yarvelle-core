@@ -50,6 +50,8 @@ from typing import (
 )
 from urllib.parse import urlparse
 
+from yarvelle_core.audit.redaction import redact_tool_args
+from yarvelle_core.schemas.age_band import CHILD_UNDER_13, canonical_age_band
 from yarvelle_core.engine.tool_registry import (
     DataFlows,
     RiskTier,
@@ -368,6 +370,9 @@ def verify_egress_firewall(
 # Section 6: Policy Decision Gate Matrix (AU-17)
 # ============================================================================
 
+KNOWN_RISK_TIERS = frozenset({"read", "write_local", "write_external", "irreversible"})
+
+
 def evaluate_policy_gate(
     ctx: ToolContext,
     spec: ToolSpec,
@@ -388,7 +393,14 @@ def evaluate_policy_gate(
     6. Autonomy A1: write_local allowed; write_external and irreversible require approval.
     7. Autonomy A2: write_local allowed; write_external allowed if consented, else requires approval.
     """
-    tier: RiskTier = getattr(spec, "risk_tier", "read")
+    raw_tier = getattr(spec, "risk_tier", None)
+    tier = str(raw_tier).strip().lower() if isinstance(raw_tier, str) else None
+
+    # 0. Fail closed on a missing or unknown tier: never infer "read".
+    if tier not in KNOWN_RISK_TIERS:
+        return PolicyDecision.require_approval(
+            f"Unknown or missing risk tier {raw_tier!r}; approval required (fail-closed)"
+        )
 
     # 1. Read Operations: Pure observation with zero state mutation
     if tier == "read":
@@ -416,10 +428,10 @@ def evaluate_policy_gate(
         if age_band is not None
         else (getattr(ctx, "age_band", None) or (getattr(ctx, "extra", {}) or {}).get("age_band") or "adult")
     )
-    effective_age_band = (eff_age_band or "adult").strip().lower()
+    effective_age_band = canonical_age_band(eff_age_band)
 
-    # 2. Child Under 13 Protection (AGENTS.md & AU-17)
-    if effective_age_band == "child_under_13":
+    # 2. Child Under 13 Protection (AGENTS.md & AU-17); legacy aliases accepted
+    if effective_age_band == CHILD_UNDER_13:
         if tier == "write_external":
             return PolicyDecision.block("Child under 13 external write blocked by policy")
         if tier == "write_local":
@@ -454,7 +466,7 @@ def evaluate_policy_gate(
                 return PolicyDecision.allow("A2 autonomy with recorded external write consent")
             return PolicyDecision.require_approval("A2 autonomy requires consent or approval for external writes")
 
-    return PolicyDecision.allow("Default allow")
+    return PolicyDecision.require_approval("No policy rule matched; approval required (fail-closed)")
 
 
 # ============================================================================
@@ -509,7 +521,7 @@ class SqlApprovalStore:
                 run_id=run_id,
                 thread_id=thread_id or run_id,
                 tool_name=tool_name,
-                args_redacted=json.dumps(args),
+                args_redacted=json.dumps(redact_tool_args(args)),
                 payload_hash=compute_payload_hash(args),
                 destination_hosts=json.dumps(list(destination_hosts or [])),
                 risk_tier=risk_tier,
@@ -521,13 +533,66 @@ class SqlApprovalStore:
             await session.commit()
             return record
 
-    async def consume_atomic(self, approval_id: str, current_args: Dict[str, Any]) -> str:
+    async def consume_atomic(
+        self,
+        approval_id: str,
+        current_args: Dict[str, Any],
+        *,
+        profile_id: Optional[str] = None,
+        tool_name: Optional[str] = None,
+    ) -> str:
         from yarvelle_core.api.approvals import consume_approval_atomic
 
         factory = self._get_session_factory()
         async with factory() as session:
-            return await consume_approval_atomic(session, approval_id, current_args)
+            return await consume_approval_atomic(
+                session, approval_id, current_args, profile_id=profile_id, tool_name=tool_name
+            )
 
+
+
+def _accepts_binding_kwargs(fn: Callable[..., Any]) -> bool:
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return True
+    return "profile_id" in params and "tool_name" in params
+
+
+async def _consume_bound_approval(
+    store: Any,
+    consume_fn: Callable[..., Any],
+    approval_id: str,
+    args: Dict[str, Any],
+    profile_id: str,
+    tool_name: str,
+) -> None:
+    """Consumes an approval only if it was issued for this profile and tool.
+
+    Stores that accept ``profile_id``/``tool_name`` enforce the binding
+    atomically. For legacy stores the record is fetched and checked first; a
+    store offering neither capability is refused (fail-closed).
+    """
+    if _accepts_binding_kwargs(consume_fn):
+        result = consume_fn(approval_id, args, profile_id=profile_id, tool_name=tool_name)
+    else:
+        get_fn = getattr(store, "get", None)
+        if not callable(get_fn):
+            raise PermissionError("Approval store cannot verify profile/tool binding (fail-closed).")
+        record = get_fn(approval_id)
+        if inspect.isawaitable(record):
+            record = await record
+        if record is None:
+            raise ValueError(f"Approval request '{approval_id}' not found.")
+        rec_profile = record.get("profile_id") if isinstance(record, Mapping) else getattr(record, "profile_id", None)
+        rec_tool = record.get("tool_name") if isinstance(record, Mapping) else getattr(record, "tool_name", None)
+        if rec_profile != profile_id or rec_tool != tool_name:
+            raise ValueError("Approval was issued for a different profile or tool (fail-closed).")
+        result = consume_fn(approval_id, args)
+    if inspect.isawaitable(result):
+        await result
 
 # ============================================================================
 # Section 7: Universal Execution Choke Point (execute_tool_call)
@@ -677,10 +742,7 @@ async def execute_tool_call(
                 if not callable(consume_fn):
                     raise TypeError(f"Approval store {store} does not implement 'consume_atomic'.")
 
-                if inspect.iscoroutinefunction(consume_fn):
-                    await consume_fn(approval_id, args)
-                else:
-                    consume_fn(approval_id, args)
+                await _consume_bound_approval(store, consume_fn, approval_id, args, ctx.profile_id, spec.name)
             except Exception as exc:
                 dur_ms = round((time.time() - t0) * 1000, 2)
                 err_msg = f"ApprovalResumeFailed: {exc}"
@@ -704,7 +766,7 @@ async def execute_tool_call(
                             run_id=ctx.run_id or "run-1",
                             tool_name=spec.name,
                             args=args,
-                            risk_tier=getattr(spec, "risk_tier", "read"),
+                            risk_tier=getattr(spec, "risk_tier", None) or "unknown",
                             destination_hosts=dest_hosts,
                         )
                     else:
@@ -714,7 +776,7 @@ async def execute_tool_call(
                             run_id=ctx.run_id or "run-1",
                             tool_name=spec.name,
                             args=args,
-                            risk_tier=getattr(spec, "risk_tier", "read"),
+                            risk_tier=getattr(spec, "risk_tier", None) or "unknown",
                             destination_hosts=dest_hosts,
                         )
             dur_ms = round((time.time() - t0) * 1000, 2)

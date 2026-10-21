@@ -25,7 +25,13 @@ from yarvelle_core.schemas.routing import RoutingHints
 
 @dataclass
 class RouterContribution:
-    """Metadata describing an API router contribution from core or a domain pack."""
+    """API router contributed by core or a domain pack.
+
+    Pack contributions (any pack_id other than "core") must declare ``scope``;
+    core mounts them behind ``require_pack_scope(scope, level)`` so every route
+    is authenticated and scope-checked (02 §3, §4.2). ``prefix`` is relative
+    to the API root (e.g. "/finance/accounts", never "/api/v1/...").
+    """
 
     router: Any
     prefix: str = ""
@@ -35,6 +41,7 @@ class RouterContribution:
     pack_id: Optional[str] = None
     scope: Optional[str] = None
     level: Optional[str] = None
+    require_profile: bool = True
 
 
 SLUG_REGEX = re.compile(r"^[a-z0-9_-]+$")
