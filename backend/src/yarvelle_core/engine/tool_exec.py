@@ -50,6 +50,7 @@ from typing import (
 )
 from urllib.parse import urlparse
 
+from yarvelle_core.audit.redaction import redact_tool_args
 from yarvelle_core.schemas.age_band import CHILD_UNDER_13, canonical_age_band
 from yarvelle_core.engine.tool_registry import (
     DataFlows,
@@ -520,7 +521,7 @@ class SqlApprovalStore:
                 run_id=run_id,
                 thread_id=thread_id or run_id,
                 tool_name=tool_name,
-                args_redacted=json.dumps(args),
+                args_redacted=json.dumps(redact_tool_args(args)),
                 payload_hash=compute_payload_hash(args),
                 destination_hosts=json.dumps(list(destination_hosts or [])),
                 risk_tier=risk_tier,

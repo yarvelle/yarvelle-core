@@ -36,6 +36,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.types import interrupt
 
 from yarvelle_core.engine.untrusted_content import wrap_tool_output
+from yarvelle_core.audit.redaction import redact_tool_args
 from yarvelle_core.config import settings
 from yarvelle_core.constants.api import SSE_EVENT_APPROVAL_REQUIRED
 from yarvelle_core.db.session import get_session_factory
@@ -345,7 +346,7 @@ class ToolNode(BaseNode):
                                     run_id=ctx.run_id,
                                     thread_id=thread_id,
                                     tool_name=spec.name,
-                                    args_redacted=json.dumps(args),
+                                    args_redacted=json.dumps(redact_tool_args(args)),
                                     payload_hash=payload_hash,
                                     destination_hosts=json.dumps(dest_hosts),
                                     risk_tier=spec.risk_tier,
@@ -373,7 +374,7 @@ class ToolNode(BaseNode):
                         "type": SSE_EVENT_APPROVAL_REQUIRED,
                         "approval_id": approval_id,
                         "tool_name": spec.name,
-                        "args_redacted": args,
+                        "args_redacted": redact_tool_args(args),
                         "payload_hash": payload_hash,
                         "risk_tier": spec.risk_tier,
                         "destination_hosts": dest_hosts,
