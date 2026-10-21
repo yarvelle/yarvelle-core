@@ -35,6 +35,7 @@ from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.types import interrupt
 
+from yarvelle_core.engine.untrusted_content import wrap_tool_output
 from yarvelle_core.config import settings
 from yarvelle_core.constants.api import SSE_EVENT_APPROVAL_REQUIRED
 from yarvelle_core.db.session import get_session_factory
@@ -426,7 +427,7 @@ class ToolNode(BaseNode):
                 })
                 tool_messages.append(
                     ToolMessage(
-                        content=json.dumps(output_val) if not isinstance(output_val, str) else output_val,
+                        content=wrap_tool_output(name, output_val, trust=getattr(spec, "trust", None)),
                         tool_call_id=call_id,
                         status=status,
                         name=name,
@@ -451,7 +452,7 @@ class ToolNode(BaseNode):
                 output_val = res.output if res.success else {"error": res.error}
                 tool_messages.append(
                     ToolMessage(
-                        content=json.dumps(output_val) if not isinstance(output_val, str) else output_val,
+                        content=wrap_tool_output(name, output_val, trust=getattr(spec, "trust", None)),
                         tool_call_id=call_id,
                         status="success" if res.success else "error",
                         name=name,
