@@ -532,13 +532,66 @@ class SqlApprovalStore:
             await session.commit()
             return record
 
-    async def consume_atomic(self, approval_id: str, current_args: Dict[str, Any]) -> str:
+    async def consume_atomic(
+        self,
+        approval_id: str,
+        current_args: Dict[str, Any],
+        *,
+        profile_id: Optional[str] = None,
+        tool_name: Optional[str] = None,
+    ) -> str:
         from yarvelle_core.api.approvals import consume_approval_atomic
 
         factory = self._get_session_factory()
         async with factory() as session:
-            return await consume_approval_atomic(session, approval_id, current_args)
+            return await consume_approval_atomic(
+                session, approval_id, current_args, profile_id=profile_id, tool_name=tool_name
+            )
 
+
+
+def _accepts_binding_kwargs(fn: Callable[..., Any]) -> bool:
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return True
+    return "profile_id" in params and "tool_name" in params
+
+
+async def _consume_bound_approval(
+    store: Any,
+    consume_fn: Callable[..., Any],
+    approval_id: str,
+    args: Dict[str, Any],
+    profile_id: str,
+    tool_name: str,
+) -> None:
+    """Consumes an approval only if it was issued for this profile and tool.
+
+    Stores that accept ``profile_id``/``tool_name`` enforce the binding
+    atomically. For legacy stores the record is fetched and checked first; a
+    store offering neither capability is refused (fail-closed).
+    """
+    if _accepts_binding_kwargs(consume_fn):
+        result = consume_fn(approval_id, args, profile_id=profile_id, tool_name=tool_name)
+    else:
+        get_fn = getattr(store, "get", None)
+        if not callable(get_fn):
+            raise PermissionError("Approval store cannot verify profile/tool binding (fail-closed).")
+        record = get_fn(approval_id)
+        if inspect.isawaitable(record):
+            record = await record
+        if record is None:
+            raise ValueError(f"Approval request '{approval_id}' not found.")
+        rec_profile = record.get("profile_id") if isinstance(record, Mapping) else getattr(record, "profile_id", None)
+        rec_tool = record.get("tool_name") if isinstance(record, Mapping) else getattr(record, "tool_name", None)
+        if rec_profile != profile_id or rec_tool != tool_name:
+            raise ValueError("Approval was issued for a different profile or tool (fail-closed).")
+        result = consume_fn(approval_id, args)
+    if inspect.isawaitable(result):
+        await result
 
 # ============================================================================
 # Section 7: Universal Execution Choke Point (execute_tool_call)
@@ -688,10 +741,7 @@ async def execute_tool_call(
                 if not callable(consume_fn):
                     raise TypeError(f"Approval store {store} does not implement 'consume_atomic'.")
 
-                if inspect.iscoroutinefunction(consume_fn):
-                    await consume_fn(approval_id, args)
-                else:
-                    consume_fn(approval_id, args)
+                await _consume_bound_approval(store, consume_fn, approval_id, args, ctx.profile_id, spec.name)
             except Exception as exc:
                 dur_ms = round((time.time() - t0) * 1000, 2)
                 err_msg = f"ApprovalResumeFailed: {exc}"
