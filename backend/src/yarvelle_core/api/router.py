@@ -13,9 +13,10 @@
 
 from dataclasses import dataclass
 from typing import Any, List, Optional, Sequence, Union
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from yarvelle_core.api.admin import router as admin_router
+from yarvelle_core.api.scope_guard import require_pack_scope
 from yarvelle_core.api.approvals import router as approvals_router
 from yarvelle_core.api.attachments import router as attachments_router
 from yarvelle_core.api.audit import router as audit_router
@@ -76,10 +77,49 @@ def mount_router_contributions(
             contrib.router,
             prefix=contrib.prefix,
             tags=contrib.tags or [],
-            dependencies=contrib.dependencies,
+            dependencies=build_contribution_dependencies(contrib),
             include_in_schema=contrib.include_in_schema,
         )
     return app_router
+
+
+class PackRouterContractError(ValueError):
+    """Raised when a router contribution would be mounted without its guard."""
+
+
+def build_contribution_dependencies(contrib: RouterContribution) -> List[Any]:
+    """Returns the dependencies a contribution must be mounted with (fail-closed).
+
+    Core routers keep their own per-endpoint auth. Every other contribution
+    (pack_id unset counts as a pack) must declare a scope and a prefix relative
+    to the API root; it is mounted behind ``require_pack_scope``.
+    """
+    deps: List[Any] = list(contrib.dependencies or [])
+    is_core = contrib.pack_id == "core"
+    if not is_core:
+        if not contrib.scope:
+            raise PackRouterContractError(
+                f"Router contribution from pack '{contrib.pack_id}' (prefix '{contrib.prefix}') "
+                "must declare a scope; pack routes are never mounted unguarded"
+            )
+        normalized = "/" + contrib.prefix.strip("/")
+        if normalized == "/api" or normalized.startswith("/api/"):
+            raise PackRouterContractError(
+                f"Router prefix '{contrib.prefix}' from pack '{contrib.pack_id}' must be relative "
+                "to the API root (e.g. '/finance/accounts')"
+            )
+    if contrib.scope:
+        deps.append(
+            Depends(
+                require_pack_scope(
+                    contrib.scope,
+                    contrib.level or "read",
+                    pack_id=contrib.pack_id,
+                    require_profile=contrib.require_profile,
+                )
+            )
+        )
+    return deps
 
 
 router = APIRouter()
