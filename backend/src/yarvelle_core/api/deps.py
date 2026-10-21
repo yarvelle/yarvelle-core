@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import Depends, HTTPException, Request
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from yarvelle_core.auth.adapters.disabled_adapter import (
