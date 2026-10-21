@@ -50,6 +50,7 @@ from typing import (
 )
 from urllib.parse import urlparse
 
+from yarvelle_core.schemas.age_band import CHILD_UNDER_13, canonical_age_band
 from yarvelle_core.engine.tool_registry import (
     DataFlows,
     RiskTier,
@@ -368,6 +369,9 @@ def verify_egress_firewall(
 # Section 6: Policy Decision Gate Matrix (AU-17)
 # ============================================================================
 
+KNOWN_RISK_TIERS = frozenset({"read", "write_local", "write_external", "irreversible"})
+
+
 def evaluate_policy_gate(
     ctx: ToolContext,
     spec: ToolSpec,
@@ -388,7 +392,14 @@ def evaluate_policy_gate(
     6. Autonomy A1: write_local allowed; write_external and irreversible require approval.
     7. Autonomy A2: write_local allowed; write_external allowed if consented, else requires approval.
     """
-    tier: RiskTier = getattr(spec, "risk_tier", "read")
+    raw_tier = getattr(spec, "risk_tier", None)
+    tier = str(raw_tier).strip().lower() if isinstance(raw_tier, str) else None
+
+    # 0. Fail closed on a missing or unknown tier: never infer "read".
+    if tier not in KNOWN_RISK_TIERS:
+        return PolicyDecision.require_approval(
+            f"Unknown or missing risk tier {raw_tier!r}; approval required (fail-closed)"
+        )
 
     # 1. Read Operations: Pure observation with zero state mutation
     if tier == "read":
@@ -416,10 +427,10 @@ def evaluate_policy_gate(
         if age_band is not None
         else (getattr(ctx, "age_band", None) or (getattr(ctx, "extra", {}) or {}).get("age_band") or "adult")
     )
-    effective_age_band = (eff_age_band or "adult").strip().lower()
+    effective_age_band = canonical_age_band(eff_age_band)
 
-    # 2. Child Under 13 Protection (AGENTS.md & AU-17)
-    if effective_age_band == "child_under_13":
+    # 2. Child Under 13 Protection (AGENTS.md & AU-17); legacy aliases accepted
+    if effective_age_band == CHILD_UNDER_13:
         if tier == "write_external":
             return PolicyDecision.block("Child under 13 external write blocked by policy")
         if tier == "write_local":
@@ -454,7 +465,7 @@ def evaluate_policy_gate(
                 return PolicyDecision.allow("A2 autonomy with recorded external write consent")
             return PolicyDecision.require_approval("A2 autonomy requires consent or approval for external writes")
 
-    return PolicyDecision.allow("Default allow")
+    return PolicyDecision.require_approval("No policy rule matched; approval required (fail-closed)")
 
 
 # ============================================================================
@@ -704,7 +715,7 @@ async def execute_tool_call(
                             run_id=ctx.run_id or "run-1",
                             tool_name=spec.name,
                             args=args,
-                            risk_tier=getattr(spec, "risk_tier", "read"),
+                            risk_tier=getattr(spec, "risk_tier", None) or "unknown",
                             destination_hosts=dest_hosts,
                         )
                     else:
@@ -714,7 +725,7 @@ async def execute_tool_call(
                             run_id=ctx.run_id or "run-1",
                             tool_name=spec.name,
                             args=args,
-                            risk_tier=getattr(spec, "risk_tier", "read"),
+                            risk_tier=getattr(spec, "risk_tier", None) or "unknown",
                             destination_hosts=dest_hosts,
                         )
             dur_ms = round((time.time() - t0) * 1000, 2)
