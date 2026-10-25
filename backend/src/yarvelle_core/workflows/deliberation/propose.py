@@ -26,8 +26,9 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import ValidationError
 
+from yarvelle_core.scope.context import scope_context
 from yarvelle_core.workflows.deliberation.doc_critique import _invoke_model_async, parse_json_or_literal
-from yarvelle_core.workflows.deliberation.tool_gate import filter_read_only_tools
+from yarvelle_core.workflows.deliberation.tool_gate import derive_tool_risk_tier, filter_read_only_tools
 from yarvelle_core.workflows.state import AgentProposal
 
 logger = logging.getLogger(__name__)
@@ -41,18 +42,19 @@ async def generate_agent_proposal(
     scope: str = "default_scope",
     tools: Optional[Sequence[Any]] = None,
     max_retries: int = 1,
+    tool_registry: Optional[Any] = None,
 ) -> AgentProposal:
     """Invokes a specialist agent to generate a structured proposal for the round.
 
     Invariants:
-    1. Read-only tools only: any non-read tool is filtered out.
-    2. Staged write actions are dropped in Phase 1 (staged_actions = []).
+    1. Read-only tools only: any non-read tool is filtered out from execution during rounds.
+    2. Staged actions are retained with risk_tier derived deterministically (never trusted from model).
     3. At most 1 repair retry is attempted upon validation failure.
     """
     if model is None:
         raise ValueError("A valid BaseChatModel is required to generate proposals.")
 
-    read_tools = filter_read_only_tools(tools or [])
+    read_tools = filter_read_only_tools(tools or [], tool_registry=tool_registry)
     ctx = dict(context or {})
     tool_names = [t.get("name") if isinstance(t, dict) else getattr(t, "name", str(t)) for t in read_tools]
     ctx["allowed_tools"] = tool_names
@@ -77,7 +79,9 @@ async def generate_agent_proposal(
         "- recommendations: list of strings\n"
         "- resource_claims: dict mapping constraint slug to numeric float\n"
         "- resource_claim_units: dict mapping constraint slug to allowed unit string\n"
-        "Read-only tools are available. Staged write actions are forbidden in Phase 1."
+        "- staged_actions: optional list of proposed actions (tool_name, tool_args, rationale)\n"
+        "Read-only tools may be consulted during deliberation. Any state-mutating action "
+        "must be staged under staged_actions for human review at plan completion."
     )
     messages = [
         SystemMessage(content=system_prompt),
@@ -89,7 +93,16 @@ async def generate_agent_proposal(
 
     while attempt <= max_retries:
         attempt += 1
-        raw_response = await _invoke_model_async(bound_model, messages)
+        with scope_context(
+            scope=scope,
+            profile_id=ctx.get("profile_id"),
+            actor=agent_id,
+            pack_id=ctx.get("pack_id"),
+            granted_scopes=ctx.get("granted_scopes"),
+            pack_declared_scopes=ctx.get("pack_declared_scopes"),
+            declared_reads=ctx.get("declared_reads"),
+        ):
+            raw_response = await _invoke_model_async(bound_model, messages)
         try:
             parsed = parse_json_or_literal(raw_response)
             if not isinstance(parsed, dict):
@@ -99,17 +112,27 @@ async def generate_agent_proposal(
             parsed["round_num"] = round_num
             parsed.setdefault("scope", scope)
 
+            # Normalize staged_actions deterministically before validation
+            raw_actions = parsed.get("staged_actions")
+            normalized_actions: List[Dict[str, Any]] = []
+            if isinstance(raw_actions, list):
+                for act in raw_actions:
+                    if not isinstance(act, dict):
+                        continue
+                    t_name = str(act.get("tool_name", "")).strip()
+                    if not t_name:
+                        continue
+                    tier = derive_tool_risk_tier(t_name, tool_registry=tool_registry, tools=tools)
+                    normalized_actions.append({
+                        "agent_id": agent_id,
+                        "tool_name": t_name,
+                        "tool_args": dict(act.get("tool_args") or {}),
+                        "rationale": str(act.get("rationale") or ""),
+                        "risk_tier": tier,
+                    })
+            parsed["staged_actions"] = normalized_actions
+
             proposal = AgentProposal.model_validate(parsed)
-
-            # Phase 1 safety invariant: drop staged write actions
-            if proposal.staged_actions:
-                logger.info(
-                    "Phase 1: Dropping %d staged actions from agent '%s'.",
-                    len(proposal.staged_actions),
-                    agent_id,
-                )
-                proposal.staged_actions = []
-
             return proposal
 
         except (ValidationError, ValueError) as err:
@@ -140,6 +163,7 @@ async def run_propose_phase(
     model: Optional[BaseChatModel] = None,
     tools: Optional[Sequence[Any]] = None,
     max_retries: int = 1,
+    tool_registry: Optional[Any] = None,
 ) -> Tuple[Dict[str, AgentProposal], List[str]]:
     """Runs Round 1 proposal generation across all active agents.
 
@@ -158,6 +182,7 @@ async def run_propose_phase(
                 model=model,
                 tools=tools,
                 max_retries=max_retries,
+                tool_registry=tool_registry,
             )
             proposals[aid] = prop
         except Exception as exc:

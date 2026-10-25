@@ -133,7 +133,8 @@ class ToolNode(BaseNode):
         )
 
         # Check if any tool call is allowed and requires execution
-        has_allowed_calls = any(c.get("name") in allowed for c in tool_calls)
+        is_panel_staged_state = bool(state.get("deliberation_state") or state.get("is_panel_staged"))
+        has_allowed_calls = any(c.get("name") in allowed for c in tool_calls) or is_panel_staged_state
 
         ctx: Optional[ToolContext] = None
         if has_allowed_calls:
@@ -185,6 +186,20 @@ class ToolNode(BaseNode):
         tool_traces: List[Dict[str, Any]] = list(state.get("tool_traces", []))
         last_tool_output: Any = ""
 
+        staged_lookup: Dict[str, str] = {}
+        if is_panel_staged_state and state.get("deliberation_state"):
+            delib = state.get("deliberation_state")
+            if isinstance(delib, dict):
+                act_props = delib.get("active_proposals") or delib.get("proposals") or {}
+                for sp_id, prop in act_props.items():
+                    p_dict = prop if isinstance(prop, dict) else (prop.model_dump() if hasattr(prop, "model_dump") else {})
+                    for sa in p_dict.get("staged_actions") or []:
+                        sa_dict = sa if isinstance(sa, dict) else (sa.model_dump() if hasattr(sa, "model_dump") else {})
+                        t_name = sa_dict.get("tool_name")
+                        sa_aid = sa_dict.get("agent_id") or sp_id
+                        if t_name and sa_aid:
+                            staged_lookup[t_name] = sa_aid
+
         for call in tool_calls:
             call_id = call.get("id") or f"call_{len(tool_messages)}"
             name = call.get("name", "")
@@ -197,7 +212,16 @@ class ToolNode(BaseNode):
             else:
                 args = dict(raw_args) if isinstance(raw_args, dict) else {}
 
-            is_allowed = name in allowed
+            is_call_panel_staged = bool(call.get("is_panel_staged") or is_panel_staged_state)
+            call_agent_id = call.get("agent_id") or staged_lookup.get(name) or (agent_id if not is_panel_staged_state else "panel_specialist")
+
+            is_allowed = (name in allowed) or (
+                is_call_panel_staged
+                and (
+                    name in CLOSED_TOOL_DEFINITIONS
+                    or (default_tool_registry and default_tool_registry.get(name) is not None)
+                )
+            )
             if not is_allowed:
                 error_msg = f"Tool '{name}' execution denied: undeclared tool for agent '{agent_id}'. Tool '{name}' is not permitted or undeclared for agent '{agent_id}'."
                 tool_traces.append({
@@ -270,7 +294,7 @@ class ToolNode(BaseNode):
                 continue
 
             # Evaluate policy gate
-            decision = evaluate_policy_gate(ctx, spec, args)
+            decision = evaluate_policy_gate(ctx, spec, args, is_panel_staged=is_call_panel_staged)
 
             if decision.decision == "needs_approval":
                 raw_app_id = f"app_{thread_id}_{call_id}"
@@ -299,27 +323,27 @@ class ToolNode(BaseNode):
                 if not is_resuming:
                     if app_store and hasattr(app_store, "create_pending"):
                         try:
+                            create_kwargs: Dict[str, Any] = {
+                                "approval_id": approval_id,
+                                "profile_id": ctx.profile_id,
+                                "run_id": ctx.run_id,
+                                "tool_name": spec.name,
+                                "args": args,
+                                "risk_tier": spec.risk_tier,
+                                "destination_hosts": dest_hosts,
+                                "thread_id": thread_id,
+                            }
+                            try:
+                                c_sig = inspect.signature(app_store.create_pending)
+                                if "agent_id" in c_sig.parameters or any(p.kind is inspect.Parameter.VAR_KEYWORD for p in c_sig.parameters.values()):
+                                    create_kwargs["agent_id"] = call_agent_id
+                            except (ValueError, TypeError):
+                                pass
+
                             if inspect.iscoroutinefunction(app_store.create_pending):
-                                await app_store.create_pending(
-                                    approval_id=approval_id,
-                                    profile_id=ctx.profile_id,
-                                    run_id=ctx.run_id,
-                                    tool_name=spec.name,
-                                    args=args,
-                                    risk_tier=spec.risk_tier,
-                                    destination_hosts=dest_hosts,
-                                    thread_id=thread_id,
-                                )
+                                await app_store.create_pending(**create_kwargs)
                             else:
-                                app_store.create_pending(
-                                    approval_id=approval_id,
-                                    profile_id=ctx.profile_id,
-                                    run_id=ctx.run_id,
-                                    tool_name=spec.name,
-                                    args=args,
-                                    risk_tier=spec.risk_tier,
-                                    destination_hosts=dest_hosts,
-                                )
+                                app_store.create_pending(**create_kwargs)
                         except Exception as store_exc:
                             logger.error(
                                 "failed_to_persist_pending_approval",
@@ -345,6 +369,7 @@ class ToolNode(BaseNode):
                                     profile_id=ctx.profile_id,
                                     run_id=ctx.run_id,
                                     thread_id=thread_id,
+                                    agent_id=call_agent_id,
                                     tool_name=spec.name,
                                     args_redacted=json.dumps(redact_tool_args(args)),
                                     payload_hash=payload_hash,
@@ -373,6 +398,7 @@ class ToolNode(BaseNode):
                     approval_payload = {
                         "type": SSE_EVENT_APPROVAL_REQUIRED,
                         "approval_id": approval_id,
+                        "agent_id": call_agent_id,
                         "tool_name": spec.name,
                         "args_redacted": redact_tool_args(args),
                         "payload_hash": payload_hash,
@@ -407,7 +433,13 @@ class ToolNode(BaseNode):
                 if decision_status == "approved":
                     t0 = time.time()
                     res = await execute_tool_call(
-                        ctx, spec, effective_args, approval_store=app_store, approval_id=resuming_approval_id
+                        ctx,
+                        spec,
+                        effective_args,
+                        approval_store=app_store,
+                        approval_id=resuming_approval_id,
+                        is_panel_staged=is_call_panel_staged,
+                        agent_id=call_agent_id,
                     )
                     dur_ms = round((time.time() - t0) * 1000, 2)
                     output_val = res.output if res.success else {"error": res.error}

@@ -28,6 +28,7 @@ import time
 from typing import Any, Dict, List, NamedTuple, Optional, Sequence
 
 from langchain_core.language_models.chat_models import BaseChatModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from yarvelle_core.constants.api import (
     SSE_EVENT_DELIBERATION_CRITIQUE,
@@ -57,7 +58,8 @@ async def _emit_sse_event(name: str, data: Dict[str, Any]) -> None:
     """Emits an SSE streaming custom event if event dispatcher is active."""
     if adispatch_custom_event is not None:
         try:
-            await adispatch_custom_event(name, data)
+            payload = {"type": name, **data} if "type" not in data else data
+            await adispatch_custom_event(name, payload)
         except Exception as err:
             logger.debug("Custom event '%s' emission skipped: %s", name, err)
 
@@ -79,12 +81,16 @@ class DeliberationEngine:
         tool_registry: Optional[Any] = None,
         default_tools: Optional[Sequence[Any]] = None,
         config: Optional[DeliberationConfig] = None,
+        session: Optional[AsyncSession] = None,
+        session_factory: Optional[Any] = None,
     ) -> None:
         self.model = model
         self.registry = registry
         self.tool_registry = tool_registry
         self.default_tools = list(default_tools) if default_tools is not None else None
         self.config = config or DeliberationConfig()
+        self.session = session
+        self.session_factory = session_factory
         self._start_time: float = 0.0
 
     def check_budget(self, round_num: int, total_tokens: int = 0) -> BudgetDecision:
@@ -156,6 +162,26 @@ class DeliberationEngine:
             shared_constraints=self.config.shared_constraints,
         )
 
+        # Collect panel scopes
+        panel_scopes: List[str] = []
+        if plan is not None:
+            raw_scopes = getattr(plan, "scopes", None) or (
+                plan.get("scopes") if isinstance(plan, dict) else None
+            )
+            if raw_scopes:
+                panel_scopes = list(raw_scopes)
+        if not panel_scopes and self.config:
+            raw_scopes = getattr(self.config, "scopes", None)
+            if raw_scopes:
+                panel_scopes = list(raw_scopes)
+        if not panel_scopes and state.get("scopes"):
+            panel_scopes = list(state["scopes"])
+        if not panel_scopes and state.get("agent_scopes"):
+            agent_sc_map = state.get("agent_scopes") or {}
+            panel_scopes = list({agent_sc_map[a] for a in target_agents if a in agent_sc_map})
+        if not panel_scopes and state.get("scope"):
+            panel_scopes = [state["scope"]]
+
         # Emit panel_start event
         await _emit_sse_event(
             SSE_EVENT_PANEL_START,
@@ -164,6 +190,7 @@ class DeliberationEngine:
                 "title": getattr(plan, "title", "Panel Deliberation") if plan else "Panel Deliberation",
                 "agents": list(target_agents),
                 "shared_constraints": [c.model_dump() for c in self.config.shared_constraints],
+                "scopes": list(panel_scopes),
             },
         )
 
@@ -198,6 +225,7 @@ class DeliberationEngine:
                         {
                             "round": 1,
                             "agent_id": prop.agent_id,
+                            "scope": prop.scope,
                             "summary": prop.summary,
                             "resource_claims": prop.resource_claims,
                             "tainted": prop.tainted,
@@ -224,6 +252,15 @@ class DeliberationEngine:
                         f"Deliberation degraded to single-agent answer due to missing peer perspectives. "
                         f"Missing agents: {missing}. Output: {single_summary}"
                     )
+                    await _emit_sse_event(
+                        SSE_EVENT_DELIBERATION_END,
+                        {
+                            "reason": "single_agent_fallback",
+                            "rounds_used": 1,
+                            "open_conflicts": 0,
+                            "missing_agents": list(missing),
+                        },
+                    )
                     return state
 
             else:
@@ -241,13 +278,19 @@ class DeliberationEngine:
                 for prop in revised_proposals.values():
                     bb.record_proposal(prop)
                     if prop.round_num == round_num:
+                        agent_resolved_critiques = [
+                            f"{c.reviewer_agent_id}: {c.critique}"
+                            for c in prior_critiques
+                            if c.target_agent_id == prop.agent_id
+                        ]
                         await _emit_sse_event(
                             SSE_EVENT_DELIBERATION_REVISION,
                             {
                                 "round": round_num,
                                 "agent_id": prop.agent_id,
+                                "scope": prop.scope,
                                 "summary": prop.summary,
-                                "resolved_critiques": [],
+                                "resolved_critiques": agent_resolved_critiques,
                             },
                         )
 
@@ -263,22 +306,35 @@ class DeliberationEngine:
             last_skipped_constraints = auditor.skipped_constraints
 
             # 2b. Peer Critiques (Disagree-or-Commit)
+            effective_session = getattr(self, "session", None) or state.get("session") or state.get("db_session")
+            effective_factory = getattr(self, "session_factory", None) or state.get("session_factory")
+
             peer_critiques = await run_peer_critiques(
                 proposals=bb.active_proposals,
                 mode=self.config.critique_mode,
                 model=self.model,
                 round_num=round_num,
                 shared_constraints=bb.shared_constraints,
+                blackboard=bb,
+                context=dict(state),
+                session=effective_session,
+                session_factory=effective_factory,
             )
 
             all_critiques = auditor_critiques + peer_critiques
             for c in all_critiques:
+                rev_prop = bb.active_proposals.get(c.reviewer_agent_id)
+                tgt_prop = bb.active_proposals.get(c.target_agent_id)
+                reviewer_scope = getattr(rev_prop, "scope", "") if rev_prop else ""
+                target_scope = getattr(tgt_prop, "scope", "") if tgt_prop else ""
                 await _emit_sse_event(
                     SSE_EVENT_DELIBERATION_CRITIQUE,
                     {
                         "round": round_num,
                         "reviewer_id": c.reviewer_agent_id,
                         "target_id": c.target_agent_id,
+                        "reviewer_scope": reviewer_scope,
+                        "target_scope": target_scope,
                         "stance": c.stance.value,
                         "issue_type": c.issue_type,
                         "critique": c.critique,
@@ -314,6 +370,24 @@ class DeliberationEngine:
 
         state["deliberation_state"] = delib_state
         state["specialist_outputs"] = {aid: p.summary for aid, p in bb.active_proposals.items()}
+
+        # Forward cross-read audit events to state
+        if "audit_events" in state or bb.recorded_cross_reads:
+            state_audit_events = list(state.get("audit_events") or [])
+            for cr in bb.recorded_cross_reads:
+                event_dict = {
+                    "event": "scope.cross_read",
+                    "reader_agent_id": cr.get("reader_agent_id"),
+                    "reader_scope": cr.get("reader_scope"),
+                    "target_agent_id": cr.get("target_agent_id"),
+                    "target_scope": cr.get("target_scope"),
+                    "claim_keys": cr.get("claim_keys"),
+                    "round_num": cr.get("round_num"),
+                    "panel_id": bb.panel_id,
+                }
+                if event_dict not in state_audit_events:
+                    state_audit_events.append(event_dict)
+            state["audit_events"] = state_audit_events
 
         if not state.get("output"):
             summaries = [f"### {aid}\n{p.summary}" for aid, p in bb.active_proposals.items()]

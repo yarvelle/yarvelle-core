@@ -24,6 +24,7 @@ Enforces ADR 0001 §2.2 & §2.8:
 from __future__ import annotations
 
 import ast
+import contextlib
 import inspect
 import json
 import logging
@@ -33,8 +34,11 @@ from typing import Any, Dict, List, Literal, Optional, Sequence, Union
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import ValidationError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from yarvelle_core.schemas.plan import SharedConstraint
+from yarvelle_core.scope.context import ScopeContext, scope_context
+from yarvelle_core.workflows.deliberation.blackboard import BlackboardManager, is_same_domain
 from yarvelle_core.workflows.state import AgentProposal, PeerCritique
 
 logger = logging.getLogger(__name__)
@@ -96,6 +100,10 @@ async def run_peer_critiques(
     round_num: int = 1,
     shared_constraints: Optional[Sequence[SharedConstraint]] = None,
     max_retries: int = 1,
+    blackboard: Optional[BlackboardManager] = None,
+    context: Optional[Dict[str, Any]] = None,
+    session: Optional[AsyncSession] = None,
+    session_factory: Optional[Any] = None,
 ) -> List[PeerCritique]:
     """Executes peer review across specialist proposals using Disagree-or-Commit protocol.
 
@@ -106,6 +114,10 @@ async def run_peer_critiques(
         round_num: Current deliberation round number.
         shared_constraints: Optional list of shared resource constraints.
         max_retries: Maximum schema repair retries (default 1).
+        blackboard: Optional blackboard manager instance.
+        context: Optional execution context dictionary (e.g. AgentState).
+        session: Optional SQLAlchemy AsyncSession for DB audit logging.
+        session_factory: Optional session factory for DB audit logging.
 
     Returns:
         List of validated PeerCritique models.
@@ -118,10 +130,29 @@ async def run_peer_critiques(
     if len(prop_list) < 2 or model is None:
         return []
 
+    bb = blackboard
+    if bb is None:
+        bb = BlackboardManager()
+        for p in prop_list:
+            bb.record_proposal(p)
+
     critiques: List[PeerCritique] = []
 
     if mode == "batched":
         # Batched mode: single model call producing pairwise critique matrix
+        # Fail closed on empty/mixed/unscoped panels: panel is same-domain ONLY if all scopes exist, are non-empty, and share domain
+        cleaned_scopes = [(p.scope or "").strip() for p in prop_list]
+        domain_prefixes = [s.split(".")[0] for s in cleaned_scopes]
+        all_scopes_valid = all(
+            bool(s) and bool(p) and "/" not in p and "\\" not in p
+            for s, p in zip(cleaned_scopes, domain_prefixes)
+        )
+        is_same_panel = (
+            all_scopes_valid
+            and len(set(domain_prefixes)) == 1
+            and all(is_same_domain(cleaned_scopes[0], s) for s in cleaned_scopes[1:])
+        )
+        is_cross_domain = not is_same_panel
         system_prompt = (
             "You are a deliberation moderator analyzing specialist proposals using "
             "the Disagree-or-Commit peer review protocol.\n"
@@ -133,10 +164,27 @@ async def run_peer_critiques(
             "- If stance is 'endorse', critique MUST contain substantive supporting rationale (no bare agreement).\n"
             "- If stance is 'amend' or 'conflict', critique and proposed_resolution MUST be non-empty."
         )
-        proposals_summary = "\n\n".join(
-            f"Agent: {p.agent_id}\nScope: {p.scope}\nSummary: {p.summary}\nClaims: {p.resource_claims}"
-            for p in prop_list
-        )
+        if is_cross_domain:
+            system_prompt += (
+                "\n- Cross-domain interactions may reference ONLY exported typed claims and shared constraints. "
+                "Free-text summaries and recommendations are withheld across domain boundaries."
+            )
+
+        formatted_props = []
+        for p in prop_list:
+            if not is_cross_domain:
+                formatted_props.append(
+                    f"Agent: {p.agent_id}\nScope: {p.scope}\nSummary: {p.summary}\nClaims: {p.resource_claims}"
+                )
+            else:
+                claim_bullets = "\n".join(
+                    f"  - [{c.kind}] {c.key}: {c.value} {c.unit or ''}".strip()
+                    for c in p.exported_claims
+                ) or "  (No exported claims)"
+                formatted_props.append(
+                    f"Agent: {p.agent_id} (Cross-Domain)\nScope: {p.scope}\n[Summary withheld across domain boundaries]\nExported Claims:\n{claim_bullets}"
+                )
+        proposals_summary = "\n\n".join(formatted_props)
         messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(
@@ -144,74 +192,27 @@ async def run_peer_critiques(
             ),
         ]
 
-        attempt = 0
-        while attempt <= max_retries:
-            attempt += 1
-            raw_response = await _invoke_model_async(model, messages)
-            try:
-                parsed = parse_json_or_literal(raw_response)
-                items = parsed if isinstance(parsed, list) else [parsed]
-                batch_critiques = []
-                for item in items:
-                    if not isinstance(item, dict):
-                        continue
-                    item["round_num"] = round_num
-                    # Filter self-critique
-                    if item.get("reviewer_agent_id") == item.get("target_agent_id"):
-                        continue
-                    critique_obj = PeerCritique.model_validate(item)
-                    batch_critiques.append(critique_obj)
-                critiques.extend(batch_critiques)
-                break
-            except (ValidationError, ValueError, json.JSONDecodeError) as err:
-                logger.warning(
-                    "Batched critique schema validation failed on attempt %d: %s",
-                    attempt,
-                    err,
-                )
-                if attempt <= max_retries:
-                    messages.append(
-                        HumanMessage(
-                            content=(
-                                f"The previous output failed validation: {err}. "
-                                "Please return a valid JSON array of PeerCritique objects."
-                            )
-                        )
-                    )
-                else:
-                    logger.error("Batched critique schema validation exhausted retries.")
-
-    else:
-        # per_agent mode: each reviewer independently critiques peer proposals
-        for reviewer in prop_list:
-            peers = [p for p in prop_list if p.agent_id != reviewer.agent_id]
-            if not peers:
-                continue
-
-            system_prompt = (
-                f"You are specialist agent '{reviewer.agent_id}' conducting peer review in Round {round_num}.\n"
-                "Evaluate peer proposals under Disagree-or-Commit:\n"
-                "- Stances: 'endorse', 'complement', 'amend', 'conflict'.\n"
-                "- Issue types: 'resource_overbudget', 'contraindication', 'dependency_order', 'synergy', 'risk_exposure'.\n"
-                "- Endorsements require substantive supporting points (bare 'agree' is rejected).\n"
-                "- Amendments/Conflicts require non-empty critique and proposed_resolution.\n"
-                "Output a JSON array of PeerCritique objects."
+        ctx = dict(context or {})
+        moderator_scope = ctx.get("scope", "moderator")
+        moderator_actor = ctx.get("moderator_id", "deliberation_moderator")
+        if moderator_scope:
+            mod_grants = ctx.get("granted_scopes")
+            effective_mod_grants = (
+                set(mod_grants) | {moderator_scope, f"{moderator_scope}.*"}
+            ) if mod_grants is not None else None
+            mod_scope_mgr = scope_context(
+                scope=moderator_scope,
+                profile_id=ctx.get("profile_id"),
+                actor=moderator_actor,
+                pack_id=ctx.get("pack_id"),
+                granted_scopes=effective_mod_grants,
+                pack_declared_scopes=ctx.get("pack_declared_scopes"),
+                declared_reads=ctx.get("declared_reads"),
             )
-            peers_summary = "\n\n".join(
-                f"Peer Agent: {p.agent_id}\nScope: {p.scope}\nSummary: {p.summary}\nClaims: {p.resource_claims}"
-                for p in peers
-            )
-            messages = [
-                SystemMessage(content=system_prompt),
-                HumanMessage(
-                    content=(
-                        f"Your own proposal summary: {reviewer.summary}\n\n"
-                        f"Peer proposals:\n{peers_summary}\n\n"
-                        "Provide your peer critiques as a JSON array:"
-                    )
-                ),
-            ]
+        else:
+            mod_scope_mgr = contextlib.nullcontext()
 
+        with mod_scope_mgr:
             attempt = 0
             while attempt <= max_retries:
                 attempt += 1
@@ -219,22 +220,21 @@ async def run_peer_critiques(
                 try:
                     parsed = parse_json_or_literal(raw_response)
                     items = parsed if isinstance(parsed, list) else [parsed]
-                    agent_critiques = []
+                    batch_critiques = []
                     for item in items:
                         if not isinstance(item, dict):
                             continue
-                        item["reviewer_agent_id"] = reviewer.agent_id
                         item["round_num"] = round_num
+                        # Filter self-critique
                         if item.get("reviewer_agent_id") == item.get("target_agent_id"):
                             continue
                         critique_obj = PeerCritique.model_validate(item)
-                        agent_critiques.append(critique_obj)
-                    critiques.extend(agent_critiques)
+                        batch_critiques.append(critique_obj)
+                    critiques.extend(batch_critiques)
                     break
                 except (ValidationError, ValueError, json.JSONDecodeError) as err:
                     logger.warning(
-                        "Agent '%s' peer critique failed validation on attempt %d: %s",
-                        reviewer.agent_id,
+                        "Batched critique schema validation failed on attempt %d: %s",
                         attempt,
                         err,
                     )
@@ -248,9 +248,158 @@ async def run_peer_critiques(
                             )
                         )
                     else:
-                        logger.error(
-                            "Agent '%s' peer critique failed after retry; skipping agent's critique.",
-                            reviewer.agent_id,
+                        logger.error("Batched critique schema validation exhausted retries.")
+
+    else:
+        # per_agent mode: each reviewer independently critiques peer proposals
+        ctx = dict(context or {})
+        ambient = ScopeContext.get()
+
+        for reviewer in prop_list:
+            rev_scope = reviewer.scope or (ctx.get("agent_scopes", {}).get(reviewer.agent_id) if ctx else "")
+
+            # Resolve declared_reads and granted_scopes for this reviewer
+            agent_declared = ctx.get("agent_declared_reads", {})
+            if isinstance(agent_declared, dict) and reviewer.agent_id in agent_declared:
+                rev_declared_reads = agent_declared[reviewer.agent_id]
+            elif "declared_reads" in ctx:
+                rev_declared_reads = ctx["declared_reads"]
+            elif ambient and ambient.declared_reads:
+                rev_declared_reads = ambient.declared_reads
+            else:
+                rev_declared_reads = None
+
+            agent_granted = ctx.get("agent_granted_scopes", {})
+            if isinstance(agent_granted, dict) and reviewer.agent_id in agent_granted:
+                rev_granted_scopes = agent_granted[reviewer.agent_id]
+            elif "granted_scopes" in ctx:
+                rev_granted_scopes = ctx["granted_scopes"]
+            elif ambient and ambient.granted_scopes:
+                rev_granted_scopes = ambient.granted_scopes
+            else:
+                rev_granted_scopes = None
+
+            if rev_scope:
+                effective_grants = (
+                    set(rev_granted_scopes) | {rev_scope, f"{rev_scope}.*"}
+                ) if rev_granted_scopes is not None else None
+                scope_mgr = scope_context(
+                    scope=rev_scope,
+                    profile_id=ctx.get("profile_id"),
+                    actor=reviewer.agent_id,
+                    pack_id=ctx.get("pack_id"),
+                    granted_scopes=effective_grants,
+                    pack_declared_scopes=ctx.get("pack_declared_scopes"),
+                    declared_reads=rev_declared_reads,
+                )
+            else:
+                scope_mgr = contextlib.nullcontext()
+
+            with scope_mgr:
+                scoped_peer_map = await bb.get_scoped_proposals_for(
+                    reader_agent_id=reviewer.agent_id,
+                    reader_scope=rev_scope,
+                    declared_reads=rev_declared_reads,
+                    granted_scopes=rev_granted_scopes,
+                    round_num=round_num,
+                    session=session,
+                    session_factory=session_factory,
+                    profile_id=ctx.get("profile_id"),
+                    actor_user_id=ctx.get("user_id") or ctx.get("actor_user_id"),
+                    run_id=ctx.get("run_id"),
+                )
+                peers = list(scoped_peer_map.values())
+                if not peers:
+                    continue
+
+                system_prompt = (
+                    f"You are specialist agent '{reviewer.agent_id}' conducting peer review in Round {round_num}.\n"
+                    "Evaluate peer proposals under Disagree-or-Commit:\n"
+                    "- Stances: 'endorse', 'complement', 'amend', 'conflict'.\n"
+                    "- Issue types: 'resource_overbudget', 'contraindication', 'dependency_order', 'synergy', 'risk_exposure'.\n"
+                    "- Endorsements require substantive supporting points (bare 'agree' is rejected).\n"
+                    "- Amendments/Conflicts require non-empty critique and proposed_resolution.\n"
+                    "- When reviewing cross-domain peers, critique ONLY exported typed claims and shared constraints; "
+                    "free-text proposals and recommendations are withheld across domain boundaries (ADR 0001 §2.3).\n"
+                    "Output a JSON array of PeerCritique objects."
+                )
+                formatted_peer_blocks = []
+                for p in peers:
+                    if rev_scope and is_same_domain(rev_scope, p.scope):
+                        recs_str = f"\nRecommendations: {', '.join(p.recommendations)}" if p.recommendations else ""
+                        formatted_peer_blocks.append(
+                            f"Peer Agent: {p.agent_id} (Same Domain)\n"
+                            f"Scope: {p.scope}\n"
+                            f"Summary: {p.summary}{recs_str}\n"
+                            f"Claims: {p.resource_claims}"
                         )
+                    else:
+                        claim_lines = []
+                        for c in p.exported_claims:
+                            if c.key == "undisclosed_constraint":
+                                claim_lines.append(f"  - [withheld] Undisclosed constraint exists on scope '{c.source_scope}'")
+                            else:
+                                unit_str = f" {c.unit}" if c.unit else ""
+                                claim_lines.append(f"  - [{c.kind}] {c.key}: {c.value}{unit_str}")
+                        claim_bullets = "\n".join(claim_lines) if claim_lines else "  (No exported claims)"
+                        formatted_peer_blocks.append(
+                            f"Peer Agent: {p.agent_id} (Cross-Domain)\n"
+                            f"Scope: {p.scope}\n"
+                            f"[Notice: Free-text proposal summary and recommendations are withheld across domain boundaries]\n"
+                            f"Exported Typed Claims:\n{claim_bullets}"
+                        )
+
+                peers_summary = "\n\n".join(formatted_peer_blocks)
+                messages = [
+                    SystemMessage(content=system_prompt),
+                    HumanMessage(
+                        content=(
+                            f"Your own proposal summary: {reviewer.summary}\n\n"
+                            f"Peer proposals:\n{peers_summary}\n\n"
+                            "Provide your peer critiques as a JSON array:"
+                        )
+                    ),
+                ]
+
+                attempt = 0
+                while attempt <= max_retries:
+                    attempt += 1
+                    raw_response = await _invoke_model_async(model, messages)
+                    try:
+                        parsed = parse_json_or_literal(raw_response)
+                        items = parsed if isinstance(parsed, list) else [parsed]
+                        agent_critiques = []
+                        for item in items:
+                            if not isinstance(item, dict):
+                                continue
+                            item["reviewer_agent_id"] = reviewer.agent_id
+                            item["round_num"] = round_num
+                            if item.get("reviewer_agent_id") == item.get("target_agent_id"):
+                                continue
+                            critique_obj = PeerCritique.model_validate(item)
+                            agent_critiques.append(critique_obj)
+                        critiques.extend(agent_critiques)
+                        break
+                    except (ValidationError, ValueError, json.JSONDecodeError) as err:
+                        logger.warning(
+                            "Agent '%s' peer critique failed validation on attempt %d: %s",
+                            reviewer.agent_id,
+                            attempt,
+                            err,
+                        )
+                        if attempt <= max_retries:
+                            messages.append(
+                                HumanMessage(
+                                    content=(
+                                        f"The previous output failed validation: {err}. "
+                                        "Please return a valid JSON array of PeerCritique objects."
+                                    )
+                                )
+                            )
+                        else:
+                            logger.error(
+                                "Agent '%s' peer critique failed after retry; skipping agent's critique.",
+                                reviewer.agent_id,
+                            )
 
     return critiques

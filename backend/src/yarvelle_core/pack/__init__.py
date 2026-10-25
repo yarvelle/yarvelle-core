@@ -23,6 +23,7 @@ from yarvelle_core.pack.routing import (
     compose_orchestrator_routing_prompt,
 )
 from yarvelle_core.pack.spec import (
+    CrossPackGrantSpec,
     PackEvalsSpec,
     PackManifest,
     PackMigrationsSpec,
@@ -48,6 +49,7 @@ __all__ = [
     "discover_and_load_packs",
     "collect_routing_hints",
     "compose_orchestrator_routing_prompt",
+    "CrossPackGrantSpec",
     "PackEvalsSpec",
     "PackManifest",
     "PackMigrationsSpec",

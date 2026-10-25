@@ -21,6 +21,8 @@ import { ToolTraceCard } from '../src/chat/ToolTraceCard.js';
 import { ExecutionPlanCard } from '../src/chat/ExecutionPlanCard.js';
 import { ThinkingIndicator } from '../src/chat/ThinkingIndicator.js';
 import { ChatMarkdown } from '../src/chat/ChatMarkdown.js';
+import { DeliberationRoundtable } from '../src/chat/DeliberationRoundtable.js';
+
 import { Calendar } from '../src/calendar/Calendar.js';
 import { Reminders } from '../src/calendar/Reminders.js';
 import { Routines } from '../src/calendar/Routines.js';
@@ -85,6 +87,54 @@ export function ChatAndApprovalShowcase() {
         }}
       />
       <ApprovalCard id="apr-story-1" level="warn" label="Create recurring Monday reminder" />
+      <DeliberationRoundtable
+        panel_id="panel-story-1"
+        title="Resource Deliberation"
+        agents={['agent-1', 'agent-2']}
+        shared_constraints={[
+          { id: 'quota', unit: 'units', limit_value: 10, total_claimed: 5 },
+          { id: 'bandwidth', unit: 'MB/s', limit_value: null },
+        ]}
+        proposals={[
+          { agent_id: 'agent-1', round_num: 1, summary: 'Proposal 1' },
+          { agent_id: 'agent-1', round_num: 2, summary: 'Revised proposal', tainted: true },
+        ]}
+        critiques={[
+          {
+            reviewer_agent_id: 'agent-2',
+            target_agent_id: 'agent-1',
+            round_num: 1,
+            stance: 'amend',
+            issue_type: 'resource_overbudget',
+            critique: 'Reduce quota',
+            proposed_resolution: 'Cut by half',
+          },
+        ]}
+        minority_reports={[
+          {
+            issue_type: 'dependency_order',
+            target_agent_id: 'agent-1',
+            reviewer_agent_id: 'agent-2',
+            target_position: 'Run first',
+            reviewer_critique: 'Run second',
+            reviewer_proposed_resolution: 'Alternate',
+          },
+        ]}
+        open_amendments={[
+          {
+            reviewer_agent_id: 'agent-2',
+            target_agent_id: 'agent-1',
+            round_num: 2,
+            stance: 'amend',
+            issue_type: 'synergy',
+            critique: 'Coordinate sync',
+            proposed_resolution: 'Use event queue',
+          },
+        ]}
+        staged_actions={[
+          { agent_id: 'agent-1', tool_name: 'sync_queue', risk_tier: 'write_local' },
+        ]}
+      />
     </div>
   );
 }

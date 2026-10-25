@@ -28,8 +28,9 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import ValidationError
 
 from yarvelle_core.schemas.plan import SharedConstraint
+from yarvelle_core.scope.context import scope_context
 from yarvelle_core.workflows.deliberation.doc_critique import _invoke_model_async, parse_json_or_literal
-from yarvelle_core.workflows.deliberation.tool_gate import filter_read_only_tools
+from yarvelle_core.workflows.deliberation.tool_gate import derive_tool_risk_tier, filter_read_only_tools
 from yarvelle_core.workflows.state import AgentProposal, CritiqueStance, PeerCritique
 
 logger = logging.getLogger(__name__)
@@ -44,13 +45,14 @@ async def run_selective_revision(
     shared_constraints: Optional[Sequence[SharedConstraint]] = None,
     tools: Optional[Sequence[Any]] = None,
     max_retries: int = 1,
+    tool_registry: Optional[Any] = None,
 ) -> Dict[str, AgentProposal]:
     """Executes selective revision targeting only agents with open conflicts or amends.
 
     Invariants:
     1. Untargeted agents are preserved untouched with 0 LLM calls.
     2. Targeted agents receive their prior proposal and open critiques targeting them.
-    3. Staged write actions are dropped in Phase 1 (staged_actions = []).
+    3. Staged actions are retained with risk_tier derived deterministically (never trusted from model).
     4. At most 1 schema repair retry is attempted per targeted specialist.
     """
     updated_proposals: Dict[str, AgentProposal] = {}
@@ -71,7 +73,7 @@ async def run_selective_revision(
     if not model:
         return updated_proposals
 
-    read_tools = filter_read_only_tools(tools or [])
+    read_tools = filter_read_only_tools(tools or [], tool_registry=tool_registry)
     ctx = dict(context or {})
     tool_names = [t.get("name") if isinstance(t, dict) else getattr(t, "name", str(t)) for t in read_tools]
     ctx["allowed_tools"] = tool_names
@@ -109,7 +111,9 @@ async def run_selective_revision(
             "- recommendations: list of strings\n"
             "- resource_claims: dict mapping constraint slug to numeric float\n"
             "- resource_claim_units: dict mapping constraint slug to allowed unit string\n"
-            "Staged write actions are forbidden in Phase 1."
+            "- staged_actions: optional list of proposed actions (tool_name, tool_args, rationale)\n"
+            "Read-only tools may be consulted during deliberation. Any state-mutating action "
+            "must be staged under staged_actions for human review at plan completion."
         )
 
         messages = [
@@ -128,7 +132,16 @@ async def run_selective_revision(
 
         while attempt <= max_retries:
             attempt += 1
-            raw_response = await _invoke_model_async(bound_model, messages)
+            with scope_context(
+                scope=prior_prop.scope,
+                profile_id=ctx.get("profile_id"),
+                actor=aid,
+                pack_id=ctx.get("pack_id"),
+                granted_scopes=ctx.get("granted_scopes"),
+                pack_declared_scopes=ctx.get("pack_declared_scopes"),
+                declared_reads=ctx.get("declared_reads"),
+            ):
+                raw_response = await _invoke_model_async(bound_model, messages)
             try:
                 parsed = parse_json_or_literal(raw_response)
                 if not isinstance(parsed, dict):
@@ -138,17 +151,27 @@ async def run_selective_revision(
                 parsed["round_num"] = round_num
                 parsed.setdefault("scope", prior_prop.scope)
 
+                # Normalize staged_actions deterministically before validation
+                raw_actions = parsed.get("staged_actions")
+                normalized_actions: List[Dict[str, Any]] = []
+                if isinstance(raw_actions, list):
+                    for act in raw_actions:
+                        if not isinstance(act, dict):
+                            continue
+                        t_name = str(act.get("tool_name", "")).strip()
+                        if not t_name:
+                            continue
+                        tier = derive_tool_risk_tier(t_name, tool_registry=tool_registry, tools=tools)
+                        normalized_actions.append({
+                            "agent_id": aid,
+                            "tool_name": t_name,
+                            "tool_args": dict(act.get("tool_args") or {}),
+                            "rationale": str(act.get("rationale") or ""),
+                            "risk_tier": tier,
+                        })
+                parsed["staged_actions"] = normalized_actions
+
                 new_proposal = AgentProposal.model_validate(parsed)
-
-                # Phase 1 safety invariant: drop staged write actions
-                if new_proposal.staged_actions:
-                    logger.info(
-                        "Phase 1: Dropping %d staged actions from revised agent '%s'.",
-                        len(new_proposal.staged_actions),
-                        aid,
-                    )
-                    new_proposal.staged_actions = []
-
                 updated_proposals[aid] = new_proposal
                 revised_successfully = True
                 logger.info("SelectiveRevise: Successfully revised proposal for agent '%s'.", aid)

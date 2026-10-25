@@ -11,7 +11,13 @@
 
 """Re-export audit package components."""
 
-from yarvelle_core.audit.redaction import redact_audit_event
+from yarvelle_core.audit.hash_chain import (
+    GENESIS_HASH,
+    append_chained_audit_event,
+    compute_audit_entry_hash,
+    record_scope_cross_read_audit,
+    verify_profile_audit_chain,
+)
 from yarvelle_core.audit.logger import (
     AuditLogger,
     compute_payload_hash,
@@ -19,8 +25,14 @@ from yarvelle_core.audit.logger import (
     read_recent_audit_events,
     record_audit,
 )
+from yarvelle_core.audit.redaction import redact_audit_event
 
 __all__ = [
+    "GENESIS_HASH",
+    "append_chained_audit_event",
+    "compute_audit_entry_hash",
+    "record_scope_cross_read_audit",
+    "verify_profile_audit_chain",
     "redact_audit_event",
     "record_audit",
     "get_recent_audit_events",

@@ -217,7 +217,7 @@ def test_read_only_tool_gate_during_deliberation():
     dec_ext = evaluate_deliberation_tool_gate(ctx, ext_tool, {"msg": "alert"})
     assert dec_ext.decision == "blocked"
 
-    # Also verify staged actions in AgentProposal are dropped in Phase 1
+    # Phase 3 retains staged actions in AgentProposal and Blackboard
     proposal_with_staged_write = AgentProposal(
         agent_id="specialist_a",
         round_num=1,
@@ -235,8 +235,9 @@ def test_read_only_tool_gate_during_deliberation():
     )
     bb = BlackboardManager()
     bb.record_proposal(proposal_with_staged_write)
-    # Phase 1 drops staged write actions
-    assert len(bb.get_active_staged_actions()) == 0
+    # Phase 3 retains staged actions for gated execution
+    assert len(bb.get_active_staged_actions()) == 1
+    assert bb.get_active_staged_actions()[0].tool_name == "store_record"
 
 
 # ============================================================================

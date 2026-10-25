@@ -72,6 +72,7 @@ class ApprovalResponse(BaseModel):
     profile_id: str
     run_id: str
     thread_id: Optional[str] = None
+    agent_id: Optional[str] = None
     tool_name: str
     args_redacted: str
     args: Dict[str, Any]
@@ -106,6 +107,7 @@ def serialize_approval(approval: Approval) -> ApprovalResponse:
         profile_id=approval.profile_id,
         run_id=approval.run_id,
         thread_id=approval.thread_id,
+        agent_id=getattr(approval, "agent_id", None),
         tool_name=approval.tool_name,
         args_redacted=approval.args_redacted,
         args=approval.args_dict,
@@ -353,13 +355,15 @@ async def consume_approval_atomic(
     *,
     profile_id: Optional[str] = None,
     tool_name: Optional[str] = None,
+    agent_id: Optional[str] = None,
 ) -> str:
     """Atomically consumes an approved tool approval token during workflow resume.
 
     When ``profile_id`` / ``tool_name`` are supplied (the execution choke point
     always supplies both), the approval must have been issued for exactly that
     profile and tool; an approval for one profile or tool can never authorize
-    another, even with an identical payload.
+    another, even with an identical payload. If ``agent_id`` is supplied and present
+    on the record, the approval must have been issued for that exact agent.
 
     Enforces the single-use token lifecycle invariant:
         UPDATE approvals
@@ -393,6 +397,9 @@ async def consume_approval_atomic(
         raise ValueError("Approval was issued for a different profile (fail-closed).")
     if tool_name is not None and approval.tool_name != tool_name:
         raise ValueError("Approval was issued for a different tool (fail-closed).")
+    if agent_id is not None and getattr(approval, "agent_id", None) is not None:
+        if approval.agent_id != agent_id:
+            raise ValueError("Approval was issued for a different agent (fail-closed).")
 
     now = datetime.now(timezone.utc)
     if ensure_utc(approval.expires_at) <= now:

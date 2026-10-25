@@ -318,7 +318,38 @@ class ResponseSynthesizerNode(BaseNode):
             sections.append("## Deliberation Outcome\n")
             sections.append("All peer critiques and constraints were successfully resolved across deliberation rounds. Full consensus achieved.\n")
 
-        # 5. Canonical Deduplicated Disclaimer Footer
+        # 6. Staged Actions for Human Approval (ADR 0001 §2.11 item 6)
+        staged_actions = []
+        if hasattr(bb, "get_active_staged_actions"):
+            staged_actions = bb.get_active_staged_actions()
+        if not staged_actions and isinstance(delib_state.get("staged_actions"), list):
+            staged_actions = delib_state["staged_actions"]
+
+        if staged_actions:
+            sections.append("## Staged Actions for Human Approval\n")
+            sections.append(
+                "The panel has staged the following operations for human verification. "
+                "Per safety invariants, all panel-staged actions require explicit human approval before execution:\n"
+            )
+            for idx, action in enumerate(staged_actions, 1):
+                a_dict = action.model_dump() if hasattr(action, "model_dump") else (action if isinstance(action, dict) else {})
+                aid = a_dict.get("agent_id", "specialist")
+                tname = a_dict.get("tool_name", "unnamed_tool")
+                tier = a_dict.get("risk_tier", "write_local")
+                rat = a_dict.get("rationale") or "Operational execution staged by specialist."
+                args_map = a_dict.get("tool_args") or {}
+
+                sections.append(f"### Staged Action {idx}: `{aid}` → `{tname}`")
+                sections.append(f"- **Agent**: `{aid}`")
+                sections.append(f"- **Tool**: `{tname}`")
+                sections.append(f"- **Risk Tier**: `{tier}` (Forced Human Verification)")
+                sections.append(f"- **Rationale**: {rat}")
+                if args_map:
+                    args_formatted = ", ".join(f"`{k}`: `{v}`" for k, v in sorted(args_map.items()))
+                    sections.append(f"- **Proposed Parameters**: {args_formatted}")
+                sections.append("- **Status**: Awaiting human approval\n")
+
+        # 7. Canonical Deduplicated Disclaimer Footer
         sections.append(CANONICAL_DISCLAIMER)
 
         full_output = "\n".join(sections)
@@ -499,13 +530,61 @@ class ResponseSynthesizerNode(BaseNode):
                 pass
 
         clean_completion = self.strip_disclaimers(full_output)
+
+        # Collect staged actions if in deliberation mode (ADR 0001 §2.6, §2.11)
+        staged_actions = []
+        delib_state = state.get("deliberation_state")
+        if delib_state:
+            if isinstance(delib_state.get("staged_actions"), list):
+                staged_actions = delib_state["staged_actions"]
+            else:
+                try:
+                    bb = BlackboardManager.from_state_dict(delib_state)
+                    staged_actions = bb.get_active_staged_actions()
+                except Exception:
+                    pass
+
+        tool_calls: List[Dict[str, Any]] = []
+        if staged_actions:
+            for idx, action in enumerate(staged_actions, 1):
+                a_dict = action.model_dump() if hasattr(action, "model_dump") else (action if isinstance(action, dict) else {})
+                aid = a_dict.get("agent_id", "specialist")
+                tname = a_dict.get("tool_name", "")
+                targs = a_dict.get("tool_args") or {}
+                if tname:
+                    tool_calls.append({
+                        "id": f"call_staged_{idx}_{tname}",
+                        "name": tname,
+                        "args": targs,
+                        "agent_id": aid,
+                        "is_panel_staged": True,
+                    })
+
+        next_step = "tools" if tool_calls else "output_guardrail"
         result_payload: Dict[str, Any] = {
             "output": clean_completion if not (specialist_outputs or state.get("deliberation_state")) else full_output,
-            "next_step": "output_guardrail",
+            "next_step": next_step,
             "audit_events": accumulated,
         }
+        if tool_calls:
+            result_payload["tool_calls"] = tool_calls
+            result_payload["is_panel_staged"] = True
+
         if specialist_outputs or state.get("deliberation_state") or not any(isinstance(m, AIMessage) for m in state.get("messages", [])):
-            result_payload["messages"] = [AIMessage(content=full_output)]
+            if tool_calls:
+                ai_calls = [
+                    {"id": tc["id"], "name": tc["name"], "args": tc["args"]}
+                    for tc in tool_calls
+                ]
+                result_payload["messages"] = [AIMessage(content=full_output, tool_calls=ai_calls)]
+            else:
+                result_payload["messages"] = [AIMessage(content=full_output)]
+
+        if tool_calls:
+            if follow_ups is None:
+                follow_ups = []
+            follow_ups.append("Review and approve staged panel actions")
+
         if follow_ups:
             result_payload["follow_up_suggestions"] = follow_ups
 

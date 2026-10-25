@@ -30,9 +30,11 @@ from typing import (
     AsyncGenerator,
     AsyncIterator,
     Dict,
+    FrozenSet,
     List,
     Optional,
     Sequence,
+    Set,
     Union,
 )
 import uuid
@@ -54,12 +56,19 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.store.base import BaseStore
 
 from yarvelle_core.audit.logger import record_audit
+from yarvelle_core.audit.redaction import REDACTED_PLACEHOLDER
 from yarvelle_core.config import settings
 from yarvelle_core.constants.api import (
+    SSE_DELIBERATION_EVENTS,
     SSE_EVENT_APPROVAL_REQUIRED,
+    SSE_EVENT_DELIBERATION_CRITIQUE,
+    SSE_EVENT_DELIBERATION_END,
+    SSE_EVENT_DELIBERATION_PROPOSAL,
+    SSE_EVENT_DELIBERATION_REVISION,
     SSE_EVENT_DONE,
     SSE_EVENT_ERROR,
     SSE_EVENT_MESSAGE,
+    SSE_EVENT_PANEL_START,
     SSE_EVENT_REFUSAL,
     SSE_EVENT_SUGGESTIONS,
     SSE_EVENT_TOKEN,
@@ -70,6 +79,7 @@ from yarvelle_core.constants.api import (
 )
 from yarvelle_core.constants.models import PROVIDER_OLLAMA
 from yarvelle_core.constants.paths import AGENTS_DIR, DEFAULT_AUDIT_LOG_FILE, LOGS_DIR, SKILLS_DIR, SYSTEM_AGENTS_DIR
+from yarvelle_core.scope.context import current_scope_context, is_scope_granted, matches_scope
 from yarvelle_core.engine.graph import (
     create_agent_graph,
     create_async_sqlite_saver,
@@ -434,6 +444,152 @@ class AgentExecutionService:
         data_str = json.dumps(event)
         return f"event: {event_type}\ndata: {data_str}\n\n"
 
+    @staticmethod
+    def filter_deliberation_event(
+        name: str,
+        data: Dict[str, Any],
+        execution_context: Optional[Dict[str, Any]] = None,
+        client_scope: Optional[str] = None,
+        granted_scopes: Optional[Union[Set[str], FrozenSet[str], Sequence[str]]] = None,
+    ) -> Dict[str, Any]:
+        """Applies scope-filtering to deliberation SSE event payloads per ADR 0001 §2.3 and §2.12.
+
+        In same-domain panels, all fields are emitted in full.
+        In cross-domain panels, free-text fields ('summary', 'critique', 'resolved_critiques')
+        from unauthorized scopes are redacted to '[REDACTED]' while preserving all
+        structured numeric/typed metadata.
+        """
+        payload = dict(data)
+
+        # 1. Determine active client scope and granted scopes
+        ambient_ctx = current_scope_context()
+        ctx_scope = client_scope
+        effective_grants: Set[str] = set(granted_scopes) if granted_scopes is not None else set()
+        is_cross_domain = False
+
+        ec_scope = None
+        ec_grants = None
+        ec_is_cross = None
+        ec_scopes = None
+        if execution_context:
+            if isinstance(execution_context, dict):
+                ec_scope = execution_context.get("scope") or execution_context.get("client_scope")
+                ec_grants = execution_context.get("granted_scopes")
+                ec_is_cross = execution_context.get("is_cross_domain")
+                ec_scopes = execution_context.get("scopes")
+            else:
+                ec_scope = getattr(execution_context, "scope", None) or getattr(execution_context, "client_scope", None)
+                ec_grants = getattr(execution_context, "granted_scopes", None)
+                ec_is_cross = getattr(execution_context, "is_cross_domain", None)
+                ec_scopes = getattr(execution_context, "scopes", None)
+
+        ctx_scope = ctx_scope or ec_scope
+        if ec_grants is not None and granted_scopes is None:
+            if isinstance(ec_grants, (list, tuple, set, frozenset)):
+                effective_grants.update(str(s) for s in ec_grants if s)
+        if ec_is_cross is not None:
+            is_cross_domain = bool(ec_is_cross)
+
+        if ambient_ctx is not None:
+            if not ctx_scope and isinstance(ambient_ctx.scope, str):
+                ctx_scope = ambient_ctx.scope
+            if granted_scopes is None and ec_grants is None and ambient_ctx.granted_scopes:
+                effective_grants.update(str(s) for s in ambient_ctx.granted_scopes if s)
+
+        # Check explicit panel / payload flags: payload flags can only escalate to True, never demote True to False
+        if bool(payload.get("cross_domain")) or bool(payload.get("is_cross_domain")):
+            is_cross_domain = True
+
+        # Check multi-scope declarations with type-safe collection & string verification
+        raw_scopes = payload.get("scopes")
+        if not isinstance(raw_scopes, (list, tuple, set, frozenset)):
+            raw_scopes = ec_scopes
+        if isinstance(raw_scopes, (list, tuple, set, frozenset)):
+            str_scopes = [s for s in raw_scopes if isinstance(s, str) and s.strip()]
+            if len(str_scopes) > 1:
+                root_domains = {s.split(".")[0] for s in str_scopes}
+                if len(root_domains) > 1 or len(str_scopes) > 1:
+                    is_cross_domain = True
+
+        # Check critique scope crossing with type-safe string verification
+        rev_sc = payload.get("reviewer_scope")
+        tgt_sc = payload.get("target_scope")
+        if (
+            isinstance(rev_sc, str)
+            and isinstance(tgt_sc, str)
+            and rev_sc.strip()
+            and tgt_sc.strip()
+            and rev_sc.split(".")[0] != tgt_sc.split(".")[0]
+        ):
+            is_cross_domain = True
+
+        # Check proposal scope against client scope with type-safe string verification
+        prop_sc = payload.get("scope")
+        if (
+            isinstance(prop_sc, str)
+            and isinstance(ctx_scope, str)
+            and prop_sc.strip()
+            and ctx_scope.strip()
+            and prop_sc.split(".")[0] != ctx_scope.split(".")[0]
+        ):
+            is_cross_domain = True
+
+        if payload.get("unauthorized", False):
+            is_cross_domain = True
+
+        # Same-domain panel: full fields are preserved
+        if not is_cross_domain:
+            return payload
+
+        # Cross-domain panel: redact free text from unauthorized scopes (fails closed)
+        if name in (SSE_EVENT_DELIBERATION_PROPOSAL, SSE_EVENT_DELIBERATION_REVISION):
+            is_authorized = False
+            if not payload.get("unauthorized", False):
+                if isinstance(prop_sc, str) and prop_sc.strip():
+                    if effective_grants:
+                        is_authorized = is_scope_granted(prop_sc, effective_grants)
+                    elif ctx_scope and isinstance(ctx_scope, str) and ctx_scope.strip():
+                        is_authorized = matches_scope(ctx_scope, prop_sc)
+
+            if not is_authorized:
+                if "summary" in payload:
+                    payload["summary"] = REDACTED_PLACEHOLDER
+                if "resolved_critiques" in payload:
+                    if isinstance(payload["resolved_critiques"], list):
+                        payload["resolved_critiques"] = [
+                            REDACTED_PLACEHOLDER for _ in payload["resolved_critiques"]
+                        ]
+                    else:
+                        payload["resolved_critiques"] = REDACTED_PLACEHOLDER
+
+        elif name == SSE_EVENT_DELIBERATION_CRITIQUE:
+            is_authorized = False
+            if not payload.get("unauthorized", False):
+                critique_scopes = []
+                if isinstance(rev_sc, str) and rev_sc.strip():
+                    critique_scopes.append(rev_sc)
+                if isinstance(tgt_sc, str) and tgt_sc.strip():
+                    critique_scopes.append(tgt_sc)
+                critique_sc = payload.get("scope")
+                if isinstance(critique_sc, str) and critique_sc.strip():
+                    critique_scopes.append(critique_sc)
+
+                if critique_scopes:
+                    if effective_grants:
+                        is_authorized = all(is_scope_granted(sc, effective_grants) for sc in critique_scopes)
+                    elif ctx_scope and isinstance(ctx_scope, str) and ctx_scope.strip():
+                        client_grants = {ctx_scope, f"{ctx_scope}.*"}
+                        is_authorized = all(is_scope_granted(sc, client_grants) for sc in critique_scopes)
+
+            if not is_authorized:
+                if "critique" in payload:
+                    payload["critique"] = REDACTED_PLACEHOLDER
+                if "proposed_resolution" in payload:
+                    payload["proposed_resolution"] = REDACTED_PLACEHOLDER
+
+        return payload
+
+
     # ------------------------------------------------------------------------
     # Execution Methods
     # ------------------------------------------------------------------------
@@ -712,10 +868,13 @@ class AgentExecutionService:
             "attachments": attachments or [],
             "notes": [],
             "emergency_red_flags": None,
-            "execution_plan": None,
+            "execution_plan": kwargs.get("execution_plan"),
             "provisioned_references": {},
             "specialist_outputs": {},
         }
+        for opt_k in ("target_agents", "scopes", "deliberation_config"):
+            if opt_k in kwargs:
+                initial_input[opt_k] = kwargs[opt_k]
         # Ingest multi-source context (attachments, notes, catalog summary)
 
         effective_run_id = str(kwargs.get("run_id") or f"run_{uuid.uuid4().hex}")
@@ -878,6 +1037,22 @@ class AgentExecutionService:
                             if cits:
                                 citations.extend(cits)
                                 yield {"type": "citations", "citations": cits}
+                        elif name in SSE_DELIBERATION_EVENTS:
+                            logger.info(
+                                "deliberation_event_forwarded",
+                                event_name=name,
+                                thread_id=thread_id,
+                            )
+                            c_scope = kwargs.get("client_scope") or kwargs.get("scope")
+                            g_scopes = kwargs.get("granted_scopes")
+                            filtered = self.filter_deliberation_event(
+                                name,
+                                data,
+                                execution_context=execution_context,
+                                client_scope=c_scope,
+                                granted_scopes=g_scopes,
+                            )
+                            yield {"type": name, **filtered}
 
                     elif ev_kind == "on_chain_end":
                         if not refusal_triggered and not accumulated_text:
@@ -1237,6 +1412,22 @@ class AgentExecutionService:
                             yield data
                             if name == SSE_EVENT_SUGGESTIONS:
                                 suggestions = data.get("suggestions", [])
+                        elif name in SSE_DELIBERATION_EVENTS:
+                            logger.info(
+                                "deliberation_resume_event_forwarded",
+                                event_name=name,
+                                thread_id=thread_id,
+                            )
+                            c_scope = kwargs.get("client_scope") or kwargs.get("scope")
+                            g_scopes = kwargs.get("granted_scopes")
+                            filtered = self.filter_deliberation_event(
+                                name,
+                                data,
+                                execution_context=execution_context,
+                                client_scope=c_scope,
+                                granted_scopes=g_scopes,
+                            )
+                            yield {"type": name, **filtered}
 
             except Exception:
                 logger.exception("resume_stream_error", thread_id=thread_id)
@@ -1364,8 +1555,10 @@ class AgentExecutionService:
 
 
 ExecutionService = AgentExecutionService
+filter_deliberation_event = AgentExecutionService.filter_deliberation_event
 
 __all__ = [
     "AgentExecutionService",
     "ExecutionService",
+    "filter_deliberation_event",
 ]

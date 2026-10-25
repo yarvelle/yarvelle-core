@@ -175,6 +175,14 @@ SSE_EVENT_DELIBERATION_CRITIQUE: str = "deliberation_critique"
 SSE_EVENT_DELIBERATION_REVISION: str = "deliberation_revision"
 SSE_EVENT_DELIBERATION_END: str = "deliberation_end"
 
+SSE_DELIBERATION_EVENTS: tuple[str, ...] = (
+    SSE_EVENT_PANEL_START,
+    SSE_EVENT_DELIBERATION_PROPOSAL,
+    SSE_EVENT_DELIBERATION_CRITIQUE,
+    SSE_EVENT_DELIBERATION_REVISION,
+    SSE_EVENT_DELIBERATION_END,
+)
+
 # Aliases without SSE_ prefix (for convenience and backward-compatibility)
 EVENT_MESSAGE: str = SSE_EVENT_MESSAGE
 EVENT_TOKEN: str = SSE_EVENT_TOKEN

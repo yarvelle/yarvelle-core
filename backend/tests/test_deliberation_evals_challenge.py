@@ -368,8 +368,8 @@ async def test_challenge_selective_revision_multiple_critiques_deduping():
 
 
 @pytest.mark.asyncio
-async def test_challenge_selective_revision_drops_staged_actions_in_phase_1():
-    """Verify Phase 1 safety invariant: staged write actions in revised proposals are strictly dropped."""
+async def test_challenge_selective_revision_retains_and_normalizes_staged_actions_in_phase_3():
+    """Verify Phase 3 invariant: staged write actions in revised proposals are retained and normalized."""
     agents = ["specialist_a", "specialist_b"]
     active = {
         "specialist_a": AgentProposal(agent_id="specialist_a", round_num=1, scope="scope_a", summary="A plan"),
@@ -386,13 +386,13 @@ async def test_challenge_selective_revision_drops_staged_actions_in_phase_1():
         resolved=False,
     )
 
-    model = MockChatModel(model_name="mock-staged-drop")
+    model = MockChatModel(model_name="mock-staged-retention")
     # Specialist B attempts to stage a write action during selective revision
     model.queue_response({
         "agent_id": "specialist_b",
         "round_num": 2,
         "scope": "scope_a",
-        "summary": "Revised plan B with unauthorized write actions",
+        "summary": "Revised plan B with staged write action",
         "staged_actions": [
             {
                 "agent_id": "specialist_b",
@@ -412,8 +412,13 @@ async def test_challenge_selective_revision_drops_staged_actions_in_phase_1():
     )
 
     assert revised["specialist_b"].round_num == 2
-    # Invariant: staged_actions must be dropped in Phase 1
-    assert revised["specialist_b"].staged_actions == []
+    # Invariant: staged_actions are retained in Phase 3 with normalized agent_id and fail-closed risk tier
+    assert len(revised["specialist_b"].staged_actions) == 1
+    staged = revised["specialist_b"].staged_actions[0]
+    assert staged.agent_id == "specialist_b"
+    assert staged.tool_name == "update_record"
+    # Unrecognized tool fails closed to irreversible
+    assert staged.risk_tier == "irreversible"
 
 
 # ============================================================================

@@ -115,6 +115,32 @@ class PanelDefaultConstraintSpec(BaseModel):
     unit: str = Field(..., description="Measurement unit matching closed unit registry")
 
 
+class CrossPackGrantSpec(BaseModel):
+    """Specification of an explicit cross-pack panel membership grant.
+
+    Governs which external packs and agents are authorized to participate
+    in deliberation panels contributed by this pack (ADR 0001 §2.9).
+    """
+
+    pack: str = Field(..., description="Target pack slug or domain identifier authorized for cross-pack collaboration")
+    panels: List[str] = Field(
+        default_factory=list,
+        description="Optional list of specific panel IDs permitted to include this pack's agents. If empty, all panels in this pack are permitted.",
+    )
+    agents: List[str] = Field(
+        default_factory=list,
+        description="Optional list of specific agent IDs permitted. If empty, all agents from the granted pack are permitted.",
+    )
+
+    @field_validator("pack")
+    @classmethod
+    def validate_pack_slug(cls, v: str) -> str:
+        clean = v.strip().lower()
+        if not SLUG_REGEX.match(clean):
+            raise ValueError(f"Cross-pack grant pack '{v}' must be a lowercase slug matching {SLUG_REGEX.pattern}")
+        return clean
+
+
 class PackPanelSpec(BaseModel):
     """Specification of a multi-agent deliberation panel in a pack."""
 
@@ -128,6 +154,10 @@ class PackPanelSpec(BaseModel):
     )
     scopes: List[str] = Field(
         default_factory=list, description="Domain scopes participating in the panel (single scope in Phase 1)"
+    )
+    cross_pack_grants: List[str] = Field(
+        default_factory=list,
+        description="Explicit cross-pack grants authorizing foreign pack/domain agents on this specific panel (ADR 0001 §2.9)",
     )
 
 
@@ -166,6 +196,10 @@ class PackManifest(BaseModel):
     scopes: List[ScopeDefinitionSpec] = Field(default_factory=list, description="Scopes owned by this pack")
     reads: List[ReadScopeSpec] = Field(default_factory=list, description="Scopes of other packs requested for reading")
     provides: Optional[PackProvidesSpec] = Field(default_factory=PackProvidesSpec, description="Contributed runtime artifacts")
+    cross_pack_grants: List[Union[str, CrossPackGrantSpec]] = Field(
+        default_factory=list,
+        description="Explicit cross-pack grants authorizing foreign packs to participate in deliberation panels (ADR 0001 §2.9)",
+    )
     migrations: Optional[PackMigrationsSpec] = Field(default=None, description="Database migration branch spec")
     compat: Optional[Dict[str, Any]] = Field(default=None, description="Compatibility metadata")
 
@@ -213,6 +247,10 @@ class PackSpec(BaseModel):
     jobs: List[Any] = Field(default_factory=list, description="Job handlers contributed by the pack")
     manifest_path: Optional[str] = Field(default=None, description="Filesystem path to source pack.yaml")
     panels: List[PackPanelSpec] = Field(default_factory=list, description="Registered multi-agent deliberation panels")
+    cross_pack_grants: List[Union[str, CrossPackGrantSpec]] = Field(
+        default_factory=list,
+        description="Explicit cross-pack grants authorizing foreign packs to participate in deliberation panels (ADR 0001 §2.9)",
+    )
     provides: Optional[PackProvidesSpec] = Field(default=None, description="Optional provides specification")
     agents: List[str] = Field(default_factory=list, description="Agent identifiers contributed by this pack")
 

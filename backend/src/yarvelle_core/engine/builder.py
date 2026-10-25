@@ -742,7 +742,21 @@ class GraphBuilder:
 
         # Response synthesizer edge
         if self.include_synthesizer and synthesizer_node is not None:
-            builder.add_edge("response_synthesizer", "output_guardrail")
+            def route_response_synthesizer(state: AgentState) -> str:
+                messages = state.get("messages", [])
+                last_ai = next((m for m in reversed(messages) if isinstance(m, AIMessage)), None)
+                tool_calls = getattr(last_ai, "tool_calls", []) if last_ai else []
+                if not tool_calls and state.get("tool_calls"):
+                    tool_calls = state.get("tool_calls")
+                if tool_calls and state.get("iteration_count", 0) < self.max_tool_iterations:
+                    return "tools"
+                return "output_guardrail"
+
+            builder.add_conditional_edges(
+                "response_synthesizer",
+                route_response_synthesizer,
+                {"tools": "tools", "output_guardrail": "output_guardrail"},
+            )
 
         # Agent conditional routing
         def route_agent(state: AgentState) -> str:
@@ -769,9 +783,28 @@ class GraphBuilder:
         # Tool execution loop
         if self.include_tool_validator:
             builder.add_edge("tools", "tool_validator")
-            builder.add_edge("tool_validator", "agent")
+
+            def route_tool_validator(state: AgentState) -> str:
+                if state.get("deliberation_state") or state.get("is_panel_staged"):
+                    return "output_guardrail"
+                return "agent"
+
+            builder.add_conditional_edges(
+                "tool_validator",
+                route_tool_validator,
+                {"output_guardrail": "output_guardrail", "agent": "agent"},
+            )
         else:
-            builder.add_edge("tools", "agent")
+            def route_tools(state: AgentState) -> str:
+                if state.get("deliberation_state") or state.get("is_panel_staged"):
+                    return "output_guardrail"
+                return "agent"
+
+            builder.add_conditional_edges(
+                "tools",
+                route_tools,
+                {"output_guardrail": "output_guardrail", "agent": "agent"},
+            )
 
         # Output guardrail conditional routing
         def route_output_guardrail(state: AgentState) -> str:

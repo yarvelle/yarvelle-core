@@ -31,6 +31,8 @@ import { ExecutionPlanCard } from '../src/chat/ExecutionPlanCard.js';
 import { ThinkingIndicator } from '../src/chat/ThinkingIndicator.js';
 import { CodeBlock } from '../src/chat/CodeBlock.js';
 import { ChatMarkdown } from '../src/chat/ChatMarkdown.js';
+import { DeliberationRoundtable, RoundtableCard } from '../src/chat/DeliberationRoundtable.js';
+
 
 // Notes
 import { RecordSearch } from '../src/notes/RecordSearch.js';
@@ -163,6 +165,31 @@ describe('Domain-Neutral Component Module Rendering & Data-Slots', () => {
     );
     expect(markdownHtml).toContain('yc-ChatMarkdown-root');
     expect(markdownHtml).toContain('data-slot="chat-markdown"');
+
+    const roundtableHtml = renderToString(
+      <DeliberationRoundtable
+        panel_id="panel-test"
+        title="Roundtable Review"
+        agents={['agent-1', 'agent-2']}
+        converged={true}
+      />
+    );
+    expect(roundtableHtml).toContain('yc-DeliberationRoundtable-root');
+    expect(roundtableHtml).toContain('yc-RoundtableCard-root');
+    expect(roundtableHtml).toContain('data-slot="deliberation-roundtable"');
+    expect(roundtableHtml).toContain('data-slot="panel-header"');
+    expect(roundtableHtml).toContain('data-slot="agent-pills"');
+
+    const cardAliasHtml = renderToString(
+      <RoundtableCard
+        panel_id="card-test"
+        title="Card Alias"
+        agents={['agent-a']}
+      />
+    );
+    expect(cardAliasHtml).toContain('yc-DeliberationRoundtable-root');
+    expect(cardAliasHtml).toContain('yc-RoundtableCard-root');
+    expect(cardAliasHtml).toContain('data-slot="deliberation-roundtable"');
   });
 
   it('renders notes components', () => {

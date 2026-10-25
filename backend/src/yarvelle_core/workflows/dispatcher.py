@@ -328,6 +328,8 @@ class ExecutionDispatcher(BaseNode):
                 tool_registry=self.tool_registry,
                 default_tools=self.default_tools,
                 config=delib_config,
+                session=state.get("session") or state.get("db_session"),
+                session_factory=state.get("session_factory"),
             )
             res_state = await engine.run(state)
             outputs = res_state.get("specialist_outputs", {})

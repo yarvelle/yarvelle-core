@@ -22,3 +22,6 @@ export * from './ChatMarkdown.js';
 export * from './MessageToolbar.js';
 export * from './ActivityLogDrawer.js';
 export * from './ModelSelector.js';
+export * from './DeliberationRoundtable.js';
+export * from './RoundtableCard.js';
+
