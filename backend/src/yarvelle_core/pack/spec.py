@@ -107,6 +107,30 @@ class PackMigrationsSpec(BaseModel):
     depends_on_core: str = Field(default="core@0010", description="Earliest core schema revision required")
 
 
+class PanelDefaultConstraintSpec(BaseModel):
+    """Specification of default constraint declared by a panel."""
+
+    id: str = Field(..., pattern=r"^[a-z0-9_-]{1,64}$", description="Constraint slug identifier")
+    description: str = Field(default="", description="Human-readable description of constraint")
+    unit: str = Field(..., description="Measurement unit matching closed unit registry")
+
+
+class PackPanelSpec(BaseModel):
+    """Specification of a multi-agent deliberation panel in a pack."""
+
+    id: str = Field(..., pattern=r"^[a-z0-9_-]{1,64}$", description="Panel slug identifier")
+    title: str = Field(..., description="Display title for the panel")
+    description: str = Field(default="", description="Purpose and objective of the panel")
+    agents: List[str] = Field(..., min_length=2, description="Specialist agent IDs participating in the panel")
+    max_rounds: int = Field(default=2, ge=1, le=4, description="Deliberation round limit (default 2)")
+    default_constraints: List[PanelDefaultConstraintSpec] = Field(
+        default_factory=list, description="Default shared constraints for this panel"
+    )
+    scopes: List[str] = Field(
+        default_factory=list, description="Domain scopes participating in the panel (single scope in Phase 1)"
+    )
+
+
 class PackProvidesSpec(BaseModel):
     """Declarative manifest entries contributed by a pack on disk."""
 
@@ -121,6 +145,7 @@ class PackProvidesSpec(BaseModel):
     locales_dir: Optional[str] = Field(default="resources/locales/", description="Locale message bundles directory")
     connectors_dir: Optional[str] = Field(default="connectors/", description="Connector manifests directory")
     evals: Optional[str] = Field(default=None, description="Path to evals definition or dataset")
+    panels: List[PackPanelSpec] = Field(default_factory=list, description="Declared multi-agent deliberation panels contributed by this pack")
 
 
 class PackManifest(BaseModel):
@@ -187,6 +212,9 @@ class PackSpec(BaseModel):
     scoped_models: List[Any] = Field(default_factory=list, description="SQLAlchemy model classes extending ScopedMixin")
     jobs: List[Any] = Field(default_factory=list, description="Job handlers contributed by the pack")
     manifest_path: Optional[str] = Field(default=None, description="Filesystem path to source pack.yaml")
+    panels: List[PackPanelSpec] = Field(default_factory=list, description="Registered multi-agent deliberation panels")
+    provides: Optional[PackProvidesSpec] = Field(default=None, description="Optional provides specification")
+    agents: List[str] = Field(default_factory=list, description="Agent identifiers contributed by this pack")
 
     @field_validator("id", "domain")
     @classmethod

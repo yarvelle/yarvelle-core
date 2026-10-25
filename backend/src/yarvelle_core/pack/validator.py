@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 from typing import Collection, List, Optional, Set, Union
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
@@ -122,6 +123,64 @@ def validate_pack_spec(spec: PackSpec, core_version: Optional[str] = None) -> No
                     f"'{spec.domain}_' or '{spec.id}_'."
                 )
 
+    # 7. Rule 7: Single-Domain Panel Invariant in Phase 1 (ADR 0001 §2.9, §7)
+    all_panels = list(spec.panels)
+    if getattr(spec, "provides", None) and spec.provides.panels:
+        for p in spec.provides.panels:
+            if p not in all_panels:
+                all_panels.append(p)
+
+    for panel in all_panels:
+        if len(panel.agents) < 2:
+            errors.append(f"Panel '{panel.id}' must specify at least 2 agents, got {len(panel.agents)}.")
+        if len(panel.agents) != len(set(panel.agents)):
+            errors.append(f"Panel '{panel.id}' contains duplicate agents: {panel.agents}.")
+        if panel.max_rounds < 1 or panel.max_rounds > 4:
+            errors.append(f"Panel '{panel.id}' max_rounds must be between 1 and 4, got {panel.max_rounds}.")
+
+        for constraint in panel.default_constraints:
+            if not re.match(r"^[a-z0-9_-]{1,64}$", constraint.id):
+                errors.append(f"Panel '{panel.id}' constraint '{constraint.id}' is not a valid slug.")
+
+        # Check declared scopes if provided
+        if getattr(panel, "scopes", None):
+            for sc in panel.scopes:
+                if not any(matches_scope(owned, sc) for owned in spec.owned_scopes):
+                    errors.append(
+                        f"Panel '{panel.id}' declares scope '{sc}' not in pack owned_scopes {spec.owned_scopes}."
+                    )
+            domain_prefixes = {s.split(".")[0] for s in panel.scopes if "." in s}
+            if len(domain_prefixes) > 1 or (domain_prefixes and not any(p == spec.domain for p in domain_prefixes)):
+                errors.append(
+                    f"Panel '{panel.id}' spans multiple domain scopes {panel.scopes}. "
+                    "Phase 1 panels must be single-domain (cross-domain panels rejected)."
+                )
+
+        # Check agent domain ownership (Phase 1 single-domain invariant)
+        if getattr(spec, "agents", None) and spec.agents:
+            for ag_id in panel.agents:
+                if ag_id not in spec.agents:
+                    errors.append(
+                        f"Panel '{panel.id}' contains agent '{ag_id}' not contributed by pack '{spec.id}'. "
+                        "All panel members must belong to the declaring pack's owned domain scope in Phase 1 (cross-domain panels rejected)."
+                    )
+        else:
+            for ag_id in panel.agents:
+                if "." in ag_id:
+                    prefix = ag_id.split(".")[0]
+                    if prefix != spec.domain and not any(matches_scope(owned, f"{prefix}.*") for owned in spec.owned_scopes):
+                        errors.append(
+                            f"Panel '{panel.id}' contains cross-domain agent '{ag_id}' outside pack domain '{spec.domain}'. "
+                            "Cross-domain panels are rejected in Phase 1 (single-domain invariant)."
+                        )
+                elif ":" in ag_id:
+                    prefix = ag_id.split(":")[0]
+                    if prefix != spec.domain and prefix != spec.id:
+                        errors.append(
+                            f"Panel '{panel.id}' contains cross-domain agent '{ag_id}' outside pack '{spec.id}'. "
+                            "Cross-domain panels are rejected in Phase 1 (single-domain invariant)."
+                        )
+
     if errors:
         raise PackValidationError(spec.id, errors)
 
@@ -179,6 +238,41 @@ def validate_pack_yaml_file(yaml_path: Union[str, Path], core_version: Optional[
             errors.append(
                 f"Pack declares risk_tier_max='{manifest.risk_tier_max}' but provides.evals is missing."
             )
+
+    # Deliberation panels single-domain invariant
+    if manifest.provides and manifest.provides.panels:
+        for panel in manifest.provides.panels:
+            if len(panel.agents) < 2:
+                errors.append(f"Panel '{panel.id}' must specify at least 2 agents, got {len(panel.agents)}.")
+            if len(panel.agents) != len(set(panel.agents)):
+                errors.append(f"Panel '{panel.id}' contains duplicate agents: {panel.agents}.")
+            if panel.max_rounds < 1 or panel.max_rounds > 4:
+                errors.append(f"Panel '{panel.id}' max_rounds must be between 1 and 4, got {panel.max_rounds}.")
+            for constraint in panel.default_constraints:
+                if not re.match(r"^[a-z0-9_-]{1,64}$", constraint.id):
+                    errors.append(f"Panel '{panel.id}' constraint '{constraint.id}' is not a valid slug.")
+            if getattr(panel, "scopes", None):
+                domain_prefixes = {s.split(".")[0] for s in panel.scopes if "." in s}
+                if len(domain_prefixes) > 1 or (domain_prefixes and not any(p == manifest.domain for p in domain_prefixes)):
+                    errors.append(
+                        f"Panel '{panel.id}' spans multiple domain scopes {panel.scopes}. "
+                        "Phase 1 panels must be single-domain (cross-domain panels rejected)."
+                    )
+            for ag_id in panel.agents:
+                if "." in ag_id:
+                    prefix = ag_id.split(".")[0]
+                    if prefix != manifest.domain and not any(s.id.startswith(f"{prefix}.") or s.id == f"{prefix}.*" for s in manifest.scopes):
+                        errors.append(
+                            f"Panel '{panel.id}' contains cross-domain agent '{ag_id}' outside pack domain '{manifest.domain}'. "
+                            "Cross-domain panels are rejected in Phase 1 (single-domain invariant)."
+                        )
+                elif ":" in ag_id:
+                    prefix = ag_id.split(":")[0]
+                    if prefix != manifest.domain and prefix != manifest.id:
+                        errors.append(
+                            f"Panel '{panel.id}' contains cross-domain agent '{ag_id}' outside pack '{manifest.id}'. "
+                            "Cross-domain panels are rejected in Phase 1 (single-domain invariant)."
+                        )
 
     if errors:
         raise PackValidationError(manifest.id, errors)

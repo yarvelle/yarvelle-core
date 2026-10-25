@@ -59,8 +59,11 @@ from yarvelle_core.schemas.health import (
 )
 from yarvelle_core.schemas.plan import (
     AgentTask,
+    DeliberationBudget,
+    DeliberationConfig,
     ExecutionMode,
     ExecutionPlan,
+    SharedConstraint,
 )
 
 from yarvelle_core.schemas.notes import (
@@ -109,8 +112,11 @@ __all__ = [
     "WorkspaceInfo",
     "HealthResponse",
     "AgentTask",
+    "DeliberationBudget",
+    "DeliberationConfig",
     "ExecutionMode",
     "ExecutionPlan",
+    "SharedConstraint",
     "WorkspaceNoteSummary",
     "WorkspaceNoteDetail",
     "NoteSummary",

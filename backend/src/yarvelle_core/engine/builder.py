@@ -175,9 +175,23 @@ class GraphBuilder:
         self.include_synthesizer = enabled
         return self
 
-    def with_safety_policy(self, safety_policy: SafetyPolicy) -> GraphBuilder:
-        """Attach a SafetyPolicy instance for input/output guardrail enforcement."""
-        self.safety_policy = safety_policy
+    def with_safety_policy(
+        self, safety_policy: Union[SafetyPolicy, Sequence[SafetyPolicy]]
+    ) -> GraphBuilder:
+        """Attach a SafetyPolicy instance or sequence of policies for input/output guardrail enforcement."""
+        if isinstance(safety_policy, (list, tuple)):
+            from yarvelle_core.engine.safety_policy import UnionSafetyPolicy
+
+            self.safety_policy = UnionSafetyPolicy(safety_policy)
+        else:
+            self.safety_policy = safety_policy
+        return self
+
+    def with_safety_policies(self, safety_policies: Sequence[SafetyPolicy]) -> GraphBuilder:
+        """Attach multiple SafetyPolicy instances aggregated via UnionSafetyPolicy."""
+        from yarvelle_core.engine.safety_policy import UnionSafetyPolicy
+
+        self.safety_policy = UnionSafetyPolicy(safety_policies)
         return self
 
     # ========================================================================
@@ -223,9 +237,9 @@ class GraphBuilder:
         self.subgraphs[name] = subgraph
         return self
 
-    def with_tools(self, tools: Sequence[Any]) -> GraphBuilder:
+    def with_tools(self, tools: Optional[Sequence[Any]]) -> GraphBuilder:
         """Configure tools available for agent binding and execution."""
-        self.tools = list(tools)
+        self.tools = list(tools) if tools is not None else []
         return self
 
     def with_system_prompt(self, system_prompt: Optional[str]) -> GraphBuilder:
@@ -337,8 +351,14 @@ class GraphBuilder:
                 else None
             )
         )
+        norm_allowed_tools = None
+        if builder_allowed_tools is not None:
+            norm_allowed_tools = [
+                t["name"] if isinstance(t, dict) and "name" in t else (getattr(t, "name", str(t)))
+                for t in builder_allowed_tools
+            ]
         tool_node = self._custom_nodes.get("tools") or ToolNode(
-            allowed_tools=builder_allowed_tools,
+            allowed_tools=norm_allowed_tools,
             tools=self.tools,
         )
         tool_validator_node = self._custom_nodes.get("tool_validator") or ToolValidatorNode()
@@ -366,7 +386,7 @@ class GraphBuilder:
         synthesizer_node = (
             self._custom_nodes.get("response_synthesizer")
             or self._custom_nodes.get("synthesizer")
-            or (ResponseSynthesizerNode() if self.include_synthesizer else None)
+            or (ResponseSynthesizerNode(model=self.model) if self.include_synthesizer else None)
         )
 
         # Helper for defensive node invocation with optional store injection
@@ -673,7 +693,7 @@ class GraphBuilder:
                 if plan and self.include_dispatcher and dispatcher_node is not None:
                     mode = plan.get("mode") if isinstance(plan, dict) else getattr(plan, "mode", None)
                     mode_val = getattr(mode, "value", str(mode)).lower()
-                    if mode_val in ("parallel", "pipeline"):
+                    if mode_val in ("parallel", "pipeline", "deliberate"):
                         return "dispatcher"
 
                 if (

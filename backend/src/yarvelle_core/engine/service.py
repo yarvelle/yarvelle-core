@@ -438,6 +438,61 @@ class AgentExecutionService:
     # Execution Methods
     # ------------------------------------------------------------------------
 
+    def _build_execution_graph(
+        self,
+        active_model: BaseChatModel,
+        checkpointer: Optional[Any],
+        effective_store: Optional[Any],
+        execution_context: Optional[Any] = None,
+        effective_tools: Optional[Sequence[Any]] = None,
+    ) -> Any:
+        """Compiles or retrieves the StateGraph ensuring identical topology across execute_turn and execute_resume_turn."""
+        if self.graph is not None:
+            return self.graph
+
+        if self.graph_builder is not None:
+            if hasattr(self.graph_builder, "build"):
+                return self.graph_builder.build(checkpointer=checkpointer, store=effective_store)
+            elif hasattr(self.graph_builder, "build_graph"):
+                return self.graph_builder.build_graph(active_model, checkpointer=checkpointer, store=effective_store)
+            elif callable(self.graph_builder):
+                sig = inspect.signature(self.graph_builder)
+                b_kwargs: Dict[str, Any] = {"checkpointer": checkpointer}
+                if "execution_context" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+                    b_kwargs["execution_context"] = execution_context
+                if "store" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+                    b_kwargs["store"] = effective_store
+                return self.graph_builder(active_model, **b_kwargs)
+            else:
+                from yarvelle_core.engine.graph import create_agent_graph
+                return create_agent_graph(
+                    active_model,
+                    execution_context=execution_context,
+                    checkpointer=checkpointer,
+                    store=effective_store,
+                )
+
+        try:
+            from yarvelle_core.engine.builder import GraphBuilder
+            builder_instance = (
+                GraphBuilder(include_supervisor=False)
+                .with_model(active_model)
+                .with_checkpointer(checkpointer)
+                .with_execution_context(execution_context)
+                .with_tools(effective_tools)
+            )
+            if effective_store is not None:
+                builder_instance = builder_instance.with_store(effective_store)
+            return builder_instance.build(checkpointer=checkpointer, store=effective_store)
+        except (ImportError, AttributeError):
+            from yarvelle_core.engine.graph import create_agent_graph
+            return create_agent_graph(
+                active_model,
+                execution_context=execution_context,
+                checkpointer=checkpointer,
+                store=effective_store,
+            )
+
     async def execute_turn(
         self,
         thread_id: str,
@@ -737,37 +792,13 @@ class AgentExecutionService:
                 )
 
                 # Resolve compiled graph
-                if self.graph is not None:
-                    compiled_graph = self.graph
-                elif self.graph_builder is not None:
-                    if hasattr(self.graph_builder, "build"):
-                        compiled_graph = self.graph_builder.build(checkpointer=checkpointer, store=effective_store)
-                    elif hasattr(self.graph_builder, "build_graph"):
-                        compiled_graph = self.graph_builder.build_graph(active_model, checkpointer=checkpointer, store=effective_store)
-                    elif callable(self.graph_builder):
-                        sig = inspect.signature(self.graph_builder)
-                        b_kwargs = {"execution_context": execution_context, "checkpointer": checkpointer}
-                        if "store" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
-                            b_kwargs["store"] = effective_store
-                        compiled_graph = self.graph_builder(active_model, **b_kwargs)
-                    else:
-                        compiled_graph = create_agent_graph(active_model, execution_context=execution_context, checkpointer=checkpointer, store=effective_store)
-                else:
-                    # Attempt import from builder.py, fallback to graph.py
-                    try:
-                        from yarvelle_core.engine.builder import GraphBuilder
-                        builder_instance = (
-                            GraphBuilder(include_supervisor=False)
-                            .with_model(active_model)
-                            .with_checkpointer(checkpointer)
-                            .with_execution_context(execution_context)
-                            .with_tools(effective_tools)
-                        )
-                        if effective_store is not None:
-                            builder_instance = builder_instance.with_store(effective_store)
-                        compiled_graph = builder_instance.build(checkpointer=checkpointer, store=effective_store)
-                    except (ImportError, AttributeError):
-                        compiled_graph = create_agent_graph(active_model, execution_context=execution_context, checkpointer=checkpointer, store=effective_store)
+                compiled_graph = self._build_execution_graph(
+                    active_model=active_model,
+                    checkpointer=checkpointer,
+                    effective_store=effective_store,
+                    execution_context=execution_context,
+                    effective_tools=effective_tools,
+                )
 
                 async for event in compiled_graph.astream_events(initial_input, config=graph_config, version="v2"):
                     ev_kind = event.get("event")
@@ -1157,29 +1188,18 @@ class AgentExecutionService:
         if app_store:
             graph_config["configurable"]["approval_store"] = app_store
 
+        tools_arg = kwargs.get("tools")
+        effective_tools = tools_arg if tools_arg is not None else (getattr(self, "allowed_tools", None) or None)
+        execution_context = kwargs.get("execution_context")
+
         async with _resolve_checkpointer() as cp:
-            if self.graph is not None:
-                compiled_graph = self.graph
-            elif self.graph_builder is not None:
-                if hasattr(self.graph_builder, "build"):
-                    compiled_graph = self.graph_builder.build(checkpointer=cp, store=effective_store)
-                elif hasattr(self.graph_builder, "build_graph"):
-                    compiled_graph = self.graph_builder.build_graph(active_model, checkpointer=cp, store=effective_store)
-                elif callable(self.graph_builder):
-                    compiled_graph = self.graph_builder(active_model, checkpointer=cp, store=effective_store)
-                else:
-                    compiled_graph = create_agent_graph(active_model, checkpointer=cp, store=effective_store)
-            else:
-                try:
-                    from yarvelle_core.engine.builder import GraphBuilder
-                    compiled_graph = (
-                        GraphBuilder(include_supervisor=False)
-                        .with_model(active_model)
-                        .with_checkpointer(cp)
-                        .build(checkpointer=cp, store=effective_store)
-                    )
-                except Exception:
-                    compiled_graph = create_agent_graph(active_model, checkpointer=cp, store=effective_store)
+            compiled_graph = self._build_execution_graph(
+                active_model=active_model,
+                checkpointer=cp,
+                effective_store=effective_store,
+                execution_context=execution_context,
+                effective_tools=effective_tools,
+            )
 
             resume_payload = {
                 "approval_id": approval_id,
@@ -1343,6 +1363,9 @@ class AgentExecutionService:
         return state is not None
 
 
+ExecutionService = AgentExecutionService
+
 __all__ = [
     "AgentExecutionService",
+    "ExecutionService",
 ]

@@ -34,7 +34,12 @@ from yarvelle_core.constants.paths import AGENTS_DIR, SKILLS_DIR
 from yarvelle_core.memory.ports.catalog_port import CatalogPort
 from yarvelle_core.resources.loader import get_resource_loader
 from yarvelle_core.schemas.manifest import AgentManifest
-from yarvelle_core.schemas.plan import AgentTask, ExecutionMode, ExecutionPlan
+from yarvelle_core.schemas.plan import (
+    AgentTask,
+    DeliberationConfig,
+    ExecutionMode,
+    ExecutionPlan,
+)
 from yarvelle_core.schemas.routing import RoutingHints
 from yarvelle_core.templates.engine import render_template
 from yarvelle_core.workflows.nodes.base import BaseNode
@@ -48,11 +53,11 @@ class DomainClassification(BaseModel):
 
     domain: str = Field(
         ...,
-        description="One of 'general', 'therapy', 'wellness', 'navigation', 'education'.",
+        description="Primary domain classification identifier.",
     )
     category: str = Field(
         default="",
-        description="Dot-notated subcategory path (e.g. 'navigation.insurance', 'wellness.habits').",
+        description="Dot-notated subcategory path (e.g. 'general.support', 'analytics.metrics').",
     )
     reasoning: str = Field(
         default="",
@@ -60,45 +65,29 @@ class DomainClassification(BaseModel):
     )
 
 
-DEFAULT_HEALTH_ROUTING_HINTS = [
+DEFAULT_ROUTING_HINTS = [
     RoutingHints(
         domain="general",
-        description="Medical evaluation, symptom assessment, diagnostic triage, treatments, prescriptions, lab results, and physician guidance.",
-        default_agent="visit-steward",
+        description="General assistance, inquiry routing, and cross-domain stewardship.",
+        default_agent="general-steward",
         domains_info={
-            "example_categories": "general.support, finance.budget, legal.contracts, operations.tasks",
+            "example_categories": "general.support, operations.tasks, workspace.notes",
         },
     ),
     RoutingHints(
-        domain="therapy",
-        description="Mental health support, counseling, emotional well-being, distress tolerance, stress management, and psychological coping.",
-        default_agent="habit-companion",
+        domain="analytics",
+        description="Data analysis, metrics calculation, reporting, structured evaluation, and quantitative synthesis.",
+        default_agent="analytics-guide",
         domains_info={
-            "example_categories": "therapy.cbt, therapy.anxiety, therapy.depression, therapy.mindfulness",
+            "example_categories": "analytics.metrics, analytics.reporting, analytics.summary",
         },
     ),
     RoutingHints(
-        domain="wellness",
-        description="Preventative lifestyle guidance, daily healthy habits, hydration, sleep improvement, fitness, and nutrition coaching.",
-        default_agent="habit-companion",
+        domain="documents",
+        description="Document extraction, structured record processing, document dossiers, and text analysis.",
+        default_agent="document-extractor",
         domains_info={
-            "example_categories": "wellness.habits, wellness.nutrition, wellness.sleep, wellness.fitness",
-        },
-    ),
-    RoutingHints(
-        domain="navigation",
-        description="Healthcare logistics, insurance benefits, claims, deductible/copay, prior auth, appointments, and medical paperwork.",
-        default_agent="benefits-guide",
-        domains_info={
-            "example_categories": "navigation.insurance, navigation.prior_auth, navigation.claims, navigation.appointments, navigation.records, navigation.formulary",
-        },
-    ),
-    RoutingHints(
-        domain="education",
-        description="Medical literacy, physiological explanations, disease definitions, procedure overviews, and health education.",
-        default_agent="visit-steward",
-        domains_info={
-            "example_categories": "education.conditions, education.procedures, education.anatomy",
+            "example_categories": "documents.extraction, documents.records, documents.verification",
         },
     ),
 ]
@@ -109,7 +98,7 @@ def compose_tier1_classifier_prompt(
     product_name: str = "Yarvelle Core",
 ) -> str:
     """Composes the Tier-1 Domain Classifier prompt dynamically from RoutingHints."""
-    active_hints = list(hints) if hints is not None else DEFAULT_HEALTH_ROUTING_HINTS
+    active_hints = list(hints) if hints is not None else DEFAULT_ROUTING_HINTS
     domains = [h.domain for h in active_hints]
     domains_quoted = ", ".join(f"'{d}'" for d in domains)
 
@@ -126,12 +115,12 @@ def compose_tier1_classifier_prompt(
     return (
         f"You are the {product_name} Tier-1 Intent and Domain Classifier.\n"
         "Your objective is to analyze the user inquiry and conversation context, then classify it into "
-        "exactly one primary healthcare domain and an appropriate dot-notated subcategory.\n\n"
-        "## Healthcare Domains:\n"
+        "exactly one primary domain and an appropriate dot-notated subcategory.\n\n"
+        "## Domains:\n"
         f"{domains_text}\n\n"
         "## Output Instructions:\n"
         f"- Set 'domain' to one of: {domains_quoted}.\n"
-        "- Set 'category' to a dot-notated category matching the user's inquiry (e.g., 'navigation.insurance', 'wellness.habits').\n"
+        "- Set 'category' to a dot-notated category matching the user's inquiry (e.g., 'operations.tasks', 'analytics.metrics').\n"
         "- Set 'reasoning' to a concise rationale explaining why the query belongs in this domain and category.\n"
         "Never attempt to answer domain questions directly; classify strictly for downstream specialist routing."
     )
@@ -576,7 +565,7 @@ class OrchestratorNode(BaseNode):
         candidates: Optional[List[AgentManifest]] = None,
         is_explicit: bool = False,
     ) -> ExecutionPlan:
-        """Constructs a typed ExecutionPlan evaluating topological mode (single, parallel, pipeline)."""
+        """Constructs a typed ExecutionPlan evaluating topological mode (single, parallel, pipeline, deliberate)."""
         if not is_explicit and state.get("explicit_agent"):
             is_explicit = True
 
@@ -592,54 +581,53 @@ class OrchestratorNode(BaseNode):
 
         prompt_lower = prompt_text.lower()
 
-        # 2. Check for cross-functional pipeline mode: specialty -> administrative (prior auth / formulary / claims)
-        auth_keywords = (
-            "prior auth",
-            "prior-auth",
-            "pre-authorization",
-            "preauthorization",
-            "authorization",
-            "pre-approval",
-            "approval",
-            "formulary",
-            "tier exception",
-            "coverage",
-            "copay",
-            "claim",
-            "appeal",
-            "denial",
+        # 2. Check for explicit deliberation configuration or panel request
+        deliberation_config = state.get("deliberation_config")
+        panel_id = state.get("panel_id")
+        deliberation_keywords = (
+            "deliberate",
+            "deliberation",
+            "roundtable",
+            "panel discussion",
+            "committee review",
+            "peer review",
         )
-        specialty_keywords = (
-            "ortho",
-            "surgery",
-            "surgical",
-            "procedure",
-            "mri",
-            "knee",
-            "hip",
-            "joint",
-            "infusion",
-            "biologic",
-            "cardio",
-            "cardiac",
-            "oncology",
-            "cancer",
-            "chemo",
-            "chemotherapy",
-            "medication",
-            "prescribe",
-            "treatment",
-        )
-        nav_agent_ids = {
-            "prior-auth-navigator",
-            "formulary-guide",
-            "claims-appeals-guide",
-            "benefits-guide",
-        }
+        wants_deliberation = any(dk in prompt_lower for dk in deliberation_keywords)
 
-        has_auth_kw = any(kw in prompt_lower for kw in auth_keywords)
-        has_spec_kw = any(kw in prompt_lower for kw in specialty_keywords)
+        if deliberation_config or panel_id or wants_deliberation:
+            target_agents = [target_agent]
+            if candidates:
+                for c in candidates:
+                    if c.id not in target_agents:
+                        target_agents.append(c.id)
+            if len(target_agents) >= 2:
+                config_obj = (
+                    DeliberationConfig.model_validate(deliberation_config)
+                    if isinstance(deliberation_config, dict)
+                    else (
+                        deliberation_config
+                        if isinstance(deliberation_config, DeliberationConfig)
+                        else DeliberationConfig(panel_id=panel_id)
+                    )
+                )
+                tasks = [
+                    AgentTask(
+                        agent_id=ag_id,
+                        instructions=f"Deliberation proposal and peer critique for {ag_id}",
+                        task_description=f"Deliberation round for {ag_id}",
+                        priority=1,
+                    )
+                    for ag_id in target_agents
+                ]
+                return ExecutionPlan(
+                    mode=ExecutionMode.DELIBERATE,
+                    target_agents=target_agents,
+                    tasks=tasks,
+                    deliberation_config=config_obj,
+                    reasoning=f"Multi-agent deliberation requested among: {', '.join(target_agents)}",
+                )
 
+        # 3. Check for multi-agent coordination (parallel mode)
         coordination_keywords = (
             "coordinate",
             "consult both",
@@ -649,131 +637,27 @@ class OrchestratorNode(BaseNode):
             "team of specialists",
             "concurrent",
         )
-        explicit_coordination = any(ck in prompt_lower for ck in coordination_keywords)
-
-        is_cross_functional = (
-            not (is_explicit and not explicit_coordination)
-            and (
-                (has_auth_kw and has_spec_kw)
-                or (target_agent in nav_agent_ids and has_spec_kw)
-                or (target_agent not in nav_agent_ids and has_auth_kw)
-            )
-        )
-
-        if is_cross_functional:
-            if "formulary" in prompt_lower:
-                secondary_agent = "formulary-guide"
-            elif any(k in prompt_lower for k in ("claim", "appeal", "denial")):
-                secondary_agent = "claims-appeals-guide"
-            elif any(k in prompt_lower for k in ("copay", "deductible", "benefit")):
-                secondary_agent = "benefits-guide"
-            else:
-                secondary_agent = "prior-auth-navigator"
-
-            if target_agent in nav_agent_ids:
-                secondary_agent = target_agent
-                if any(k in prompt_lower for k in ("ortho", "surgery", "knee", "hip", "joint")):
-                    primary_agent = "ortho-guide"
-                elif any(k in prompt_lower for k in ("cardio", "heart", "cardiac", "hypertension")):
-                    primary_agent = "cardiology-guide"
-                elif any(k in prompt_lower for k in ("oncology", "cancer", "tumor", "chemo")):
-                    primary_agent = "oncology-navigator"
-                else:
-                    primary_agent = None
-
-                if primary_agent is None:
-                    instructions = decision.instructions if decision and decision.instructions else ""
-                    reasoning = (
-                        decision.reasoning
-                        if decision and decision.reasoning
-                        else f"Direct administrative/navigation query handled by {target_agent}"
-                    )
-                    return ExecutionPlan(
-                        mode=ExecutionMode.SINGLE,
-                        target_agents=[target_agent],
-                        tasks=[
-                            AgentTask(
-                                agent_id=target_agent,
-                                instructions=instructions,
-                                task_description=instructions or f"Navigation consultation with {target_agent}",
-                                priority=1,
-                            )
-                        ],
-                        reasoning=reasoning,
-                    )
-            else:
-                primary_agent = target_agent
-
-            target_agents = [primary_agent, secondary_agent]
-            plan_tasks = [
+        if any(ck in prompt_lower for ck in coordination_keywords) and candidates and len(candidates) >= 2:
+            coord_agents = [target_agent] + [c.id for c in candidates if c.id != target_agent]
+            tasks = [
                 AgentTask(
-                    agent_id=primary_agent,
-                    instructions=f"Evaluation and preparation for {primary_agent}",
-                    task_description="Assessment and action plan",
+                    agent_id=ag_id,
+                    instructions=f"Coordinate assessment for {ag_id}",
+                    task_description=f"Specialist contribution from {ag_id}",
                     priority=1,
-                ),
-                AgentTask(
-                    agent_id=secondary_agent,
-                    instructions=f"Verify coverage and authorization based on {primary_agent} findings",
-                    task_description="Check authorization and coverage",
-                    priority=2,
-                    depends_on=[primary_agent],
-                    dependencies=[primary_agent],
-                ),
+                )
+                for ag_id in coord_agents
             ]
             return ExecutionPlan(
-                mode=ExecutionMode.PIPELINE,
-                target_agents=target_agents,
-                tasks=plan_tasks,
-                reasoning=f"Cross-functional consultation with insurance authorization dependency ({primary_agent} -> {secondary_agent})",
+                mode=ExecutionMode.PARALLEL,
+                target_agents=coord_agents,
+                tasks=tasks,
+                reasoning=f"Multi-agent coordination plan across: {', '.join(coord_agents)}",
             )
 
-        # 3. Check for multimorbid presentation (parallel mode)
-        # Preserve explicit single-specialist intent unless the user prompt explicitly requests multi-specialist coordination.
-        if not (is_explicit and not explicit_coordination):
-            condition_patterns = [
-                (("heart", "cardio", "cardiac", "hypertension", "blood pressure", "chf", "congestive"), "cardiology-guide"),
-                (("kidney", "renal", "ckd", "nephrology", "fluid"), "nephrology-guide"),
-                (("diabetes", "glucose", "cgm", "insulin", "endocrinology", "sugar", "a1c"), "endocrinology-guide"),
-                (("pulmonary", "pulmonology", "lung", "dyspnea", "breathing", "shortness of breath", "asthma", "copd"), "pulmonology-guide"),
-                (("gastro", "gastroenterology", "ibs", "ibd", "bowel", "stomach", "gi tract", "crohn", "colitis"), "gastro-guide"),
-                (("neurology", "migraine", "headache", "cognitive", "dementia", "neuropathy", "seizure"), "neurology-guide"),
-                (("rheumatology", "arthritis", "lupus", "joint pain", "autoimmune"), "rheuma-guide"),
-                (("dermatology", "rash", "skin", "lesion", "eczema", "psoriasis"), "derma-guide"),
-                (("orthopedic", "ortho", "joint mobility", "bone", "fracture"), "ortho-guide"),
-                (("oncology", "cancer", "tumor", "oncologist"), "oncology-navigator"),
-            ]
-
-            multimorbid_agents: List[str] = []
-            for keywords, ag_id in condition_patterns:
-                if any(kw in prompt_lower for kw in keywords):
-                    if ag_id not in multimorbid_agents:
-                        multimorbid_agents.append(ag_id)
-
-            if target_agent in multimorbid_agents:
-                multimorbid_agents.remove(target_agent)
-                multimorbid_agents.insert(0, target_agent)
-
-            if len(multimorbid_agents) >= 2:
-                plan_tasks = [
-                    AgentTask(
-                        agent_id=ag_id,
-                        instructions=f"Specialist assessment and tracking for {ag_id}",
-                        task_description=f"Specialist evaluation for {ag_id}",
-                        priority=1,
-                    )
-                    for ag_id in multimorbid_agents
-                ]
-                return ExecutionPlan(
-                    mode=ExecutionMode.PARALLEL,
-                    target_agents=multimorbid_agents,
-                    tasks=plan_tasks,
-                    reasoning=f"Multimorbid presentation requiring concurrent specialist guidance from: {', '.join(multimorbid_agents)}",
-                )
-
-        # 4. Single-agent mode
+        # 4. Standard single-agent mode
         instructions = decision.instructions if decision and decision.instructions else ""
-        reasoning = decision.reasoning if decision and decision.reasoning else f"Focused single-specialty question for {target_agent}"
+        reasoning = decision.reasoning if decision and decision.reasoning else f"Delegation to {target_agent}"
         return ExecutionPlan(
             mode=ExecutionMode.SINGLE,
             target_agents=[target_agent],
@@ -1150,6 +1034,6 @@ __all__ = [
     "OrchestratorNode",
     "TIER1_DOMAIN_CLASSIFIER_PROMPT",
     "compose_tier1_classifier_prompt",
-    "DEFAULT_HEALTH_ROUTING_HINTS",
+    "DEFAULT_ROUTING_HINTS",
 ]
 

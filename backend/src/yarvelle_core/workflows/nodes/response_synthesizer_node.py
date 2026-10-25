@@ -9,39 +9,46 @@
 #
 # Required Notice: Copyright 2026 Spectrayan (https://spectrayan.com)
 
-"""Response synthesis and output guardrailing node (R5).
+"""Response synthesis and output coordination node (R3 / F-25).
 
-Consolidates multi-agent specialist outputs into a unified consultation master agenda,
-reconciles cardiorenal tradeoffs (fluid restriction vs renal clearance) into collaborative
-discussion questions without prescribing, deduplicates constituent disclaimers,
+Consolidates multi-agent specialist outputs and blackboard deliberation state into
+a unified coordinated plan, formats resource allocation tables with skipped constraint
+notations, summarizes multi-round trade-offs, formats structured minority reports and
+open amendment notes, flags untrusted inputs, deduplicates constituent disclaimers,
 appends the canonical disclaimer footer, and records zero-body audit events.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from functools import wraps
 import json
 import logging
 from pathlib import Path
 import re
 import time
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence, Union
 
 from langchain_core.callbacks.manager import adispatch_custom_event
 from langchain_core.messages import AIMessage
 from langgraph.store.base import BaseStore
 
+if TYPE_CHECKING:
+    from langchain_core.language_models.chat_models import BaseChatModel
+
 from yarvelle_core.audit.logger import _file_lock
 from yarvelle_core.audit.redaction import redact_audit_event
 from yarvelle_core.config import settings
 from yarvelle_core.constants.paths import DEFAULT_AUDIT_LOG_FILE, LOGS_DIR
+from yarvelle_core.workflows.deliberation.blackboard import BlackboardManager
 from yarvelle_core.workflows.nodes.base import BaseNode
+from yarvelle_core.workflows.state import CritiqueStance
 
 logger = logging.getLogger(__name__)
 
 CANONICAL_DISCLAIMER = (
-    "DISCLAIMER: Yarvelle Core is an educational and administrative navigation companion, not a licensed healthcare provider. "
-    "Do not alter plans or medications without consulting authorized providers."
+    "DISCLAIMER: Yarvelle Core provides educational and administrative navigation assistance, not professional advice. "
+    "Verify important decisions with qualified professionals."
 )
 
 CONSTITUENT_DISCLAIMER_PATTERNS = [
@@ -52,11 +59,39 @@ CONSTITUENT_DISCLAIMER_PATTERNS = [
 ]
 
 
-class ResponseSynthesizerNode(BaseNode):
-    """Discrete node consolidating multi-agent specialist outputs into a master agenda."""
+class class_or_instance_method:
+    """Decorator allowing a method to be called either on an instance or on the class."""
 
-    def __init__(self, name: str = "response_synthesizer") -> None:
+    def __init__(self, func: Callable[..., Any]) -> None:
+        self.func = func
+        self.__doc__ = func.__doc__
+        self.__name__ = func.__name__
+
+    def __get__(self, instance: Any, owner: Any) -> Callable[..., Any]:
+        if instance is not None:
+            @wraps(self.func)
+            def _bound(state: Dict[str, Any]) -> str:
+                return self.func(instance, state)
+
+            return _bound
+
+        @wraps(self.func)
+        def _unbound(state: Dict[str, Any]) -> str:
+            return self.func(owner(), state)
+
+        return _unbound
+
+
+class ResponseSynthesizerNode(BaseNode):
+    """Discrete node consolidating multi-agent specialist outputs into a coordinated plan."""
+
+    def __init__(
+        self,
+        name: str = "response_synthesizer",
+        model: Optional[BaseChatModel] = None,
+    ) -> None:
         super().__init__(name=name)
+        self.model = model
 
     async def __call__(
         self, state: Dict[str, Any], *, store: Optional[BaseStore] = None, **kwargs: Any
@@ -92,9 +127,211 @@ class ResponseSynthesizerNode(BaseNode):
         ).strip()
         return cleaned
 
-    @classmethod
-    def synthesize_response(cls, state: Dict[str, Any]) -> str:
-        """Synthesizes specialist outputs into a master agenda with cardiorenal reconciliation."""
+    def synthesize_deliberation(self, state: Dict[str, Any]) -> str:
+        """Synthesizes structured multi-agent deliberation state (ADR 0001 §2.11).
+
+        Produces:
+        1. Unified plan with generic stakeholder advisory framing.
+        2. Constraint resource table with skipped limits explicitly noted.
+        3. Trade-offs summary explaining multi-round proposal revisions.
+        4. Structured minority report (Option A vs. Option B) for unresolved CONFLICT critiques;
+           open amendment notes for unresolved AMEND critiques.
+        5. Untrusted-input flags for tainted proposals.
+        6. Canonical disclaimer footer.
+        """
+        delib_state = state.get("deliberation_state") or {}
+
+        # 0. Degraded fallback handling
+        if delib_state.get("degraded"):
+            missing = delib_state.get("missing_agents") or []
+            missing_str = f" Missing agents: {', '.join(missing)}." if missing else ""
+            fallback_text = state.get("output") or "Multi-agent deliberation degraded to single-agent answer due to insufficient valid proposals."
+            clean_fb = self.strip_disclaimers(str(fallback_text))
+            full_out = (
+                f"# Deliberation Plan (for stakeholder review)\n\n"
+                f"*Note: Multi-agent deliberation degraded to single-agent answer due to insufficient valid proposals.{missing_str}*\n\n"
+                f"{clean_fb}\n\n"
+                f"{CANONICAL_DISCLAIMER}"
+            )
+            state["output"] = full_out
+            return full_out
+
+        bb = BlackboardManager.from_state_dict(delib_state)
+        proposals = bb.active_proposals
+        shared_constraints = bb.shared_constraints
+        rounds_used = delib_state.get("rounds_used") or (max(bb.proposals.keys()) if bb.proposals else 1)
+        skipped_constraints = delib_state.get("skipped_constraints") or []
+
+        # Taint detection
+        tainted_props = [p for p in proposals.values() if getattr(p, "tainted", False)]
+        run_tainted = bool(state.get("tainted"))
+
+        sections: List[str] = []
+
+        # 1. Unified Coordinated Plan Framing (Generic stakeholder advisory)
+        sections.append("# Deliberation Plan (for stakeholder review)\n")
+        sections.append(
+            "*Draft coordinated plan compiled from multi-specialist deliberation for human review and evaluation. "
+            "This proposal is prepared for administrative coordination and does not constitute formal professional or legal advice.*\n"
+        )
+
+        # Untrusted-input warning banner
+        if tainted_props or run_tainted:
+            tainted_ids = [p.agent_id for p in tainted_props]
+            if tainted_ids:
+                for tid in sorted(tainted_ids):
+                    sections.append(
+                        f"> ⚠️ **Warning**: Recommendations from agent '{tid}' are based partly on content from an untrusted source.\n"
+                    )
+            else:
+                sections.append(
+                    "> ⚠️ **Warning**: Recommendations in this plan are based partly on content from an untrusted source.\n"
+                )
+
+        # Active proposals & recommendations
+        sections.append("### Consolidated Recommendations\n")
+        if proposals:
+            for aid, prop in sorted(proposals.items()):
+                agent_name = aid.replace("-", " ").replace("_", " ").title()
+                taint_tag = " [⚠️ Untrusted Source]" if getattr(prop, "tainted", False) else ""
+                sections.append(f"#### {agent_name} Perspective{taint_tag}")
+                if prop.summary:
+                    clean_sum = self.strip_disclaimers(prop.summary)
+                    sections.append(f"- **Summary**: {clean_sum}")
+                if prop.recommendations:
+                    sections.append("- **Key Recommendations**:")
+                    for r in prop.recommendations:
+                        sections.append(f"  - {r}")
+                if prop.dependencies:
+                    deps = ", ".join(prop.dependencies)
+                    sections.append(f"- **Dependencies**: {deps}")
+                sections.append("")
+        else:
+            sections.append("No active specialist proposals available.\n")
+
+        # 2. Resource Allocation & Shared Constraints Table
+        sections.append("## Resource Allocation & Shared Constraints\n")
+        if shared_constraints:
+            table_lines = [
+                "| Constraint | Limit | Total Claimed | Status |",
+                "| :--- | :--- | :--- | :--- |",
+            ]
+            has_skipped = False
+            for c in shared_constraints:
+                claimed = sum(p.resource_claims.get(c.id, 0.0) for p in proposals.values())
+                unit_suffix = f" {c.unit}" if c.unit else ""
+                is_skipped = c.limit_value is None or c.id in skipped_constraints
+                if is_skipped:
+                    has_skipped = True
+                    limit_str = "None (Skipped)"
+                    status_str = "Limit Unknown (Skipped)"
+                else:
+                    src_str = f" ({c.limit_source})" if c.limit_source else ""
+                    limit_str = f"{c.limit_value:.1f}{unit_suffix}{src_str}"
+                    if claimed - c.limit_value > 1e-9:
+                        over = claimed - c.limit_value
+                        status_str = f"Overbudget (+{over:.1f})"
+                    else:
+                        status_str = "Within limit"
+                claimed_str = f"{claimed:.1f}{unit_suffix}"
+                table_lines.append(f"| {c.id} | {limit_str} | {claimed_str} | {status_str} |")
+            sections.append("\n".join(table_lines) + "\n")
+            if has_skipped:
+                sections.append("*Note: Constraints with unknown limits were not checked against a budget boundary.*\n")
+        else:
+            sections.append("*No shared resource constraints declared for this panel.*\n")
+
+        # 3. Trade-Offs Summary
+        sections.append("## Trade-Offs & Multi-Round Revisions\n")
+        revisions: List[str] = []
+        if rounds_used > 1 and len(bb.proposals) > 1:
+            r1_props = bb.proposals.get(1, {})
+            for r in range(2, rounds_used + 1):
+                r_props = bb.proposals.get(r, {})
+                for aid, prop in sorted(r_props.items()):
+                    r1_prop = r1_props.get(aid)
+                    if r1_prop:
+                        changes: List[str] = []
+                        for cid, val in prop.resource_claims.items():
+                            old_val = r1_prop.resource_claims.get(cid)
+                            if old_val is not None and abs(val - old_val) > 1e-9:
+                                if val < old_val:
+                                    changes.append(f"reduced `{cid}` allocation from {old_val:.1f} to {val:.1f}")
+                                else:
+                                    changes.append(f"adjusted `{cid}` allocation from {old_val:.1f} to {val:.1f}")
+                        for old_cid, old_val in r1_prop.resource_claims.items():
+                            if old_cid not in prop.resource_claims:
+                                changes.append(f"removed claim on `{old_cid}` ({old_val:.1f})")
+                        if prop.summary != r1_prop.summary and not changes:
+                            changes.append("revised recommendations to address peer critique")
+                        if changes:
+                            revisions.append(f"- **{aid}** revised proposal in Round {r}: {', '.join(changes)}.")
+        if revisions:
+            sections.append(f"Across {rounds_used} deliberation rounds, panel members negotiated the following trade-offs:\n" + "\n".join(revisions) + "\n")
+        else:
+            sections.append("Specialist proposals reached initial consensus in Round 1; no resource trade-offs or proposal revisions were required.\n")
+
+        # 4. Minority Report & Open Amendment Notes
+        last_round_num = max(bb.critiques.keys()) if bb.critiques else rounds_used
+        final_critiques = bb.critiques.get(last_round_num, [])
+
+        unresolved_conflicts = [
+            c for c in final_critiques if not c.resolved and c.stance == CritiqueStance.CONFLICT
+        ]
+        unresolved_amends = [
+            c for c in final_critiques if not c.resolved and c.stance == CritiqueStance.AMEND
+        ]
+
+        if unresolved_conflicts:
+            sections.append("## Minority Report: Unresolved Conflicts\n")
+            sections.append(
+                "The panel did not reach consensus on the following items. "
+                "Options are presented below for stakeholder review and value judgment:\n"
+            )
+            for idx, c in enumerate(unresolved_conflicts, 1):
+                target_prop = proposals.get(c.target_agent_id)
+                target_position = target_prop.summary if target_prop else "Specialist proposed action"
+                target_recs = target_prop.recommendations if target_prop else []
+                sections.append(f"### Conflict: {c.issue_type} ({c.target_agent_id} vs {c.reviewer_agent_id})")
+                sections.append(f"### Option A ({c.target_agent_id} Position)")
+                sections.append(f"- **Position**: {target_position}")
+                if target_recs:
+                    sections.append("- **Recommendations**:")
+                    for r in target_recs:
+                        sections.append(f"  - {r}")
+                sections.append(f"### Option B ({c.reviewer_agent_id} Position)")
+                sections.append(f"- **Objection**: {c.critique}")
+                sections.append(f"- **Proposed Resolution**: {c.proposed_resolution}")
+                sections.append("- **Stakeholder Decision Required**: Value judgment and review required by human stakeholder.\n")
+
+        if unresolved_amends:
+            sections.append("## Open Amendment Notes\n")
+            sections.append("The following amendment suggestions remain open for human review:\n")
+            for c in unresolved_amends:
+                sections.append(
+                    f"- **`{c.reviewer_agent_id}` -> `{c.target_agent_id}`** ({c.issue_type}): "
+                    f"{c.critique} (Proposed: {c.proposed_resolution})"
+                )
+            sections.append("")
+
+        if not unresolved_conflicts and not unresolved_amends:
+            sections.append("## Deliberation Outcome\n")
+            sections.append("All peer critiques and constraints were successfully resolved across deliberation rounds. Full consensus achieved.\n")
+
+        # 5. Canonical Deduplicated Disclaimer Footer
+        sections.append(CANONICAL_DISCLAIMER)
+
+        full_output = "\n".join(sections)
+        state["output"] = full_output
+        return full_output
+
+    @class_or_instance_method
+    def synthesize_response(self, state: Dict[str, Any]) -> str:
+        """Synthesizes specialist outputs and deliberation state into a coordinated plan."""
+        # Check if deliberation state is present
+        if state.get("deliberation_state"):
+            return self.synthesize_deliberation(state)
+
         specialist_outputs = state.get("specialist_outputs")
         if specialist_outputs is None:
             specialist_outputs = {}
@@ -114,7 +351,7 @@ class ResponseSynthesizerNode(BaseNode):
                         single_out = m.get("content")
                         break
             if single_out:
-                clean_text = cls.strip_disclaimers(str(single_out))
+                clean_text = self.strip_disclaimers(str(single_out))
                 full_output = f"{clean_text}\n\n{CANONICAL_DISCLAIMER}"
                 state["output"] = full_output
                 return full_output
@@ -125,35 +362,17 @@ class ResponseSynthesizerNode(BaseNode):
         # Single agent fast-path
         if len(specialist_outputs) == 1:
             single_text = str(list(specialist_outputs.values())[0])
-            clean_text = cls.strip_disclaimers(single_text)
+            clean_text = self.strip_disclaimers(single_text)
             full_output = f"{clean_text}\n\n{CANONICAL_DISCLAIMER}"
             state["output"] = full_output
             return full_output
 
-        # Multi-agent synthesis
-        sections: List[str] = ["# Consultation Master Agenda\n"]
-
-        # Check for cardiorenal fluid/sodium tradeoff
-        has_cardio = any("cardio" in str(k).lower() for k in specialist_outputs.keys())
-        has_nephro = any("nephro" in str(k).lower() for k in specialist_outputs.keys())
-        combined_text = " ".join(str(v) for v in specialist_outputs.values()).lower()
-        has_fluid_conflict = ("fluid" in combined_text or "sodium" in combined_text) and (has_cardio and has_nephro)
-
-        # 1. Coordination Framing (collaborative discussion questions)
-        if has_fluid_conflict:
-            sections.append(
-                "## Priority Coordination Questions\n"
-                "- How should daily fluid restriction and sodium intake be balanced to protect heart function while accommodating renal clearance?\n"
-                "- What target weight range and lab monitoring intervals (electrolytes, BUN, creatinine) are recommended when adjusting diuretic therapies?\n"
-            )
-
-        # 2. Specialist Domain Agendas
+        # Multi-agent synthesis (domain-neutral coordination summary)
+        sections: List[str] = ["# Multi-Agent Coordination Summary\n"]
         for agent_id, output_text in specialist_outputs.items():
-            specialty_title = str(agent_id).replace("-", " ").replace("_", " ").title()
-            clean_output = cls.strip_disclaimers(str(output_text))
-            sections.append(f"## {specialty_title} Guidance\n{clean_output}\n")
-
-        # 3. Canonical Deduplicated Disclaimer Footer
+            agent_title = str(agent_id).replace("-", " ").replace("_", " ").title()
+            clean_output = self.strip_disclaimers(str(output_text))
+            sections.append(f"## {agent_title} Perspective\n{clean_output}\n")
         sections.append(CANONICAL_DISCLAIMER)
 
         full_output = "\n".join(sections)
@@ -216,23 +435,20 @@ class ResponseSynthesizerNode(BaseNode):
         accumulated = list(state.get("audit_events", []))
         accumulated.append(redacted)
 
-        # Suggestion chips
+        # Suggestion chips (domain-neutral)
         follow_ups = list(state.get("follow_up_suggestions") or [])
         if not follow_ups:
-            combined_text = " ".join(str(v) for v in state.get("specialist_outputs", {}).values()).lower()
-            has_cardio = any("cardio" in k.lower() for k in state.get("specialist_outputs", {}))
-            has_nephro = any("nephro" in k.lower() for k in state.get("specialist_outputs", {}))
-            if ("fluid" in combined_text or "sodium" in combined_text) and (has_cardio and has_nephro):
+            if state.get("deliberation_state"):
                 follow_ups = [
-                    "Review daily balance metrics with coordinator",
-                    "Inquire about target weight range and lab monitoring",
-                    "Schedule coordinated cardiology and nephrology follow-up",
+                    "Review coordinated deliberation plan with team",
+                    "Evaluate resource allocation constraints",
+                    "Review open minority report options and amendment notes",
                 ]
             elif len(state.get("specialist_outputs", {})) > 1:
                 follow_ups = [
-                    "Review consultation master agenda with coordinator",
-                    "Prioritize questions for upcoming appointment",
-                    "Verify insurance coverage for recommended assessments",
+                    "Review multi-agent summary with stakeholders",
+                    "Prioritize next operational steps",
+                    "Verify resource allocations against budget",
                 ]
 
         # Phase 5 Turn Persistence: Commit interaction into episodic memory
@@ -270,7 +486,7 @@ class ResponseSynthesizerNode(BaseNode):
                 self.logger.warning("Phase 5 turn persistence failed gracefully: %s", err)
 
         # SSE custom event dispatching
-        if specialist_outputs:
+        if specialist_outputs or state.get("deliberation_state"):
             try:
                 await adispatch_custom_event(
                     "synthesis",
@@ -284,11 +500,11 @@ class ResponseSynthesizerNode(BaseNode):
 
         clean_completion = self.strip_disclaimers(full_output)
         result_payload: Dict[str, Any] = {
-            "output": clean_completion if not specialist_outputs else full_output,
+            "output": clean_completion if not (specialist_outputs or state.get("deliberation_state")) else full_output,
             "next_step": "output_guardrail",
             "audit_events": accumulated,
         }
-        if specialist_outputs or not any(isinstance(m, AIMessage) for m in state.get("messages", [])):
+        if specialist_outputs or state.get("deliberation_state") or not any(isinstance(m, AIMessage) for m in state.get("messages", [])):
             result_payload["messages"] = [AIMessage(content=full_output)]
         if follow_ups:
             result_payload["follow_up_suggestions"] = follow_ups

@@ -20,7 +20,7 @@ Defines typed schemas for planning execution topologies:
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 import uuid
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -32,6 +32,98 @@ class ExecutionMode(str, Enum):
     SINGLE = "single"
     PARALLEL = "parallel"
     PIPELINE = "pipeline"
+    DELIBERATE = "deliberate"
+
+
+class SharedConstraint(BaseModel):
+    """A finite resource shared across deliberating agents.
+
+    limit_value MUST come from user- or profile-sourced data, never from a model.
+    If it is unknown, it stays None and the budget check for this constraint is skipped.
+    """
+
+    id: str = Field(
+        ...,
+        pattern=r"^[a-z0-9_-]{1,64}$",
+        description="Bounded slug identifier for the constraint (e.g. 'weekly_time_budget').",
+    )
+    description: str = Field(
+        ...,
+        description="Human-readable description of the shared constraint.",
+    )
+    unit: str = Field(
+        ...,
+        description="Resource unit (e.g. 'hours', 'units'); required for arithmetic budget checking.",
+    )
+    limit_value: Optional[float] = Field(
+        default=None,
+        description="Optional numeric limit sourced exclusively from user or profile data.",
+    )
+    limit_source: Optional[Literal["user", "profile"]] = Field(
+        default=None,
+        description="Origin of limit_value ('user' or 'profile'). Required when limit_value is set.",
+    )
+
+    @model_validator(mode="after")
+    def _validate_limit_source(self) -> SharedConstraint:
+        if self.limit_value is not None and self.limit_source is None:
+            raise ValueError(
+                "limit_source ('user' or 'profile') is required when limit_value is set"
+            )
+        if self.limit_value is None and self.limit_source is not None:
+            raise ValueError("limit_source cannot be set when limit_value is None")
+        return self
+
+
+class DeliberationBudget(BaseModel):
+    """Resource bounds for blackboard deliberation rounds and model executions."""
+
+    max_rounds: int = Field(
+        default=2,
+        ge=1,
+        le=4,
+        description="Maximum deliberation rounds (Phase 1 default is 2).",
+    )
+    max_wall_clock_s: float = Field(
+        default=120.0,
+        gt=0,
+        description="Hard wall-clock timeout in seconds for the entire deliberation.",
+    )
+    max_total_tokens: int = Field(
+        default=40_000,
+        gt=0,
+        description="Hard upper bound on prompt + completion tokens across all calls.",
+    )
+
+
+class DeliberationConfig(BaseModel):
+    """Configuration parameters for ExecutionMode.DELIBERATE.
+
+    Explicit invariant: NO consensus_threshold is supported.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    panel_id: Optional[str] = Field(
+        default=None,
+        description="Optional identifier of pack-declared panel.",
+    )
+    moderator_agent_id: str = Field(
+        default="orchestrator",
+        description="Agent identifier serving as deliberation moderator/synthesizer.",
+    )
+    budget: DeliberationBudget = Field(
+        default_factory=DeliberationBudget,
+        description="Budget limits for deliberation rounds, time, and tokens.",
+    )
+    shared_constraints: List[SharedConstraint] = Field(
+        default_factory=list,
+        description="List of finite resource constraints negotiated during deliberation.",
+    )
+    critique_mode: Literal["per_agent", "batched"] = Field(
+        default="per_agent",
+        description="Critique execution mode: per_agent (isolated calls) or batched (single matrix call).",
+    )
 
 
 class AgentTask(BaseModel):
@@ -138,6 +230,10 @@ class ExecutionPlan(BaseModel):
         default="",
         description="Rationale explaining topology selection and agent delegation.",
     )
+    deliberation_config: Optional[DeliberationConfig] = Field(
+        default=None,
+        description="Configuration parameters when mode is ExecutionMode.DELIBERATE.",
+    )
 
     def __getitem__(self, item: str) -> Any:
         """Enables dictionary-style subscripting for plan['intent'], plan['steps'], etc."""
@@ -171,7 +267,10 @@ class ExecutionPlan(BaseModel):
 
 __all__ = [
     "AgentTask",
+    "DeliberationBudget",
+    "DeliberationConfig",
     "ExecutionMode",
     "ExecutionPlan",
+    "SharedConstraint",
 ]
 
