@@ -1,9 +1,30 @@
-# ADR 0001: Multi-Agent Deliberation (`ExecutionMode.DELIBERATE`)
+# ADR-0001: Multi-Agent Deliberation (`ExecutionMode.DELIBERATE`)
 
-- **Status:** Accepted
-- **Date:** 2026-10-24
-- **Authors:** Yarvelle maintainers
-- **Verified against:** `yarvelle/yarvelle-core` `main` @ `cb3813c` (tag `v0.1.1`). Line references below point at that commit and may drift as `main` moves.
+<!--
+  Yarvelle Core — Domain-Neutral AI Agent Runtime & Execution Engine
+  Copyright 2026 Spectrayan (https://spectrayan.com)
+
+  Licensed under the PolyForm Noncommercial License 1.0.0 and the
+  Yarvelle Core Additional Terms (see LICENSE and ADDITIONAL-TERMS.md).
+  Personal and household local use only. Commercial use, hosted service
+  offering, rebranding, white-labeling, and redistribution of modified
+  forks are prohibited without a written commercial license from Spectrayan.
+
+  Required Notice: Copyright 2026 Spectrayan (https://spectrayan.com)
+-->
+
+## Metadata
+
+| Property | Value |
+|---|---|
+| **Status** | `Accepted (Implemented)` |
+| **Date** | 2026-10-24 |
+| **Authors** | Spectrayan Architecture Working Group (AWG) (`architecture@spectrayan.com`) |
+| **Deciders** | Yarvelle Core Maintainers, Architecture Working Group |
+| **Consulted** | Technical Lead & TSC Chair, Security Engineering Reviewers |
+| **Informed** | Yarvelle Open-Source Community |
+| **Verified against** | `yarvelle/yarvelle-core` `main` @ `cb3813c` (tag `v0.1.1`) |
+| **Related** | [ADR-0002](0002-dynamic-mcp-db-toolbox.md) (Dynamic MCP DB Toolbox), [ADR-0003](0003-orchestrator-driven-agent-architecture.md) (Orchestrator Lifecycle), [ADR-0006](0006-policy-approvals-and-resume.md) (Policy Approvals) |
 
 ---
 
@@ -11,13 +32,13 @@
 
 ### 1.1 What the engine does today
 
-`yarvelle-core` supports three execution topologies in [`ExecutionMode`](../../backend/src/yarvelle_core/schemas/plan.py#L29-L34):
+`yarvelle-core` supports three execution topologies in [`ExecutionMode`](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/schemas/plan.py#L29-L34):
 
 1. **`SINGLE`**: one specialist agent handles the user turn.
-2. **`PARALLEL`**: several specialists run concurrently via `asyncio.gather` ([`ExecutionDispatcher.dispatch`, parallel branch](../../backend/src/yarvelle_core/workflows/dispatcher.py#L260-L283)), with no awareness of each other's outputs.
-3. **`PIPELINE`**: a one-way topologically sorted chain ([pipeline branch](../../backend/src/yarvelle_core/workflows/dispatcher.py#L284-L316)). Downstream agents receive `# PRIOR SPECIALIST OUTPUTS` as read-only context and cannot question, push back on, or revise upstream proposals.
+2. **`PARALLEL`**: several specialists run concurrently via `asyncio.gather` ([`ExecutionDispatcher.dispatch`, parallel branch](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/workflows/dispatcher.py#L260-L283)), with no awareness of each other's outputs.
+3. **`PIPELINE`**: a one-way topologically sorted chain ([pipeline branch](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/workflows/dispatcher.py#L284-L316)). Downstream agents receive `# PRIOR SPECIALIST OUTPUTS` as read-only context and cannot question, push back on, or revise upstream proposals.
 
-[`ResponseSynthesizerNode.synthesize_response`](../../backend/src/yarvelle_core/workflows/nodes/response_synthesizer_node.py#L96-L161) does not call an LLM or resolve conflicts. It concatenates each specialist's markdown under `## <Specialty> Guidance` headers, with one hardcoded keyword check for a `cardio` + `nephro` fluid conflict ([L136-L148](../../backend/src/yarvelle_core/workflows/nodes/response_synthesizer_node.py#L136-L148)).
+[`ResponseSynthesizerNode.synthesize_response`](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/workflows/nodes/response_synthesizer_node.py#L96-L161) does not call an LLM or resolve conflicts. It concatenates each specialist's markdown under `## <Specialty> Guidance` headers, with one hardcoded keyword check for a `cardio` + `nephro` fluid conflict ([L136-L148](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/workflows/nodes/response_synthesizer_node.py#L136-L148)).
 
 ### 1.2 Why that is not enough
 
@@ -33,12 +54,12 @@ Neither blind fan-out nor a one-way chain supports any of these.
 
 | Subsystem | Current implementation (`file:line` @ `cb3813c`) | Why it blocks deliberation |
 | :--- | :--- | :--- |
-| **Plan schema** | [`schemas/plan.py` L29-L34](../../backend/src/yarvelle_core/schemas/plan.py#L29-L34) defines `ExecutionMode`; [`AgentTask` L37-L68](../../backend/src/yarvelle_core/schemas/plan.py#L37-L68). | No representation for rounds, shared constraints, a moderator, convergence rules or panel membership. |
-| **Orchestrator routing** | [`OrchestratorDecision` L144-L170](../../backend/src/yarvelle_core/workflows/nodes/orchestrator_node.py#L144-L170) selects a single `agent_id`. Multi-agent plans in [`_route()` L570-L789](../../backend/src/yarvelle_core/workflows/nodes/orchestrator_node.py#L570-L789) rely on hardcoded health keyword tuples (`auth_keywords` at [L596](../../backend/src/yarvelle_core/workflows/nodes/orchestrator_node.py#L596), `condition_patterns` at [L734](../../backend/src/yarvelle_core/workflows/nodes/orchestrator_node.py#L734)). | Domain keywords live in core, which should know no domain, and the orchestrator cannot assemble a K-agent panel with role briefs. |
-| **Execution dispatcher** | [`workflows/dispatcher.py` L248-L319](../../backend/src/yarvelle_core/workflows/dispatcher.py#L248-L319) runs each agent at most once per turn (`outputs[aid] = ...`). | Agents cannot read peer proposals, critique, answer a peer, or revise. |
-| **Response synthesizer** | [`ResponseSynthesizerNode`](../../backend/src/yarvelle_core/workflows/nodes/response_synthesizer_node.py#L55-L161) has no model; [`__init__` L58](../../backend/src/yarvelle_core/workflows/nodes/response_synthesizer_node.py#L58) takes only `name`. | Cannot reconcile conflicting recommendations, merge goals, or summarize dissent. |
-| **Streaming and wiring** | Both `execute_turn` ([`engine/service.py` L760](../../backend/src/yarvelle_core/engine/service.py#L760)) and `execute_resume_turn` ([`engine/service.py` L1176](../../backend/src/yarvelle_core/engine/service.py#L1176)) build `GraphBuilder(include_supervisor=False)`; [`NON_STREAMING_NODES` L93-L115](../../backend/src/yarvelle_core/engine/service.py#L93-L115) suppresses token streaming from `"dispatcher"`. | A multi-round deliberation inside `"dispatcher"` would emit nothing to the client until synthesis finishes, and turn execution vs. resume must compile the identical graph topology. |
-| **Policy gate** | [`evaluate_policy_gate` L376-L469](../../backend/src/yarvelle_core/engine/tool_exec.py#L376-L469); the taint override at [L446-L449](../../backend/src/yarvelle_core/engine/tool_exec.py#L446-L449) forces approval only when `tier == "write_external"` (irreversible is already always gated at L442-L443). | A tainted context can still run a `write_local` action without approval under A1/A2. Acceptable for a single agent, not for actions a panel stages from many agents' inputs. |
+| **Plan schema** | [`schemas/plan.py` L29-L34](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/schemas/plan.py#L29-L34) defines `ExecutionMode`; [`AgentTask` L37-L68](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/schemas/plan.py#L37-L68). | No representation for rounds, shared constraints, a moderator, convergence rules or panel membership. |
+| **Orchestrator routing** | [`OrchestratorDecision` L144-L170](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/workflows/nodes/orchestrator_node.py#L144-L170) selects a single `agent_id`. Multi-agent plans in [`_route()` L570-L789](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/workflows/nodes/orchestrator_node.py#L570-L789) rely on hardcoded health keyword tuples (`auth_keywords` at [L596](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/workflows/nodes/orchestrator_node.py#L596), `condition_patterns` at [L734](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/workflows/nodes/orchestrator_node.py#L734)). | Domain keywords live in core, which should know no domain, and the orchestrator cannot assemble a K-agent panel with role briefs. |
+| **Execution dispatcher** | [`workflows/dispatcher.py` L248-L319](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/workflows/dispatcher.py#L248-L319) runs each agent at most once per turn (`outputs[aid] = ...`). | Agents cannot read peer proposals, critique, answer a peer, or revise. |
+| **Response synthesizer** | [`ResponseSynthesizerNode`](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/workflows/nodes/response_synthesizer_node.py#L55-L161) has no model; [`__init__` L58](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/workflows/nodes/response_synthesizer_node.py#L58) takes only `name`. | Cannot reconcile conflicting recommendations, merge goals, or summarize dissent. |
+| **Streaming and wiring** | Both `execute_turn` ([`engine/service.py` L760](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/engine/service.py#L760)) and `execute_resume_turn` ([`engine/service.py` L1176](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/engine/service.py#L1176)) build `GraphBuilder(include_supervisor=False)`; [`NON_STREAMING_NODES` L93-L115](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/engine/service.py#L93-L115) suppresses token streaming from `"dispatcher"`. | A multi-round deliberation inside `"dispatcher"` would emit nothing to the client until synthesis finishes, and turn execution vs. resume must compile the identical graph topology. |
+| **Policy gate** | [`evaluate_policy_gate` L376-L469](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/engine/tool_exec.py#L376-L469); the taint override at [L446-L449](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/engine/tool_exec.py#L446-L449) forces approval only when `tier == "write_external"` (irreversible is already always gated at L442-L443). | A tainted context can still run a `write_local` action without approval under A1/A2. Acceptable for a single agent, not for actions a panel stages from many agents' inputs. |
 
 ### 1.4 Architectural principles this must respect
 
@@ -46,8 +67,8 @@ Stated here so the ADR stands on its own:
 
 - **Core knows no domain.** No health, finance or other domain vocabulary in `yarvelle-core`; domains arrive via packs.
 - **Dependencies point inward:** app -> packs -> core. Core never imports a pack.
-- **Scope isolation.** Every tool call runs inside a [`scope_context`](../../backend/src/yarvelle_core/scope/context.py#L136-L182); cross-scope reads require a declared read (`declared_reads` in the [pack protocol](../../backend/src/yarvelle_core/conformance/protocol.py#L19-L25)) plus a grant, and are audited.
-- **Tool execution tiers.** Tools are `read`, `write_local`, `write_external` or `irreversible` ([`KNOWN_RISK_TIERS`](../../backend/src/yarvelle_core/engine/tool_exec.py#L373)), gated by autonomy level, monotone taint ([`TaintFlag`](../../backend/src/yarvelle_core/engine/tool_exec.py#L81-L98)), consent and age band. Unknown tiers fail closed.
+- **Scope isolation.** Every tool call runs inside a [`scope_context`](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/scope/context.py#L136-L182); cross-scope reads require a declared read (`declared_reads` in the [pack protocol](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/conformance/protocol.py#L19-L25)) plus a grant, and are audited.
+- **Tool execution tiers.** Tools are `read`, `write_local`, `write_external` or `irreversible` ([`KNOWN_RISK_TIERS`](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/engine/tool_exec.py#L373)), gated by autonomy level, monotone taint ([`TaintFlag`](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/engine/tool_exec.py#L81-L98)), consent and age band. Unknown tiers fail closed.
 
 ---
 
@@ -104,7 +125,7 @@ There is deliberately **no `consensus_threshold`** field (see 2.4). The budget d
 
 ### 2.2 Blackboard state (`workflows/state.py`)
 
-Deliberation state lives in a dedicated `deliberation_state` channel on [`AgentState`](../../backend/src/yarvelle_core/workflows/state.py#L35-L165), not in `state["messages"]`, so peer chatter neither pollutes checkpointed history nor bypasses scope filtering.
+Deliberation state lives in a dedicated `deliberation_state` channel on [`AgentState`](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/workflows/state.py#L35-L165), not in `state["messages"]`, so peer chatter neither pollutes checkpointed history nor bypasses scope filtering.
 
 ```python
 class TypedClaim(BaseModel):
@@ -195,7 +216,7 @@ Self-reported `confidence` never decides convergence or weighting. LLM self-scor
 
 ### 2.6 Staged actions and taint
 
-- **Every action a panel stages requires human approval, regardless of tier or autonomy level.** Panel-staged actions are routed through [`execute_tool_call`](../../backend/src/yarvelle_core/engine/tool_exec.py#L601) with approval forced, so `write_local` from a panel is gated even under A1/A2. The existing single-agent gate is unchanged.
+- **Every action a panel stages requires human approval, regardless of tier or autonomy level.** Panel-staged actions are routed through [`execute_tool_call`](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/engine/tool_exec.py#L601) with approval forced, so `write_local` from a panel is gated even under A1/A2. The existing single-agent gate is unchanged.
 - **No tool writes during deliberation.** During Propose and Revise, agents may call `read` tools only; writes are only ever *staged* for the final gate. (Phase 1 drops staged actions entirely; see section 7.)
 - **Taint is tracked per proposal.** The engine sets `AgentProposal.tainted` from the agent's `TaintFlag` and records `provenance`. A typed claim derived from a tainted proposal is itself tainted. The run-level taint remains monotone: once any proposal is tainted, the deliberation context is tainted.
 - The synthesizer must **flag any recommendation that rests on a tainted proposal or claim** ("based partly on content from an untrusted source"), so the human can weigh it.
@@ -205,7 +226,7 @@ Self-reported `confidence` never decides convergence or weighting. LLM self-scor
 - **Budgets:** `max_rounds`, `max_wall_clock_s` and `max_total_tokens` are all enforced. On exhaustion the engine stops starting new calls, lets in-flight calls finish or cancels them at the wall-clock limit, and synthesizes from what is on the blackboard, marking the result as "deliberation cut short".
 - **Schema-validation failure:** an agent whose output fails validation gets at most one repair retry. If it still fails, the panel **continues without it**, and the synthesizer states that the agent's perspective is missing. If fewer than two valid proposals remain, the engine falls back to presenting the valid output as a single-agent answer with that note.
 - **User cancellation mid-round:** in-flight calls are cancelled, no staged actions are created, nothing is written, and the partial blackboard is checkpointed so the thread history shows the deliberation was cancelled.
-- **Approval interrupt and resume:** the final gate uses the existing LangGraph `interrupt` path in [`tool_node.py`](../../backend/src/yarvelle_core/workflows/nodes/tool_node.py). The blackboard is checkpointed before the interrupt; on resume (via the existing `Command` resume path in `execute_resume_turn`, [`engine/service.py` L1075](../../backend/src/yarvelle_core/engine/service.py#L1075)) the engine continues from the checkpoint and **does not re-run any deliberation round**. Both `execute_turn` ([`L760`](../../backend/src/yarvelle_core/engine/service.py#L760)) and `execute_resume_turn` ([`L1176`](../../backend/src/yarvelle_core/engine/service.py#L1176)) must construct the identical `GraphBuilder` topology so checkpoint resumption lands directly on the staged-action gate node. Approvals bind to the exact staged tool name and arguments.
+- **Approval interrupt and resume:** the final gate uses the existing LangGraph `interrupt` path in [`tool_node.py`](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/workflows/nodes/tool_node.py). The blackboard is checkpointed before the interrupt; on resume (via the existing `Command` resume path in `execute_resume_turn`, [`engine/service.py` L1075](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/engine/service.py#L1075)) the engine continues from the checkpoint and **does not re-run any deliberation round**. Both `execute_turn` ([`L760`](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/engine/service.py#L760)) and `execute_resume_turn` ([`L1176`](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/engine/service.py#L1176)) must construct the identical `GraphBuilder` topology so checkpoint resumption lands directly on the staged-action gate node. Approvals bind to the exact staged tool name and arguments.
 
 ### 2.8 Critique modes
 
@@ -214,7 +235,7 @@ Self-reported `confidence` never decides convergence or weighting. LLM self-scor
 
 ### 2.9 Panels in packs, and routing
 
-Core does not know which agents form a therapy team or a finance committee; packs declare it. We extend [`PackProvidesSpec`](../../backend/src/yarvelle_core/pack/spec.py#L110-L123) with an optional `panels:` list.
+Core does not know which agents form a therapy team or a finance committee; packs declare it. We extend [`PackProvidesSpec`](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/pack/spec.py#L110-L123) with an optional `panels:` list.
 
 ```yaml
 # Illustrative: a therapy-domain pack's pack.yaml
@@ -254,7 +275,7 @@ provides:
 
 Rules:
 
-- **No new `trigger_patterns` keyword lists.** Panel selection reuses the existing declarative routing hints (`PackProvidesSpec.routing`, [L119](../../backend/src/yarvelle_core/pack/spec.py#L119), and [`RoutingHints`](../../backend/src/yarvelle_core/schemas/routing.py) / `PackSpec.routing_hints`). Hints are inputs the LLM orchestrator **confirms**, never automatic triggers. Moving the existing hardcoded keywords out of `_route()` is part of this work.
+- **No new `trigger_patterns` keyword lists.** Panel selection reuses the existing declarative routing hints (`PackProvidesSpec.routing`, [L119](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/pack/spec.py#L119), and [`RoutingHints`](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/schemas/routing.py) / `PackSpec.routing_hints`). Hints are inputs the LLM orchestrator **confirms**, never automatic triggers. Moving the existing hardcoded keywords out of `_route()` is part of this work.
 - **Panel membership is pack-scoped.** A panel may list only agents its own pack contributes. Placing another pack's agent on a panel requires an explicit grant for that pack pairing; without it, the panel fails validation at load time.
 - Constraint `default_constraints` declare *which* constraints exist and their units, never their limits. Limits come from the user or profile at run time (2.5).
 - The orchestrator may also assemble an **ad-hoc panel** of 2 to 5 registered specialists when a request clearly spans specialties with competing trade-offs, under the same membership, scope and grant rules.
@@ -309,13 +330,13 @@ stateDiagram-v2
 5. **Untrusted-input flags** for any advice resting on tainted proposals.
 6. **Staged actions** as approval cards (Phase 3 only).
 
-Every synthesized output passes through [`OutputGuardrailNode`](../../backend/src/yarvelle_core/workflows/nodes/output_guardrail_node.py), applying the union of all participating packs' `SafetyPolicy` rules.
+Every synthesized output passes through [`OutputGuardrailNode`](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/workflows/nodes/output_guardrail_node.py), applying the union of all participating packs' `SafetyPolicy` rules.
 
 **Non-clinical, non-fiduciary framing:** outputs are framed as preparation material for review by the user and their professionals, for example "Care conference prep: draft goal matrix (for provider and family review)" or "Financial scenario (for household review)". They are never presented as a treatment plan, prescription, or investment, tax or legal advice.
 
 ### 2.12 Streaming events
 
-Deliberation emits custom events via `adispatch_custom_event` (already used in [`engine/builder.py`](../../backend/src/yarvelle_core/engine/builder.py#L429)), with constants added next to the existing `SSE_EVENT_*` values in [`constants/api.py`](../../backend/src/yarvelle_core/constants/api.py#L159-L168). Payloads are filtered per scope exactly like blackboard reads.
+Deliberation emits custom events via `adispatch_custom_event` (already used in [`engine/builder.py`](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/engine/builder.py#L429)), with constants added next to the existing `SSE_EVENT_*` values in [`constants/api.py`](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/constants/api.py#L159-L168). Payloads are filtered per scope exactly like blackboard reads.
 
 | Event | Payload | UI |
 | :--- | :--- | :--- |
@@ -485,20 +506,20 @@ The point is the mechanism: because the expense crossed as a typed claim, the ta
 
 **Code (`yarvelle-core` @ `cb3813c`)**
 
-- [`backend/src/yarvelle_core/schemas/plan.py`](../../backend/src/yarvelle_core/schemas/plan.py): `ExecutionMode`, `AgentTask`, `ExecutionPlan`
-- [`backend/src/yarvelle_core/workflows/state.py`](../../backend/src/yarvelle_core/workflows/state.py): `AgentState`
-- [`backend/src/yarvelle_core/workflows/dispatcher.py`](../../backend/src/yarvelle_core/workflows/dispatcher.py): `ExecutionDispatcher`
-- [`backend/src/yarvelle_core/workflows/nodes/orchestrator_node.py`](../../backend/src/yarvelle_core/workflows/nodes/orchestrator_node.py): `OrchestratorNode`, `_route()`
-- [`backend/src/yarvelle_core/workflows/nodes/response_synthesizer_node.py`](../../backend/src/yarvelle_core/workflows/nodes/response_synthesizer_node.py): `ResponseSynthesizerNode`
-- [`backend/src/yarvelle_core/workflows/nodes/output_guardrail_node.py`](../../backend/src/yarvelle_core/workflows/nodes/output_guardrail_node.py): `OutputGuardrailNode`
-- [`backend/src/yarvelle_core/workflows/nodes/tool_node.py`](../../backend/src/yarvelle_core/workflows/nodes/tool_node.py): approval interrupt
-- [`backend/src/yarvelle_core/engine/builder.py`](../../backend/src/yarvelle_core/engine/builder.py): `GraphBuilder`
-- [`backend/src/yarvelle_core/engine/service.py`](../../backend/src/yarvelle_core/engine/service.py): execution service, `NON_STREAMING_NODES`
-- [`backend/src/yarvelle_core/engine/tool_exec.py`](../../backend/src/yarvelle_core/engine/tool_exec.py): `execute_tool_call`, `evaluate_policy_gate`, `TaintFlag`, `UntrustedResult`
-- [`backend/src/yarvelle_core/pack/spec.py`](../../backend/src/yarvelle_core/pack/spec.py): `PackProvidesSpec`, `PackSpec`
-- [`backend/src/yarvelle_core/schemas/routing.py`](../../backend/src/yarvelle_core/schemas/routing.py): `RoutingHints`
-- [`backend/src/yarvelle_core/scope/context.py`](../../backend/src/yarvelle_core/scope/context.py): `ScopeContext`, `scope_context`
-- [`backend/src/yarvelle_core/conformance/protocol.py`](../../backend/src/yarvelle_core/conformance/protocol.py): `owned_scopes`, `declared_reads`
+- [`backend/src/yarvelle_core/schemas/plan.py`](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/schemas/plan.py): `ExecutionMode`, `AgentTask`, `ExecutionPlan`
+- [`backend/src/yarvelle_core/workflows/state.py`](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/workflows/state.py): `AgentState`
+- [`backend/src/yarvelle_core/workflows/dispatcher.py`](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/workflows/dispatcher.py): `ExecutionDispatcher`
+- [`backend/src/yarvelle_core/workflows/nodes/orchestrator_node.py`](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/workflows/nodes/orchestrator_node.py): `OrchestratorNode`, `_route()`
+- [`backend/src/yarvelle_core/workflows/nodes/response_synthesizer_node.py`](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/workflows/nodes/response_synthesizer_node.py): `ResponseSynthesizerNode`
+- [`backend/src/yarvelle_core/workflows/nodes/output_guardrail_node.py`](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/workflows/nodes/output_guardrail_node.py): `OutputGuardrailNode`
+- [`backend/src/yarvelle_core/workflows/nodes/tool_node.py`](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/workflows/nodes/tool_node.py): approval interrupt
+- [`backend/src/yarvelle_core/engine/builder.py`](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/engine/builder.py): `GraphBuilder`
+- [`backend/src/yarvelle_core/engine/service.py`](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/engine/service.py): execution service, `NON_STREAMING_NODES`
+- [`backend/src/yarvelle_core/engine/tool_exec.py`](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/engine/tool_exec.py): `execute_tool_call`, `evaluate_policy_gate`, `TaintFlag`, `UntrustedResult`
+- [`backend/src/yarvelle_core/pack/spec.py`](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/pack/spec.py): `PackProvidesSpec`, `PackSpec`
+- [`backend/src/yarvelle_core/schemas/routing.py`](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/schemas/routing.py): `RoutingHints`
+- [`backend/src/yarvelle_core/scope/context.py`](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/scope/context.py): `ScopeContext`, `scope_context`
+- [`backend/src/yarvelle_core/conformance/protocol.py`](https://github.com/yarvelle/yarvelle-core/blob/main/backend/src/yarvelle_core/conformance/protocol.py): `owned_scopes`, `declared_reads`
 
 **Literature**
 

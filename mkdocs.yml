@@ -1,0 +1,70 @@
+site_name: Yarvelle Core
+site_description: Domain-Neutral AI Agent Runtime, Multi-Agent Deliberation Engine & 11-Layer Scope Isolation Framework
+site_author: Spectrayan
+site_url: https://yarvelle.github.io/yarvelle-core/
+repo_name: yarvelle/yarvelle-core
+repo_url: https://github.com/yarvelle/yarvelle-core
+copyright: "Copyright &copy; 2026 Spectrayan. All rights reserved."
+
+theme:
+  name: material
+  language: en
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: cyan
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: cyan
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - tables
+  - attr_list
+
+nav:
+  - Home: index.md
+  - Architecture Decision Records:
+      - ADR Overview: adr/README.md
+      - 0000 - ADR Template: adr/0000-template.md
+      - 0001 - Multi-Agent Deliberation: adr/0001-multi-agent-deliberation.md
+      - 0002 - Dynamic MCP DB Toolbox: adr/0002-dynamic-mcp-db-toolbox.md
+      - 0003 - Orchestrator Architecture: adr/0003-orchestrator-driven-agent-architecture.md
+      - 0004 - Hexagonal Memory Ports: adr/0004-hexagonal-memory-and-catalog-ports.md
+      - 0005 - Progressive Disclosure: adr/0005-progressive-disclosure-skill-context-management.md
+      - 0006 - Policy Approvals & Resume: adr/0006-policy-approvals-and-resume.md
+      - 0007 - Vault Threat Model & KEK: adr/0007-vault-threat-model-and-kek-sources.md
+      - 0008 - Deployment Modes & Tiers: adr/0008-deployment-modes-and-requirement-tiers.md
+      - 0009 - Content-Addressed Storage: adr/0009-content-addressed-storage-and-hybrid-search.md
+      - 0010 - Stateless OAuth PKCE Relay: adr/0010-oauth-relay-and-stateless-callback.md
+      - 0011 - Internationalization & Multilingual Architecture: adr/0011-internationalization-and-multilingual-architecture.md
