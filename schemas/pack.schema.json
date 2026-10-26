@@ -1,5 +1,36 @@
 {
   "$defs": {
+    "CrossPackGrantSpec": {
+      "description": "Specification of an explicit cross-pack panel membership grant.\n\nGoverns which external packs and agents are authorized to participate\nin deliberation panels contributed by this pack (ADR 0001 \u00a72.9).",
+      "properties": {
+        "pack": {
+          "description": "Target pack slug or domain identifier authorized for cross-pack collaboration",
+          "title": "Pack",
+          "type": "string"
+        },
+        "panels": {
+          "description": "Optional list of specific panel IDs permitted to include this pack's agents. If empty, all panels in this pack are permitted.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Panels",
+          "type": "array"
+        },
+        "agents": {
+          "description": "Optional list of specific agent IDs permitted. If empty, all agents from the granted pack are permitted.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Agents",
+          "type": "array"
+        }
+      },
+      "required": [
+        "pack"
+      ],
+      "title": "CrossPackGrantSpec",
+      "type": "object"
+    },
     "PackMigrationsSpec": {
       "description": "Specification of Alembic database migration branch contributed by a pack.",
       "properties": {
@@ -38,6 +69,76 @@
         "version_table"
       ],
       "title": "PackMigrationsSpec",
+      "type": "object"
+    },
+    "PackPanelSpec": {
+      "description": "Specification of a multi-agent deliberation panel in a pack.",
+      "properties": {
+        "id": {
+          "description": "Panel slug identifier",
+          "pattern": "^[a-z0-9_-]{1,64}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "description": "Display title for the panel",
+          "title": "Title",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "description": "Purpose and objective of the panel",
+          "title": "Description",
+          "type": "string"
+        },
+        "agents": {
+          "description": "Specialist agent IDs participating in the panel",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 2,
+          "title": "Agents",
+          "type": "array"
+        },
+        "max_rounds": {
+          "default": 2,
+          "description": "Deliberation round limit (default 2)",
+          "maximum": 4,
+          "minimum": 1,
+          "title": "Max Rounds",
+          "type": "integer"
+        },
+        "default_constraints": {
+          "description": "Default shared constraints for this panel",
+          "items": {
+            "$ref": "#/$defs/PanelDefaultConstraintSpec"
+          },
+          "title": "Default Constraints",
+          "type": "array"
+        },
+        "scopes": {
+          "description": "Domain scopes participating in the panel (single scope in Phase 1)",
+          "items": {
+            "type": "string"
+          },
+          "title": "Scopes",
+          "type": "array"
+        },
+        "cross_pack_grants": {
+          "description": "Explicit cross-pack grants authorizing foreign pack/domain agents on this specific panel (ADR 0001 \u00a72.9)",
+          "items": {
+            "type": "string"
+          },
+          "title": "Cross Pack Grants",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "agents"
+      ],
+      "title": "PackPanelSpec",
       "type": "object"
     },
     "PackProvidesSpec": {
@@ -174,9 +275,45 @@
           "default": null,
           "description": "Path to evals definition or dataset",
           "title": "Evals"
+        },
+        "panels": {
+          "description": "Declared multi-agent deliberation panels contributed by this pack",
+          "items": {
+            "$ref": "#/$defs/PackPanelSpec"
+          },
+          "title": "Panels",
+          "type": "array"
         }
       },
       "title": "PackProvidesSpec",
+      "type": "object"
+    },
+    "PanelDefaultConstraintSpec": {
+      "description": "Specification of default constraint declared by a panel.",
+      "properties": {
+        "id": {
+          "description": "Constraint slug identifier",
+          "pattern": "^[a-z0-9_-]{1,64}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "description": "Human-readable description of constraint",
+          "title": "Description",
+          "type": "string"
+        },
+        "unit": {
+          "description": "Measurement unit matching closed unit registry",
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "unit"
+      ],
+      "title": "PanelDefaultConstraintSpec",
       "type": "object"
     },
     "ReadScopeSpec": {
@@ -366,6 +503,21 @@
         }
       ],
       "description": "Contributed runtime artifacts"
+    },
+    "cross_pack_grants": {
+      "description": "Explicit cross-pack grants authorizing foreign packs to participate in deliberation panels (ADR 0001 \u00a72.9)",
+      "items": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "$ref": "#/$defs/CrossPackGrantSpec"
+          }
+        ]
+      },
+      "title": "Cross Pack Grants",
+      "type": "array"
     },
     "migrations": {
       "anyOf": [

@@ -71,7 +71,7 @@ except ImportError:
     ConnectorToolContext = ()  # type: ignore
     ConnectorToolSpec = ()  # type: ignore
 
-AutonomyLevel = Literal["A0", "A1", "A2"]
+AutonomyLevel = Literal["A0", "A1", "A2", "A3"]
 
 
 # ============================================================================
@@ -160,6 +160,20 @@ def canonical_json(data: Any) -> str:
 def compute_payload_hash(args: Dict[str, Any]) -> str:
     """Computes SHA-256 hex digest of canonical arguments."""
     return hashlib.sha256(canonical_json(args).encode("utf-8")).hexdigest()
+
+
+def compute_action_binding_hash(
+    agent_id: str,
+    tool_name: str,
+    args: Dict[str, Any],
+) -> str:
+    """Computes SHA-256 digest binding agent_id, tool_name, and canonical JSON args (AU-18)."""
+    payload = {
+        "agent_id": str(agent_id).strip(),
+        "args": args,
+        "tool_name": str(tool_name).strip(),
+    }
+    return hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True, init=False)
@@ -259,8 +273,10 @@ class ToolContext:
     principal: Literal["user", "job"] = "user"
     run_id: str = ""
     mode: Literal["local", "server"] = "local"
-    autonomy: Literal["A0", "A1", "A2", "supervised", "autonomous"] = "A1"
+    autonomy: Literal["A0", "A1", "A2", "A3", "supervised", "autonomous"] = "A1"
     taint: TaintFlag = field(default_factory=TaintFlag)
+    agent_id: Optional[str] = None
+    is_panel_staged: bool = False
 
     # Sandbox compatibility fields
     workspace_root: Optional[Path] = None
@@ -379,19 +395,22 @@ def evaluate_policy_gate(
     args: Dict[str, Any],
     consents: Optional[Mapping[str, bool]] = None,
     age_band: Optional[str] = None,
+    is_panel_staged: bool = False,
 ) -> PolicyDecision:
     """Evaluates multi-dimensional security matrix:
 
-        tier x profile autonomy (A0/A1/A2) x taint x consent x age_band
+        tier x profile autonomy (A0/A1/A2/A3) x taint x consent x age_band x is_panel_staged
 
     Rules:
-    1. Read operations: ALLOWED across all contexts.
+    1. Read operations: ALLOWED across single-agent contexts.
     2. Child under 13: external writes completely blocked; write_local requires guardian consent.
-    3. Irreversible actions: ALWAYS require human approval across all autonomy levels.
-    4. Monotone taint: if taint == True, write_external and irreversible FORCE APPROVAL.
-    5. Autonomy A0: all writes require approval.
-    6. Autonomy A1: write_local allowed; write_external and irreversible require approval.
-    7. Autonomy A2: write_local allowed; write_external allowed if consented, else requires approval.
+    3. Universal forced human approval for panel-staged actions (ADR 0001 §2.6) across all autonomy levels (A0-A3).
+    4. Irreversible actions: ALWAYS require human approval across all autonomy levels.
+    5. Monotone taint: if taint == True, write_external and irreversible FORCE APPROVAL.
+    6. Autonomy A0: all writes require approval.
+    7. Autonomy A1: write_local allowed; write_external and irreversible require approval.
+    8. Autonomy A2: write_local allowed; write_external allowed if consented, else requires approval.
+    9. Autonomy A3: full autonomy for write_local and write_external in single-agent execution.
     """
     raw_tier = getattr(spec, "risk_tier", None)
     tier = str(raw_tier).strip().lower() if isinstance(raw_tier, str) else None
@@ -401,22 +420,6 @@ def evaluate_policy_gate(
         return PolicyDecision.require_approval(
             f"Unknown or missing risk tier {raw_tier!r}; approval required (fail-closed)"
         )
-
-    # 1. Read Operations: Pure observation with zero state mutation
-    if tier == "read":
-        return PolicyDecision.allow("Read operation permitted")
-
-    raw_autonomy = getattr(ctx, "autonomy", "A1")
-
-    # Normalize autonomy levels
-    if raw_autonomy in ("A0", "A1", "A2"):
-        autonomy: AutonomyLevel = raw_autonomy  # type: ignore
-    elif raw_autonomy == "supervised":
-        autonomy = "A1"
-    elif raw_autonomy == "autonomous":
-        autonomy = "A2"
-    else:
-        autonomy = "A0"  # Fail-closed fallback
 
     eff_consents: Mapping[str, bool] = (
         consents
@@ -430,7 +433,7 @@ def evaluate_policy_gate(
     )
     effective_age_band = canonical_age_band(eff_age_band)
 
-    # 2. Child Under 13 Protection (AGENTS.md & AU-17); legacy aliases accepted
+    # 1. Child Under 13 Protection (AGENTS.md & AU-17); legacy aliases accepted
     if effective_age_band == CHILD_UNDER_13:
         if tier == "write_external":
             return PolicyDecision.block("Child under 13 external write blocked by policy")
@@ -438,17 +441,44 @@ def evaluate_policy_gate(
             if not eff_consents.get("guardian_consent"):
                 return PolicyDecision.require_approval("Guardian consent required for child write_local")
 
-    # 3. Irreversible Actions: Permanence invariant
+    # 2. Universal forced approval for all panel-staged actions (ADR 0001 §2.6)
+    is_staged = (
+        is_panel_staged
+        or getattr(ctx, "is_panel_staged", False)
+        or bool((getattr(ctx, "extra", {}) or {}).get("is_panel_staged", False))
+    )
+    if is_staged:
+        return PolicyDecision.require_approval(
+            f"Panel-staged action for tool '{spec.name}' requires human approval across all autonomy levels."
+        )
+
+    # 3. Read Operations: Pure observation with zero state mutation
+    if tier == "read":
+        return PolicyDecision.allow("Read operation permitted")
+
+    raw_autonomy = getattr(ctx, "autonomy", "A1")
+
+    # Normalize autonomy levels
+    if raw_autonomy in ("A0", "A1", "A2", "A3"):
+        autonomy: AutonomyLevel = raw_autonomy  # type: ignore
+    elif raw_autonomy == "supervised":
+        autonomy = "A1"
+    elif raw_autonomy == "autonomous":
+        autonomy = "A2"
+    else:
+        autonomy = "A0"  # Fail-closed fallback
+
+    # 4. Irreversible Actions: Permanence invariant
     if tier == "irreversible":
         return PolicyDecision.require_approval("Irreversible action requires human approval")
 
-    # 4. Monotone Taint Override: Untrusted input exfiltration prevention
+    # 5. Monotone Taint Override: Untrusted input exfiltration prevention
     taint_obj = getattr(ctx, "taint", None)
     is_tainted: bool = bool(getattr(taint_obj, "is_tainted", taint_obj or False))
     if is_tainted and tier == "write_external":
         return PolicyDecision.require_approval("FORCED APPROVAL: Context is tainted by untrusted data")
 
-    # 5. Autonomy Level Matrix (A0 / A1 / A2)
+    # 6. Autonomy Level Matrix (A0 / A1 / A2 / A3)
     if autonomy == "A0":
         return PolicyDecision.require_approval(f"A0 autonomy requires approval for all write actions")
 
@@ -465,6 +495,9 @@ def evaluate_policy_gate(
             if eff_consents.get("external_write_consent"):
                 return PolicyDecision.allow("A2 autonomy with recorded external write consent")
             return PolicyDecision.require_approval("A2 autonomy requires consent or approval for external writes")
+
+    if autonomy == "A3":
+        return PolicyDecision.allow("Action permitted under A3 full autonomy")
 
     return PolicyDecision.require_approval("No policy rule matched; approval required (fail-closed)")
 
@@ -508,6 +541,7 @@ class SqlApprovalStore:
         destination_hosts: Optional[Sequence[str]] = None,
         thread_id: Optional[str] = None,
         ttl_minutes: int = 15,
+        agent_id: Optional[str] = None,
     ) -> Any:
         from datetime import datetime, timedelta, timezone
         from yarvelle_core.db.models import Approval
@@ -520,6 +554,7 @@ class SqlApprovalStore:
                 profile_id=profile_id,
                 run_id=run_id,
                 thread_id=thread_id or run_id,
+                agent_id=agent_id,
                 tool_name=tool_name,
                 args_redacted=json.dumps(redact_tool_args(args)),
                 payload_hash=compute_payload_hash(args),
@@ -540,13 +575,14 @@ class SqlApprovalStore:
         *,
         profile_id: Optional[str] = None,
         tool_name: Optional[str] = None,
+        agent_id: Optional[str] = None,
     ) -> str:
         from yarvelle_core.api.approvals import consume_approval_atomic
 
         factory = self._get_session_factory()
         async with factory() as session:
             return await consume_approval_atomic(
-                session, approval_id, current_args, profile_id=profile_id, tool_name=tool_name
+                session, approval_id, current_args, profile_id=profile_id, tool_name=tool_name, agent_id=agent_id
             )
 
 
@@ -568,15 +604,23 @@ async def _consume_bound_approval(
     args: Dict[str, Any],
     profile_id: str,
     tool_name: str,
+    agent_id: Optional[str] = None,
 ) -> None:
-    """Consumes an approval only if it was issued for this profile and tool.
+    """Consumes an approval only if it was issued for this profile, tool, and agent.
 
-    Stores that accept ``profile_id``/``tool_name`` enforce the binding
+    Stores that accept ``profile_id``/``tool_name``/``agent_id`` enforce the binding
     atomically. For legacy stores the record is fetched and checked first; a
     store offering neither capability is refused (fail-closed).
     """
     if _accepts_binding_kwargs(consume_fn):
-        result = consume_fn(approval_id, args, profile_id=profile_id, tool_name=tool_name)
+        kwargs: Dict[str, Any] = {"profile_id": profile_id, "tool_name": tool_name}
+        try:
+            params = inspect.signature(consume_fn).parameters
+            if "agent_id" in params or any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+                kwargs["agent_id"] = agent_id
+        except (TypeError, ValueError):
+            pass
+        result = consume_fn(approval_id, args, **kwargs)
     else:
         get_fn = getattr(store, "get", None)
         if not callable(get_fn):
@@ -588,8 +632,11 @@ async def _consume_bound_approval(
             raise ValueError(f"Approval request '{approval_id}' not found.")
         rec_profile = record.get("profile_id") if isinstance(record, Mapping) else getattr(record, "profile_id", None)
         rec_tool = record.get("tool_name") if isinstance(record, Mapping) else getattr(record, "tool_name", None)
+        rec_agent = record.get("agent_id") if isinstance(record, Mapping) else getattr(record, "agent_id", None)
         if rec_profile != profile_id or rec_tool != tool_name:
             raise ValueError("Approval was issued for a different profile or tool (fail-closed).")
+        if agent_id is not None and rec_agent is not None and rec_agent != agent_id:
+            raise ValueError("Approval was issued for a different agent (fail-closed).")
         result = consume_fn(approval_id, args)
     if inspect.isawaitable(result):
         await result
@@ -606,6 +653,8 @@ async def execute_tool_call(
     approval_id: Optional[str] = None,
     consents: Optional[Mapping[str, bool]] = None,
     age_band: Optional[str] = None,
+    is_panel_staged: bool = False,
+    agent_id: Optional[str] = None,
 ) -> ToolResult:
     """Single execution choke point for all tool invocations across Yarvelle Core.
 
@@ -720,8 +769,17 @@ async def execute_tool_call(
             error=err_msg,
         )
 
+    eff_agent_id = agent_id or getattr(ctx, "agent_id", None) or getattr(getattr(ctx, "agent", None), "id", None)
+
     # 4. Deterministic Policy Gate Evaluation
-    decision = evaluate_policy_gate(ctx, spec, args, consents=consents, age_band=age_band)
+    decision = evaluate_policy_gate(
+        ctx,
+        spec,
+        args,
+        consents=consents,
+        age_band=age_band,
+        is_panel_staged=is_panel_staged,
+    )
 
     if decision.decision == "blocked":
         dur_ms = round((time.time() - t0) * 1000, 2)
@@ -742,7 +800,15 @@ async def execute_tool_call(
                 if not callable(consume_fn):
                     raise TypeError(f"Approval store {store} does not implement 'consume_atomic'.")
 
-                await _consume_bound_approval(store, consume_fn, approval_id, args, ctx.profile_id, spec.name)
+                await _consume_bound_approval(
+                    store,
+                    consume_fn,
+                    approval_id,
+                    args,
+                    ctx.profile_id,
+                    spec.name,
+                    agent_id=eff_agent_id,
+                )
             except Exception as exc:
                 dur_ms = round((time.time() - t0) * 1000, 2)
                 err_msg = f"ApprovalResumeFailed: {exc}"
@@ -759,26 +825,25 @@ async def execute_tool_call(
                 app_id = f"app-{os.urandom(8).hex()}"
                 create_fn = getattr(approval_store, "create_pending", None)
                 if callable(create_fn):
+                    create_kwargs: Dict[str, Any] = {
+                        "approval_id": app_id,
+                        "profile_id": ctx.profile_id,
+                        "run_id": ctx.run_id or "run-1",
+                        "tool_name": spec.name,
+                        "args": args,
+                        "risk_tier": getattr(spec, "risk_tier", None) or "unknown",
+                        "destination_hosts": dest_hosts,
+                    }
+                    try:
+                        c_sig = inspect.signature(create_fn)
+                        if "agent_id" in c_sig.parameters or any(p.kind is inspect.Parameter.VAR_KEYWORD for p in c_sig.parameters.values()):
+                            create_kwargs["agent_id"] = eff_agent_id
+                    except (ValueError, TypeError):
+                        pass
                     if inspect.iscoroutinefunction(create_fn):
-                        await create_fn(
-                            approval_id=app_id,
-                            profile_id=ctx.profile_id,
-                            run_id=ctx.run_id or "run-1",
-                            tool_name=spec.name,
-                            args=args,
-                            risk_tier=getattr(spec, "risk_tier", None) or "unknown",
-                            destination_hosts=dest_hosts,
-                        )
+                        await create_fn(**create_kwargs)
                     else:
-                        create_fn(
-                            approval_id=app_id,
-                            profile_id=ctx.profile_id,
-                            run_id=ctx.run_id or "run-1",
-                            tool_name=spec.name,
-                            args=args,
-                            risk_tier=getattr(spec, "risk_tier", None) or "unknown",
-                            destination_hosts=dest_hosts,
-                        )
+                        create_fn(**create_kwargs)
             dur_ms = round((time.time() - t0) * 1000, 2)
             err_msg = f"ApprovalRequired: {decision.reason}"
             await _record_tool_audit(ctx, spec, False, dur_ms, err_msg)

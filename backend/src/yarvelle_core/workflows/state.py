@@ -18,8 +18,12 @@ document extraction dossiers, reflection counters, and safety refusal gating.
 
 from __future__ import annotations
 
+from datetime import date
+from enum import Enum
 import operator
-from typing import Annotated, Any, Dict, List, Optional, Sequence, Union
+import re
+from typing import Annotated, Any, Dict, List, Literal, Optional, Sequence, Union
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from typing_extensions import TypedDict
 
 from langchain_core.messages import (
@@ -157,12 +161,177 @@ class AgentState(TypedDict, total=False):
 
     # Orchestrator Planning, Generic Provisioning & Multi-Agent Execution (R3-R5)
     execution_plan: Optional[Dict[str, Any]]
+    target_agents: Optional[List[str]]
     provisioned_references: Dict[str, Any]
     specialist_outputs: Dict[str, Any]
 
     # Phase 1 Cognitive Memory Recall fields (Phase3, R3)
     recalled_memories: List[Dict[str, Any]]
     memory_context: Optional[str]
+
+    # Multi-Agent Blackboard Deliberation State (R1-R3)
+    deliberation_state: Optional[Dict[str, Any]]
+
+
+SLUG_REGEX: re.Pattern[str] = re.compile(r"^[a-z0-9_-]{1,64}$")
+
+ALLOWED_CLAIM_UNITS: frozenset[str] = frozenset({
+    "hours",
+    "minutes",
+    "seconds",
+    "days",
+    "weeks",
+    "months",
+    "years",
+    "units",
+    "count",
+    "items",
+    "points",
+    "percent",
+    "percentage",
+    "ratio",
+    "score",
+    "rate",
+    "hours/week",
+    "minutes/day",
+})
+
+
+class TypedClaim(BaseModel):
+    """The ONLY kind of content that may cross a domain boundary.
+
+    key MUST match SLUG_REGEX (^[a-z0-9_-]{1,64}$).
+    unit MUST belong to closed unit allowlist (ALLOWED_CLAIM_UNITS).
+    """
+
+    kind: Literal["amount", "date_window", "boolean", "quantity"]
+    key: str = Field(..., pattern=r"^[a-z0-9_-]{1,64}$")
+    value: Union[float, bool, None] = None
+    unit: Optional[str] = None
+    window_start: Optional[date] = None
+    window_end: Optional[date] = None
+    source_scope: str
+    tainted: bool = False
+
+    @model_validator(mode="after")
+    def validate_claim(self) -> TypedClaim:
+        if self.kind in ("amount", "quantity"):
+            if self.unit is None:
+                raise ValueError("unit is required for amount and quantity claims")
+        if self.unit is not None and self.unit not in ALLOWED_CLAIM_UNITS:
+            raise ValueError(f"unit '{self.unit}' is not in ALLOWED_CLAIM_UNITS")
+        if self.kind == "date_window" and self.window_start and self.window_end:
+            if self.window_start > self.window_end:
+                raise ValueError("window_start cannot be after window_end")
+        return self
+
+
+class StagedAction(BaseModel):
+    """Proposed tool call schema for blackboard deliberation."""
+
+    agent_id: str
+    tool_name: str
+    tool_args: Dict[str, Any] = Field(default_factory=dict)
+    rationale: str = ""
+    risk_tier: Literal["read", "write_local", "write_external", "irreversible"]
+
+
+class AgentProposal(BaseModel):
+    """Specialist proposal produced during a deliberation round."""
+
+    agent_id: str
+    round_num: int = Field(default=1, ge=1)
+    scope: str
+    summary: str
+    recommendations: List[str] = Field(default_factory=list)
+    resource_claims: Dict[str, float] = Field(default_factory=dict)
+    resource_claim_units: Dict[str, str] = Field(default_factory=dict)
+    exported_claims: List[TypedClaim] = Field(default_factory=list)
+    dependencies: List[str] = Field(default_factory=list)
+    staged_actions: List[StagedAction] = Field(default_factory=list)
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    provenance: List[str] = Field(default_factory=list)
+    tainted: bool = False
+
+    @field_validator("resource_claims")
+    @classmethod
+    def validate_claim_slugs(cls, v: Dict[str, float]) -> Dict[str, float]:
+        for k in v:
+            if not SLUG_REGEX.match(k):
+                raise ValueError(f"resource_claim key '{k}' must match SLUG_REGEX")
+        return v
+
+    @field_validator("resource_claim_units")
+    @classmethod
+    def validate_claim_units(cls, v: Dict[str, str]) -> Dict[str, str]:
+        for k, unit in v.items():
+            if unit not in ALLOWED_CLAIM_UNITS:
+                raise ValueError(f"resource_claim unit '{unit}' for '{k}' must be in ALLOWED_CLAIM_UNITS")
+        return v
+
+
+class CritiqueStance(str, Enum):
+    """Disagree-or-Commit stance enum for structured peer critique."""
+
+    ENDORSE = "endorse"
+    COMPLEMENT = "complement"
+    AMEND = "amend"
+    CONFLICT = "conflict"
+
+
+BARE_AGREEMENT_BOILERPLATE: frozenset[str] = frozenset({
+    "i agree",
+    "agree",
+    "agreed",
+    "lgtm",
+    "looks good",
+    "looks good to me",
+    "endorse",
+    "endorsed",
+    "+1",
+    "ok",
+    "fine",
+    "approved",
+    "no issues",
+})
+
+
+class PeerCritique(BaseModel):
+    """Structured Disagree-or-Commit peer review."""
+
+    reviewer_agent_id: str
+    target_agent_id: str
+    round_num: int = Field(default=1, ge=1)
+    stance: CritiqueStance
+    issue_type: Literal[
+        "resource_overbudget",
+        "contraindication",
+        "dependency_order",
+        "synergy",
+        "risk_exposure",
+    ]
+    critique: str
+    proposed_resolution: str
+    resolved: bool = False
+
+    @model_validator(mode="after")
+    def validate_doc_invariants(self) -> PeerCritique:
+        if self.reviewer_agent_id == self.target_agent_id:
+            raise ValueError(
+                "reviewer_agent_id and target_agent_id must be different; self-critique is forbidden"
+            )
+        if self.stance == CritiqueStance.ENDORSE:
+            stripped = self.critique.strip().lower()
+            if not stripped or stripped in BARE_AGREEMENT_BOILERPLATE or len(stripped) < 10:
+                raise ValueError(
+                    "ENDORSE stance requires substantive supporting points; bare agreement is rejected"
+                )
+        elif self.stance in (CritiqueStance.AMEND, CritiqueStance.CONFLICT):
+            if not self.critique.strip() or not self.proposed_resolution.strip():
+                raise ValueError(
+                    f"{self.stance.value.upper()} stance requires non-empty critique and proposed_resolution"
+                )
+        return self
 
 
 def extract_text_content(item: Any) -> str:
@@ -331,10 +500,12 @@ def create_initial_state(
         "catalog_summary": kwargs.get("catalog_summary", ""),
         "target_domain": kwargs.get("target_domain", None),
         "execution_plan": kwargs.get("execution_plan", None),
+        "target_agents": kwargs.get("target_agents", []),
         "provisioned_references": kwargs.get("provisioned_references", {}),
         "specialist_outputs": kwargs.get("specialist_outputs", {}),
         "recalled_memories": kwargs.get("recalled_memories", []),
         "memory_context": kwargs.get("memory_context", None),
+        "deliberation_state": kwargs.get("deliberation_state", None),
     }
     for k, v in kwargs.items():
         if k not in state:
@@ -343,7 +514,14 @@ def create_initial_state(
 
 
 __all__ = [
+    "ALLOWED_CLAIM_UNITS",
+    "AgentProposal",
     "AgentState",
+    "CritiqueStance",
+    "PeerCritique",
+    "SLUG_REGEX",
+    "StagedAction",
+    "TypedClaim",
     "create_initial_state",
     "extract_text_content",
     "get_last_message",

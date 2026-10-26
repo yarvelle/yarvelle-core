@@ -148,12 +148,122 @@ class NeutralSafetyPolicy:
         return set()
 
 
+class UnionSafetyPolicy:
+    """Composite safety policy aggregating multiple SafetyPolicy instances via union logic (ADR 0001 §2.11)."""
+
+    def __init__(self, policies: Optional[Sequence[SafetyPolicy]] = None) -> None:
+        self.policies: List[SafetyPolicy] = list(policies or [])
+
+    def add_policy(self, policy: SafetyPolicy) -> None:
+        """Adds a policy to the union if not already present."""
+        if policy not in self.policies:
+            self.policies.append(policy)
+
+    def check_output(
+        self, text: Optional[str], ctx: Optional[SafetyContext] = None
+    ) -> SafetyVerdict:
+        """Evaluates output across all constituent policies with hard refusal precedence."""
+        refused_verdicts: List[tuple[SafetyVerdict, SafetyPolicy]] = []
+        for policy in self.policies:
+            verdict = policy.check_output(text, ctx)
+            if verdict.refused:
+                refused_verdicts.append((verdict, policy))
+
+        if not refused_verdicts:
+            return SafetyVerdict(refused=False)
+
+        # Hard refusal takes precedence
+        for v, p in refused_verdicts:
+            if v.is_hard or p.is_hard_refusal_reason(v.reason):
+                return SafetyVerdict(
+                    refused=True,
+                    reason=v.reason,
+                    safe_response=v.safe_response,
+                    category=v.category,
+                    is_hard=True,
+                )
+
+        first_v, _ = refused_verdicts[0]
+        return SafetyVerdict(
+            refused=True,
+            reason=first_v.reason,
+            safe_response=first_v.safe_response,
+            category=first_v.category,
+            is_hard=False,
+        )
+
+    def check_input(
+        self, text: Optional[str], ctx: Optional[SafetyContext] = None
+    ) -> SafetyVerdict:
+        """Evaluates input across all constituent policies with hard refusal precedence."""
+        refused_verdicts: List[tuple[SafetyVerdict, SafetyPolicy]] = []
+        for policy in self.policies:
+            verdict = policy.check_input(text, ctx)
+            if verdict.refused:
+                refused_verdicts.append((verdict, policy))
+
+        if not refused_verdicts:
+            return SafetyVerdict(refused=False)
+
+        for v, p in refused_verdicts:
+            if v.is_hard or p.is_hard_refusal_reason(v.reason):
+                return SafetyVerdict(
+                    refused=True,
+                    reason=v.reason,
+                    safe_response=v.safe_response,
+                    category=v.category,
+                    is_hard=True,
+                )
+
+        first_v, _ = refused_verdicts[0]
+        return SafetyVerdict(
+            refused=True,
+            reason=first_v.reason,
+            safe_response=first_v.safe_response,
+            category=first_v.category,
+            is_hard=False,
+        )
+
+    def check_emergency(self, text: Optional[str]) -> Optional[EmergencyDirective]:
+        """Returns the first detected emergency directive across all policies."""
+        for policy in self.policies:
+            directive = policy.check_emergency(text)
+            if directive is not None and getattr(directive, "detected", False):
+                return directive
+        return None
+
+    def get_preamble(self, agent: Any, skills: Sequence[Any] = ()) -> str:
+        """Concatenates non-empty safety preambles from all policies."""
+        preambles = [p.get_preamble(agent, skills) for p in self.policies]
+        return "\n\n".join(filter(None, preambles))
+
+    def get_refusal_template(self, reason: Optional[str] = None) -> str:
+        """Retrieves the first matching refusal template."""
+        for policy in self.policies:
+            tmpl = policy.get_refusal_template(reason)
+            if tmpl:
+                return tmpl
+        return "I cannot fulfill this request as it violates safety guidelines."
+
+    def is_hard_refusal_reason(self, reason: Optional[str]) -> bool:
+        """Returns True if any constituent policy considers the reason hard."""
+        return any(p.is_hard_refusal_reason(reason) for p in self.policies)
+
+    def get_forbidden_intents(self) -> Set[str]:
+        """Returns the union of forbidden intents across all policies."""
+        intents: Set[str] = set()
+        for p in self.policies:
+            intents.update(p.get_forbidden_intents())
+        return intents
+
+
 __all__ = [
     "EmergencyDirective",
     "NeutralSafetyPolicy",
     "SafetyContext",
     "SafetyPolicy",
     "SafetyVerdict",
+    "UnionSafetyPolicy",
     "get_default_safety_policy",
     "get_domain_safety_policy",
     "set_default_safety_policy",

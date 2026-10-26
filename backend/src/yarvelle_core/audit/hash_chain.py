@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import hashlib
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Sequence
 import uuid
 
 from sqlalchemy import select
@@ -256,3 +256,87 @@ async def verify_profile_audit_chain(
         "broken_at_event_id": None,
         "reason": None,
     }
+
+
+async def record_scope_cross_read_audit(
+    session: Optional[AsyncSession] = None,
+    *,
+    reader_agent_id: str,
+    reader_scope: str,
+    target_agent_id: str,
+    target_scope: str,
+    claim_keys: Sequence[str],
+    round_num: int,
+    profile_id: Optional[str] = None,
+    actor_user_id: Optional[str] = None,
+    run_id: Optional[str] = None,
+    pack_id: Optional[str] = None,
+    panel_id: Optional[str] = None,
+    session_factory: Optional[Any] = None,
+) -> AuditEventRecord:
+    """Records a tamper-evident SHA-256 hash-chained 'scope.cross_read' audit event.
+
+    Enforces ADR 0001 §2.3 Rule 5:
+        For every cross-scope read permitted by the blackboard, a tamper-evident
+        SHA-256 hash-chained audit record is appended to the profile audit chain.
+    """
+    sorted_keys = sorted(list(claim_keys))
+    payload: Dict[str, Any] = {
+        "claim_keys": sorted_keys,
+        "reader_agent_id": reader_agent_id,
+        "reader_scope": reader_scope,
+        "round_num": round_num,
+        "source_scope": target_scope,
+        "target_agent_id": target_agent_id,
+        "target_scope": target_scope,
+    }
+    if panel_id:
+        payload["panel_id"] = panel_id
+
+    import json
+    from yarvelle_core.audit.logger import compute_payload_hash
+
+    payload_hash = compute_payload_hash(payload)
+    detail_redacted = json.dumps(payload, sort_keys=True)
+
+    if session is not None:
+        return await append_chained_audit_event(
+            session,
+            profile_id=profile_id,
+            actor_user_id=actor_user_id,
+            principal="agent",
+            run_id=run_id,
+            event="scope.cross_read",
+            tool=None,
+            risk="read",
+            decision="allow",
+            payload_hash=payload_hash,
+            detail_redacted=detail_redacted,
+            scope=reader_scope,
+            pack_id=pack_id or reader_scope,
+            risk_tier="read",
+        )
+
+    from yarvelle_core.db.session import get_session_factory
+
+    factory = session_factory or get_session_factory()
+    async with factory() as sess:
+        record = await append_chained_audit_event(
+            sess,
+            profile_id=profile_id,
+            actor_user_id=actor_user_id,
+            principal="agent",
+            run_id=run_id,
+            event="scope.cross_read",
+            tool=None,
+            risk="read",
+            decision="allow",
+            payload_hash=payload_hash,
+            detail_redacted=detail_redacted,
+            scope=reader_scope,
+            pack_id=pack_id or reader_scope,
+            risk_tier="read",
+        )
+        await sess.commit()
+        return record
+

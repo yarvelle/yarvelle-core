@@ -2249,6 +2249,12 @@ class Approval(Base, ScopedMixin):
         nullable=True,
         doc="LangGraph conversation thread identifier",
     )
+    agent_id: Mapped[Optional[str]] = mapped_column(
+        String(64),
+        index=True,
+        nullable=True,
+        doc="Agent identifier that staged or requested the tool action",
+    )
     tool_name: Mapped[str] = mapped_column(
         String(128),
         index=True,

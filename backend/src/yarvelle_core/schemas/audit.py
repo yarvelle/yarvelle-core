@@ -17,7 +17,15 @@ from datetime import datetime, timezone
 from typing import List, Literal, Optional
 from pydantic import BaseModel, Field
 
-AuditEventType = Literal["run", "tool", "refuse", "error", "boundary_warning", "synthesis"]
+AuditEventType = Literal[
+    "run",
+    "tool",
+    "refuse",
+    "error",
+    "boundary_warning",
+    "synthesis",
+    "scope.cross_read",
+]
 
 
 class AuditEvent(BaseModel):

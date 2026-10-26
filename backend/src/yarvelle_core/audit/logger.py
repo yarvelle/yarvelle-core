@@ -408,6 +408,13 @@ class AuditLogger:
         """Synchronous reader for recent audit events."""
         return read_recent_audit_events(**kwargs)
 
+    @classmethod
+    async def record_cross_read(cls, **kwargs: Any) -> AuditEventRecord:
+        """Records a tamper-evident SHA-256 hash-chained scope.cross_read audit event."""
+        from yarvelle_core.audit.hash_chain import record_scope_cross_read_audit
+
+        return await record_scope_cross_read_audit(**kwargs)
+
 
 __all__ = [
     "compute_payload_hash",

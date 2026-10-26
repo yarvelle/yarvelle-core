@@ -18,8 +18,10 @@ import pytest
 from yarvelle_core.pack.loader import discover_and_load_packs
 from yarvelle_core.pack.routing import collect_routing_hints, compose_orchestrator_routing_prompt
 from yarvelle_core.pack.spec import (
+    CrossPackGrantSpec,
     PackEvalsSpec,
     PackMigrationsSpec,
+    PackPanelSpec,
     PackProvidesSpec,
     PackSpec,
     ReadScopeSpec,
@@ -184,3 +186,171 @@ def test_discover_and_load_packs_graceful():
     loaded = discover_and_load_packs()
     assert hasattr(loaded, "packs")
     assert isinstance(loaded.packs, dict)
+
+
+def test_cross_pack_panel_membership_requires_grant_fail_closed():
+    """Verify that placing foreign agents on a panel without grants fails closed (ADR 0001 §2.9)."""
+    panel = PackPanelSpec(
+        id="cross_panel_test",
+        title="Cross Panel Test",
+        agents=["domain_alpha.specialist_a", "domain_beta.specialist_foreign"],
+        max_rounds=2,
+    )
+    spec = PackSpec(
+        id="pack_alpha",
+        name="Pack Alpha",
+        version="0.1.0",
+        domain="domain_alpha",
+        requires_core=">=0.1.0",
+        owned_scopes=["domain_alpha.tasks"],
+        risk_tier_max="T1",
+        panels=[panel],
+    )
+    with pytest.raises(PackValidationError) as exc:
+        validate_pack_spec(spec)
+    err = str(exc.value)
+    assert "cross-domain" in err or "cross-pack" in err
+    assert "domain_beta" in err
+    assert "ADR 0001 §2.9" in err
+
+
+def test_cross_pack_panel_membership_permitted_with_pack_level_grant():
+    """Verify pack-level cross_pack_grants authorize foreign agents on panels."""
+    panel = PackPanelSpec(
+        id="cross_panel_test",
+        title="Cross Panel Test",
+        agents=["domain_alpha.specialist_a", "domain_beta.specialist_foreign"],
+        max_rounds=2,
+    )
+    spec = PackSpec(
+        id="pack_alpha",
+        name="Pack Alpha",
+        version="0.1.0",
+        domain="domain_alpha",
+        requires_core=">=0.1.0",
+        owned_scopes=["domain_alpha.tasks"],
+        risk_tier_max="T1",
+        panels=[panel],
+        cross_pack_grants=["domain_beta"],
+    )
+    validate_pack_spec(spec)
+
+
+def test_cross_pack_panel_membership_permitted_with_panel_level_grant():
+    """Verify panel-level cross_pack_grants authorize foreign agents for that panel."""
+    panel = PackPanelSpec(
+        id="cross_panel_test",
+        title="Cross Panel Test",
+        agents=["domain_alpha.specialist_a", "domain_beta.specialist_foreign"],
+        max_rounds=2,
+        cross_pack_grants=["domain_beta"],
+    )
+    spec = PackSpec(
+        id="pack_alpha",
+        name="Pack Alpha",
+        version="0.1.0",
+        domain="domain_alpha",
+        requires_core=">=0.1.0",
+        owned_scopes=["domain_alpha.tasks"],
+        risk_tier_max="T1",
+        panels=[panel],
+    )
+    validate_pack_spec(spec)
+
+
+def test_cross_pack_panel_membership_permitted_with_cross_pack_grant_spec():
+    """Verify CrossPackGrantSpec granular agent and panel restrictions."""
+    panel_allowed = PackPanelSpec(
+        id="panel_allowed",
+        title="Allowed Panel",
+        agents=["domain_alpha.specialist_a", "domain_beta.specialist_b"],
+        max_rounds=2,
+    )
+    panel_blocked = PackPanelSpec(
+        id="panel_blocked",
+        title="Blocked Panel",
+        agents=["domain_alpha.specialist_a", "domain_beta.specialist_c"],
+        max_rounds=2,
+    )
+    grant = CrossPackGrantSpec(
+        pack="domain_beta",
+        panels=["panel_allowed"],
+        agents=["specialist_b"],
+    )
+    spec_ok = PackSpec(
+        id="pack_alpha",
+        name="Pack Alpha",
+        version="0.1.0",
+        domain="domain_alpha",
+        requires_core=">=0.1.0",
+        owned_scopes=["domain_alpha.tasks"],
+        risk_tier_max="T1",
+        panels=[panel_allowed],
+        cross_pack_grants=[grant],
+    )
+    validate_pack_spec(spec_ok)
+
+    spec_blocked = PackSpec(
+        id="pack_alpha",
+        name="Pack Alpha",
+        version="0.1.0",
+        domain="domain_alpha",
+        requires_core=">=0.1.0",
+        owned_scopes=["domain_alpha.tasks"],
+        risk_tier_max="T1",
+        panels=[panel_blocked],
+        cross_pack_grants=[grant],
+    )
+    with pytest.raises(PackValidationError) as exc:
+        validate_pack_spec(spec_blocked)
+    assert "cross-pack" in str(exc.value) or "cross-domain" in str(exc.value)
+
+
+def test_cross_pack_panel_membership_permitted_with_runtime_grants():
+    """Verify runtime_grants parameter permits ad-hoc foreign agent membership."""
+    panel = PackPanelSpec(
+        id="ad_hoc_panel",
+        title="Ad Hoc Panel",
+        agents=["domain_alpha.specialist_a", "domain_beta.specialist_b"],
+        max_rounds=2,
+    )
+    spec = PackSpec(
+        id="pack_alpha",
+        name="Pack Alpha",
+        version="0.1.0",
+        domain="domain_alpha",
+        requires_core=">=0.1.0",
+        owned_scopes=["domain_alpha.tasks"],
+        risk_tier_max="T1",
+        panels=[panel],
+    )
+    with pytest.raises(PackValidationError):
+        validate_pack_spec(spec)
+
+    validate_pack_spec(spec, runtime_grants={"domain_beta"})
+
+
+def test_cross_pack_panel_multi_scope_permitted_with_grant_and_declared_reads():
+    """Verify panel declaring foreign scope succeeds when granted and declared."""
+    panel = PackPanelSpec(
+        id="multi_scope_panel",
+        title="Multi Scope Panel",
+        agents=["domain_alpha.specialist_a", "domain_beta.specialist_b"],
+        scopes=["domain_alpha.tasks", "domain_beta.metrics"],
+        max_rounds=2,
+        cross_pack_grants=["domain_beta"],
+    )
+    spec = PackSpec(
+        id="pack_alpha",
+        name="Pack Alpha",
+        version="0.1.0",
+        domain="domain_alpha",
+        requires_core=">=0.1.0",
+        owned_scopes=["domain_alpha.tasks"],
+        declared_reads=["domain_beta.*"],
+        risk_tier_max="T1",
+        panels=[panel],
+        cross_pack_grants=["domain_beta"],
+    )
+    validate_pack_spec(spec)
+

@@ -18,20 +18,32 @@ Appends compliance disclaimers to valid responses.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence, Union
 from langchain_core.messages import AIMessage
 
-from yarvelle_core.engine.safety_policy import SafetyPolicy, get_default_safety_policy
+from yarvelle_core.engine.safety_policy import (
+    SafetyPolicy,
+    UnionSafetyPolicy,
+    get_default_safety_policy,
+    get_domain_safety_policy,
+)
 from yarvelle_core.resources.loader import get_resource_loader
 from yarvelle_core.workflows.nodes.base import BaseNode
 
 
 class OutputGuardrailNode(BaseNode):
-    """Verifies output safety and appends compliance disclaimers."""
+    """Verifies output safety and appends compliance disclaimers across safety policies."""
 
-    def __init__(self, name: str = "output_guardrail", safety_policy: Optional[SafetyPolicy] = None) -> None:
+    def __init__(
+        self,
+        name: str = "output_guardrail",
+        safety_policy: Optional[Union[SafetyPolicy, Sequence[SafetyPolicy]]] = None,
+    ) -> None:
         super().__init__(name=name)
-        self.safety_policy = safety_policy or get_default_safety_policy()
+        if isinstance(safety_policy, (list, tuple)):
+            self.safety_policy: SafetyPolicy = UnionSafetyPolicy(safety_policy)
+        else:
+            self.safety_policy = safety_policy or get_default_safety_policy()
 
     async def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """Checks output text against refusal boundaries."""
@@ -49,12 +61,32 @@ class OutputGuardrailNode(BaseNode):
                     output_text = str(m.get("content", ""))
                     break
 
-        safety_check = self.safety_policy.check_output(output_text)
+        # Dynamically aggregate union policy across state-provided policies and participating panel domains
+        policies: List[SafetyPolicy] = [self.safety_policy]
+        extra_policies = state.get("safety_policies") or []
+        if isinstance(extra_policies, (list, tuple)):
+            for p in extra_policies:
+                if p not in policies:
+                    policies.append(p)
+        participating_domains = set(state.get("participating_domains") or [])
+        if not participating_domains and state.get("deliberation_state"):
+            d_state = state["deliberation_state"]
+            for prop in (d_state.get("active_proposals") or {}).values():
+                scope = prop.get("scope") if isinstance(prop, dict) else getattr(prop, "scope", None)
+                if scope:
+                    participating_domains.add(scope)
+        for dom in participating_domains:
+            dom_pol = get_domain_safety_policy(dom)
+            if dom_pol and dom_pol not in policies:
+                policies.append(dom_pol)
+
+        effective_policy = UnionSafetyPolicy(policies) if len(policies) > 1 else policies[0]
+        safety_check = effective_policy.check_output(output_text)
 
         # Safety refusal gate
         if safety_check.refused:
-            reason = safety_check.reason or "forbidden_intent:medical_prohibited"
-            is_hard = self.safety_policy.is_hard_refusal_reason(reason)
+            reason = safety_check.reason or "forbidden_intent:policy_prohibited"
+            is_hard = effective_policy.is_hard_refusal_reason(reason)
             return {
                 "is_refusal": True,
                 "refused": True,
@@ -70,7 +102,7 @@ class OutputGuardrailNode(BaseNode):
                 },
             }
 
-        # Tier 2 (Soft Clinical Boundary Notice) and Compliant Output:
+        # Tier 2 (Soft Boundary Notice) and Compliant Output:
         # Preserve full output text, clean robotic preambles, and append compliance disclaimer.
         import re
         pattern = r"^(?:(?:\*|_){0,2}(?:(?:Based on|According to|From) (?:the )?(?:provided )?reference (?:document|guide|material|checklist|information|docs?)(?: provided)?)[,:]?(?:\*|_){0,2}[,:]?\s*)"
@@ -88,7 +120,7 @@ class OutputGuardrailNode(BaseNode):
         if header_text and header_text.lower() not in output_text.lower():
             final_output = f"{output_text}{disclaimer_clause}"
 
-        boundary_warning = bool(safety_check.refused and not self.safety_policy.is_hard_refusal_reason(safety_check.reason))
+        boundary_warning = bool(safety_check.refused and not effective_policy.is_hard_refusal_reason(safety_check.reason))
         boundary_reason = safety_check.reason if boundary_warning else None
 
         return {

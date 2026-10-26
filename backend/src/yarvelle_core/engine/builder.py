@@ -175,9 +175,23 @@ class GraphBuilder:
         self.include_synthesizer = enabled
         return self
 
-    def with_safety_policy(self, safety_policy: SafetyPolicy) -> GraphBuilder:
-        """Attach a SafetyPolicy instance for input/output guardrail enforcement."""
-        self.safety_policy = safety_policy
+    def with_safety_policy(
+        self, safety_policy: Union[SafetyPolicy, Sequence[SafetyPolicy]]
+    ) -> GraphBuilder:
+        """Attach a SafetyPolicy instance or sequence of policies for input/output guardrail enforcement."""
+        if isinstance(safety_policy, (list, tuple)):
+            from yarvelle_core.engine.safety_policy import UnionSafetyPolicy
+
+            self.safety_policy = UnionSafetyPolicy(safety_policy)
+        else:
+            self.safety_policy = safety_policy
+        return self
+
+    def with_safety_policies(self, safety_policies: Sequence[SafetyPolicy]) -> GraphBuilder:
+        """Attach multiple SafetyPolicy instances aggregated via UnionSafetyPolicy."""
+        from yarvelle_core.engine.safety_policy import UnionSafetyPolicy
+
+        self.safety_policy = UnionSafetyPolicy(safety_policies)
         return self
 
     # ========================================================================
@@ -223,9 +237,9 @@ class GraphBuilder:
         self.subgraphs[name] = subgraph
         return self
 
-    def with_tools(self, tools: Sequence[Any]) -> GraphBuilder:
+    def with_tools(self, tools: Optional[Sequence[Any]]) -> GraphBuilder:
         """Configure tools available for agent binding and execution."""
-        self.tools = list(tools)
+        self.tools = list(tools) if tools is not None else []
         return self
 
     def with_system_prompt(self, system_prompt: Optional[str]) -> GraphBuilder:
@@ -337,8 +351,14 @@ class GraphBuilder:
                 else None
             )
         )
+        norm_allowed_tools = None
+        if builder_allowed_tools is not None:
+            norm_allowed_tools = [
+                t["name"] if isinstance(t, dict) and "name" in t else (getattr(t, "name", str(t)))
+                for t in builder_allowed_tools
+            ]
         tool_node = self._custom_nodes.get("tools") or ToolNode(
-            allowed_tools=builder_allowed_tools,
+            allowed_tools=norm_allowed_tools,
             tools=self.tools,
         )
         tool_validator_node = self._custom_nodes.get("tool_validator") or ToolValidatorNode()
@@ -366,7 +386,7 @@ class GraphBuilder:
         synthesizer_node = (
             self._custom_nodes.get("response_synthesizer")
             or self._custom_nodes.get("synthesizer")
-            or (ResponseSynthesizerNode() if self.include_synthesizer else None)
+            or (ResponseSynthesizerNode(model=self.model) if self.include_synthesizer else None)
         )
 
         # Helper for defensive node invocation with optional store injection
@@ -673,7 +693,7 @@ class GraphBuilder:
                 if plan and self.include_dispatcher and dispatcher_node is not None:
                     mode = plan.get("mode") if isinstance(plan, dict) else getattr(plan, "mode", None)
                     mode_val = getattr(mode, "value", str(mode)).lower()
-                    if mode_val in ("parallel", "pipeline"):
+                    if mode_val in ("parallel", "pipeline", "deliberate"):
                         return "dispatcher"
 
                 if (
@@ -722,7 +742,21 @@ class GraphBuilder:
 
         # Response synthesizer edge
         if self.include_synthesizer and synthesizer_node is not None:
-            builder.add_edge("response_synthesizer", "output_guardrail")
+            def route_response_synthesizer(state: AgentState) -> str:
+                messages = state.get("messages", [])
+                last_ai = next((m for m in reversed(messages) if isinstance(m, AIMessage)), None)
+                tool_calls = getattr(last_ai, "tool_calls", []) if last_ai else []
+                if not tool_calls and state.get("tool_calls"):
+                    tool_calls = state.get("tool_calls")
+                if tool_calls and state.get("iteration_count", 0) < self.max_tool_iterations:
+                    return "tools"
+                return "output_guardrail"
+
+            builder.add_conditional_edges(
+                "response_synthesizer",
+                route_response_synthesizer,
+                {"tools": "tools", "output_guardrail": "output_guardrail"},
+            )
 
         # Agent conditional routing
         def route_agent(state: AgentState) -> str:
@@ -749,9 +783,28 @@ class GraphBuilder:
         # Tool execution loop
         if self.include_tool_validator:
             builder.add_edge("tools", "tool_validator")
-            builder.add_edge("tool_validator", "agent")
+
+            def route_tool_validator(state: AgentState) -> str:
+                if state.get("deliberation_state") or state.get("is_panel_staged"):
+                    return "output_guardrail"
+                return "agent"
+
+            builder.add_conditional_edges(
+                "tool_validator",
+                route_tool_validator,
+                {"output_guardrail": "output_guardrail", "agent": "agent"},
+            )
         else:
-            builder.add_edge("tools", "agent")
+            def route_tools(state: AgentState) -> str:
+                if state.get("deliberation_state") or state.get("is_panel_staged"):
+                    return "output_guardrail"
+                return "agent"
+
+            builder.add_conditional_edges(
+                "tools",
+                route_tools,
+                {"output_guardrail": "output_guardrail", "agent": "agent"},
+            )
 
         # Output guardrail conditional routing
         def route_output_guardrail(state: AgentState) -> str:

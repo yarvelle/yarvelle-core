@@ -1,6 +1,6 @@
 # ADR 0001: Multi-Agent Deliberation (`ExecutionMode.DELIBERATE`)
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-24
 - **Authors:** Yarvelle maintainers
 - **Verified against:** `yarvelle/yarvelle-core` `main` @ `cb3813c` (tag `v0.1.1`). Line references below point at that commit and may drift as `main` moves.
@@ -37,7 +37,7 @@ Neither blind fan-out nor a one-way chain supports any of these.
 | **Orchestrator routing** | [`OrchestratorDecision` L144-L170](../../backend/src/yarvelle_core/workflows/nodes/orchestrator_node.py#L144-L170) selects a single `agent_id`. Multi-agent plans in [`_route()` L570-L789](../../backend/src/yarvelle_core/workflows/nodes/orchestrator_node.py#L570-L789) rely on hardcoded health keyword tuples (`auth_keywords` at [L596](../../backend/src/yarvelle_core/workflows/nodes/orchestrator_node.py#L596), `condition_patterns` at [L734](../../backend/src/yarvelle_core/workflows/nodes/orchestrator_node.py#L734)). | Domain keywords live in core, which should know no domain, and the orchestrator cannot assemble a K-agent panel with role briefs. |
 | **Execution dispatcher** | [`workflows/dispatcher.py` L248-L319](../../backend/src/yarvelle_core/workflows/dispatcher.py#L248-L319) runs each agent at most once per turn (`outputs[aid] = ...`). | Agents cannot read peer proposals, critique, answer a peer, or revise. |
 | **Response synthesizer** | [`ResponseSynthesizerNode`](../../backend/src/yarvelle_core/workflows/nodes/response_synthesizer_node.py#L55-L161) has no model; [`__init__` L58](../../backend/src/yarvelle_core/workflows/nodes/response_synthesizer_node.py#L58) takes only `name`. | Cannot reconcile conflicting recommendations, merge goals, or summarize dissent. |
-| **Streaming and wiring** | [`engine/service.py` L760](../../backend/src/yarvelle_core/engine/service.py#L760) builds `GraphBuilder(include_supervisor=False)`; [`NON_STREAMING_NODES` L93-L115](../../backend/src/yarvelle_core/engine/service.py#L93-L115) suppresses token streaming from `"dispatcher"`. | A multi-round deliberation inside `"dispatcher"` would emit nothing to the client until synthesis finishes. |
+| **Streaming and wiring** | Both `execute_turn` ([`engine/service.py` L760](../../backend/src/yarvelle_core/engine/service.py#L760)) and `execute_resume_turn` ([`engine/service.py` L1176](../../backend/src/yarvelle_core/engine/service.py#L1176)) build `GraphBuilder(include_supervisor=False)`; [`NON_STREAMING_NODES` L93-L115](../../backend/src/yarvelle_core/engine/service.py#L93-L115) suppresses token streaming from `"dispatcher"`. | A multi-round deliberation inside `"dispatcher"` would emit nothing to the client until synthesis finishes, and turn execution vs. resume must compile the identical graph topology. |
 | **Policy gate** | [`evaluate_policy_gate` L376-L469](../../backend/src/yarvelle_core/engine/tool_exec.py#L376-L469); the taint override at [L446-L449](../../backend/src/yarvelle_core/engine/tool_exec.py#L446-L449) forces approval only when `tier == "write_external"` (irreversible is already always gated at L442-L443). | A tainted context can still run a `write_local` action without approval under A1/A2. Acceptable for a single agent, not for actions a panel stages from many agents' inputs. |
 
 ### 1.4 Architectural principles this must respect
@@ -108,11 +108,15 @@ Deliberation state lives in a dedicated `deliberation_state` channel on [`AgentS
 
 ```python
 class TypedClaim(BaseModel):
-    """The ONLY kind of content that may cross a domain boundary (see 2.3)."""
+    """The ONLY kind of content that may cross a domain boundary (see 2.3).
+
+    key MUST match SLUG_REGEX (^[a-z0-9_-]{1,64}$) or a pack-declared claim key allowlist.
+    unit MUST belong to a closed unit allowlist/registry (ALLOWED_CLAIM_UNITS), never free text.
+    """
     kind: Literal["amount", "date_window", "boolean", "quantity"]
-    key: str                                  # e.g. "upcoming_out_of_pocket_expense"
+    key: str = Field(pattern=r"^[a-z0-9_-]{1,64}$")  # e.g. "upcoming_out_of_pocket_expense"
     value: Union[float, bool, None] = None
-    unit: Optional[str] = None                # required for amount and quantity
+    unit: Optional[str] = None                # required for amount and quantity; validated against closed unit registry
     window_start: Optional[date] = None       # for date_window
     window_end: Optional[date] = None
     source_scope: str                         # scope the claim was derived from
@@ -164,7 +168,7 @@ class PeerCritique(BaseModel):
 ### 2.3 Scope rules on the blackboard
 
 1. **Same-domain panels** (all members in one domain scope): members may read every field of each other's proposals.
-2. **Cross-domain panels:** only `TypedClaim` objects cross a domain boundary. **No free text crosses domains**: not `summary`, not `recommendations`, not `critique` text, not an LLM-written "summary" of another domain's data. A typed claim is an amount, a date window, a boolean or a quantity with a unit (for example "out-of-pocket expense: 3500 USD within 60 days"), so another domain learns the constraint without learning the underlying record.
+2. **Cross-domain panels:** only `TypedClaim` objects cross a domain boundary. **No free text crosses domains**: not `summary`, not `recommendations`, not `critique` text, not an LLM-written "summary" of another domain's data. A typed claim is an amount, a date window, a boolean or a quantity with a unit (for example "out-of-pocket expense: 3500 USD within 60 days"), so another domain learns the constraint without learning the underlying record. To prevent models from smuggling free-text prose inside claim identifiers or units, the engine strictly validates `TypedClaim.key` against a slug regex (`^[a-z0-9_-]{1,64}$`, or pack-declared claim keys) and `TypedClaim.unit` against a closed unit registry (`ALLOWED_CLAIM_UNITS`).
 3. The engine (not the model) builds each agent's view of the blackboard by filtering on the reader's scope. Cross-domain critiques may reference only the target's exported claims.
 4. A cross-domain read requires the reader's pack to declare the read (`declared_reads`) and hold a grant for it. Without both, the claim is withheld and the panel is told only that a constraint exists but is not visible.
 5. **Every cross-scope blackboard read emits a `scope.cross_read` audit event** (new event type) in the hash-chained audit log, recording reader agent, source scope, claim keys and round.
@@ -172,13 +176,15 @@ class PeerCritique(BaseModel):
 
 ### 2.4 Convergence is rule-based
 
-Deliberation ends when **either**:
+`ConvergenceGate` enters `SelectiveRevise` when at least one unresolved `CONFLICT` **or** `AMEND` critique remains, `round_num < max_rounds`, and budget remains — giving targeted specialists one revision round to resolve conflicts or incorporate peer amendments.
 
-- no unresolved `CONFLICT` critiques remain, **or**
+Deliberation ends and advances to `Synthesize` when **either**:
+
+- no unresolved `CONFLICT` or `AMEND` critiques remain, **or**
 - `max_rounds` is reached, **or**
 - the wall-clock or token budget is exhausted (2.7).
 
-Self-reported `confidence` never decides convergence or weighting. LLM self-scores are poorly calibrated, so `confidence` is optional, defaults to `None`, and is shown only as information. Unresolved `AMEND` critiques do not block convergence; they are listed for the human.
+Self-reported `confidence` never decides convergence or weighting. LLM self-scores are poorly calibrated, so `confidence` is optional, defaults to `None`, and is shown only as information. At termination (`round_num == max_rounds` or when only `AMEND` items remain after revision), unresolved `AMEND` critiques do not block convergence or force a minority-report split; they are listed as open amendment notes for the human, whereas unresolved `CONFLICT` critiques produce a structured minority report (2.11).
 
 ### 2.5 Constraint budget checks
 
@@ -199,7 +205,7 @@ Self-reported `confidence` never decides convergence or weighting. LLM self-scor
 - **Budgets:** `max_rounds`, `max_wall_clock_s` and `max_total_tokens` are all enforced. On exhaustion the engine stops starting new calls, lets in-flight calls finish or cancels them at the wall-clock limit, and synthesizes from what is on the blackboard, marking the result as "deliberation cut short".
 - **Schema-validation failure:** an agent whose output fails validation gets at most one repair retry. If it still fails, the panel **continues without it**, and the synthesizer states that the agent's perspective is missing. If fewer than two valid proposals remain, the engine falls back to presenting the valid output as a single-agent answer with that note.
 - **User cancellation mid-round:** in-flight calls are cancelled, no staged actions are created, nothing is written, and the partial blackboard is checkpointed so the thread history shows the deliberation was cancelled.
-- **Approval interrupt and resume:** the final gate uses the existing LangGraph `interrupt` path in [`tool_node.py`](../../backend/src/yarvelle_core/workflows/nodes/tool_node.py). The blackboard is checkpointed before the interrupt; on resume (via the existing `Command` resume path in [`engine/service.py`](../../backend/src/yarvelle_core/engine/service.py#L1075)) the engine continues from the checkpoint and **does not re-run any deliberation round**. Approvals bind to the exact staged tool name and arguments.
+- **Approval interrupt and resume:** the final gate uses the existing LangGraph `interrupt` path in [`tool_node.py`](../../backend/src/yarvelle_core/workflows/nodes/tool_node.py). The blackboard is checkpointed before the interrupt; on resume (via the existing `Command` resume path in `execute_resume_turn`, [`engine/service.py` L1075](../../backend/src/yarvelle_core/engine/service.py#L1075)) the engine continues from the checkpoint and **does not re-run any deliberation round**. Both `execute_turn` ([`L760`](../../backend/src/yarvelle_core/engine/service.py#L760)) and `execute_resume_turn` ([`L1176`](../../backend/src/yarvelle_core/engine/service.py#L1176)) must construct the identical `GraphBuilder` topology so checkpoint resumption lands directly on the staged-action gate node. Approvals bind to the exact staged tool name and arguments.
 
 ### 2.8 Critique modes
 
@@ -266,7 +272,7 @@ stateDiagram-v2
         [*] --> Specialist_2
         [*] --> Specialist_K
     }
-    note right of Propose: read-only tools; writes are never executed here
+    note right of Propose: read-only tools — writes are never executed here
 
     Propose --> CrossExamine: AgentProposals on blackboard (scope-filtered views)
 
@@ -277,8 +283,8 @@ stateDiagram-v2
 
     CrossExamine --> ConvergenceGate
     state ConvergenceGate <<choice>>
-    ConvergenceGate --> SelectiveRevise: open CONFLICT and round < max_rounds and budget left
-    ConvergenceGate --> Synthesize: no open CONFLICT, or max_rounds, or budget exhausted
+    ConvergenceGate --> SelectiveRevise: open CONFLICT or AMEND, and round < max_rounds and budget left
+    ConvergenceGate --> Synthesize: no open CONFLICT/AMEND, or max_rounds, or budget exhausted
 
     state SelectiveRevise {
         [*] --> TargetedSpecialistsOnly
@@ -386,18 +392,18 @@ sequenceDiagram
 
     Note over BB: Free cash flow $1,800/mo (user) | CC $14k @ 22.9% | 401(k): $500/mo captures $250/mo match | Typed claim: $3,500 expense within ~60 days
     par Round 1: proposals
-        A1->>BB: $1,800/mo to the credit card (highest APR first); pause investing
+        A1->>BB: $1,800/mo to the credit card (highest APR first), pause investing
         A2->>BB: $500/mo 401(k) for the full match + $650/mo HSA (pre-tax)
         A3->>BB: $1,500/mo to a liquid reserve for the $3,500 expense and a 3-month floor
     end
     Note over BB: Auditor CONFLICT: $4,450/mo claimed vs $1,800/mo limit
     par Cross-examination (Disagree-or-Commit)
-        A1->>A2: COMPLEMENT: the match is an immediate 50% on contributions; keep $500/mo 401(k)
+        A1->>A2: COMPLEMENT: the match is an immediate 50% on contributions, keep $500/mo 401(k)
         A3->>A1: CONFLICT: paying the card down before the expense likely puts $3,500 back on the 22.9% card
         A2->>A3: AMEND: if HSA-eligible, fund the expense reserve through the HSA (pre-tax) and reimburse the qualified expense
     end
     Mod->>BB: Synthesis (scenario for household review)
-    Note over Mod,BB: Months 1-2: $500 401(k) + $580 HSA + $720 card = $1,800<br/>Months 3-12: $500 401(k) + $1,300 card = $1,800<br/>Payoff timeline not computed here; minority view (faster payoff vs larger buffer) shown as Option A / B
+    Note over Mod,BB: Months 1-2: $500 401(k) + $580 HSA + $720 card = $1,800<br/>Months 3-12: $500 401(k) + $1,300 card = $1,800<br/>Payoff timeline not computed here — minority view (faster payoff vs larger buffer) shown as Option A / B
 ```
 
 The point is the mechanism: because the expense crossed as a typed claim, the tax and risk agents found an option neither proposed alone (fund the reserve pre-tax through an HSA, if eligible) while staying within the user's $1,800/month. Exact tax effects depend on the household and are deliberately not quantified.
