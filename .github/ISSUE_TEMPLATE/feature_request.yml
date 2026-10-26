@@ -1,0 +1,67 @@
+name: Feature Request
+description: Propose a new domain-neutral runtime capability, ADR, or @yarvelle/ui component
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Proposing an enhancement for **Yarvelle Core**? Remember that `yarvelle-core` strictly adheres to the **Domain-Neutrality Mandate** ("Core Knows No Domain")—all domain-specific business logic belongs in external domain packs.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Feature Summary
+      description: Concise summary of the requested capability or architectural improvement.
+      placeholder: Introduce support for...
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement & Motivation
+      description: What architectural challenge or downstream pack requirement does this solve?
+      placeholder: Currently, domain packs cannot...
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Design & Architecture
+      description: How should this be implemented across ports, LangGraph nodes, schemas, or UI primitives?
+      placeholder: Extend PackSpec / MemoryPort / DeliberationSubgraph to support...
+    validations:
+      required: true
+  - type: dropdown
+    id: subsystem
+    attributes:
+      label: Target Subsystem
+      options:
+        - "Execution Engine & LangGraph Orchestration"
+        - "Multi-Agent Blackboard Deliberation"
+        - "11-Layer Scope Isolation & Security Gate"
+        - "Dynamic MCP DB Toolbox & Multi-Dialect SQL Sandbox"
+        - "Pack API v1 & Schema Specifications"
+        - "Cognitive Memory, CAS & Hybrid Search"
+        - "Scoped Connectors & Envelope Vault"
+        - "Frontend Component Library (@yarvelle/ui)"
+        - "Developer Tooling, CI/CD & Documentation"
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any alternative designs or trade-offs evaluated.
+    validations:
+      required: false
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Community Checklist
+      options:
+        - label: This proposal is strictly domain-neutral and contains no domain-specific business logic.
+          required: true
+        - label: I would be interested in contributing code or an ADR for this feature.
+          required: false
+        - label: I have checked existing feature requests to prevent duplicates.
+          required: true
