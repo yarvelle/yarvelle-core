@@ -1,0 +1,78 @@
+name: Bug Report
+description: File a bug report or regression in Yarvelle Core or @yarvelle/ui
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting an issue in **Yarvelle Core**! Please ensure no sensitive personal data, API keys, or unredacted PII are included in your report.
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of the bug or regression.
+      placeholder: Describe what happened...
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected Subsystem
+      description: Select the primary subsystem experiencing the defect.
+      options:
+        - "Execution Engine & LangGraph Workflows (SINGLE / PARALLEL / PIPELINE)"
+        - "Multi-Agent Deliberation Engine (Blackboard / Critique / Auditor / Gate)"
+        - "11-Layer Scope Isolation & Conformance Suite (ScopeContext / ScopedSession)"
+        - "Dynamic MCP DB Toolbox & SQL AST Sandbox (SqlAstSandbox / SchemaCatalog)"
+        - "Pack API v1 & Manifest Loaders (PackSpec / AgentManifest / SkillManifest)"
+        - "Hexagonal Memory, CAS Storage & Hybrid Search (FTS5 / sqlite-vec)"
+        - "Envelope Keyring Vault & OAuth PKCE Connectors"
+        - "Frontend Component Library (@yarvelle/ui / Design Tokens / RTL)"
+        - "CI/CD, Packaging & Documentation"
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Minimal reproducible steps or test case demonstrating the issue.
+      placeholder: |
+        1. Configure runtime / scope context with `...`
+        2. Execute turn or tool call `...`
+        3. Observe error `...`
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What should have happened instead?
+      placeholder: Expected the runtime to...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error Logs or Stack Trace
+      description: Paste relevant terminal logs, stack traces, or test output.
+      render: shell
+    validations:
+      required: false
+  - type: input
+    id: environment
+    attributes:
+      label: Environment & Versions
+      description: OS, Python version, Node.js/pnpm version, SQL dialect, and LLM provider.
+      placeholder: "macOS 15 / Python 3.12 / Node 22 / SQLite or PostgreSQL / Ollama"
+    validations:
+      required: true
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-Submission Checklist
+      options:
+        - label: I have verified that no secrets or sensitive personal data are contained in this report.
+          required: true
+        - label: I have searched existing issues to ensure this is not a duplicate.
+          required: true

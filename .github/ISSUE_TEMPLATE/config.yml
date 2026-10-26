@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security Vulnerability Disclosure
+    url: https://github.com/yarvelle/yarvelle-core/security/advisories/new
+    about: Please report security vulnerabilities or scope isolation bypasses privately via GitHub Security Advisories.
+  - name: Architecture Decision Records (ADRs) & Documentation
+    url: https://yarvelle.github.io/yarvelle-core/
+    about: Browse the Yarvelle Core architecture documentation and living ADRs before opening an issue.

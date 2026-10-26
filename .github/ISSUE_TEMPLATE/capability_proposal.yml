@@ -1,0 +1,59 @@
+name: System Agent or Tool Capability Proposal
+description: Propose a new domain-neutral system agent, sandboxed tool, or connector capability
+title: "[Capability Proposal]: "
+labels: ["capability-proposal", "architecture"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template to propose a new domain-neutral system agent (`agents/_system/`), sandboxed runtime tool (`yarvelle_core/tools/`), or connector protocol capability.
+  - type: input
+    id: capability_id
+    attributes:
+      label: Capability / Tool Identifier
+      description: Kebab-case or snake_case identifier (e.g., `db-operator`, `db_execute_query`).
+      placeholder: "system-capability-id"
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Capability Type
+      options:
+        - "System Agent (agents/_system/)"
+        - "Sandboxed Core Tool (yarvelle_core/tools/)"
+        - "Pack API v1 Extension (yarvelle_core/pack/)"
+        - "Scoped Connector Protocol (yarvelle_core/connectors/)"
+    validations:
+      required: true
+  - type: dropdown
+    id: risk_tier
+    attributes:
+      label: 4-Tier Tool Execution Gate Classification
+      description: Select the default risk tier governing autonomy and approval gating.
+      options:
+        - "read (Read-only introspection or retrieval within active ScopeContext)"
+        - "write_local (Scoped local mutation; gated by autonomy level and taint)"
+        - "write_external (Outbound connector mutation; requires explicit approval when tainted)"
+        - "irreversible (Destructive or permanent action; always requires human-in-the-loop approval)"
+    validations:
+      required: true
+  - type: textarea
+    id: scope_isolation
+    attributes:
+      label: Scope Isolation & Taint Guarantees
+      description: Explain how this capability enforces `ScopeContext` (`profile_id`, `scope`), `declared_reads` + grants, and `TaintFlag` propagation.
+      placeholder: |
+        - Enforces active profile_id and scope via ScopedSession / SqlAstSandbox.
+        - Propagates UntrustedResult taint flags on external inputs.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Security & Neutrality Confirmations
+      options:
+        - label: The capability is strictly domain-neutral ("Core Knows No Domain").
+          required: true
+        - label: Unrecognized or destructive operations fail closed to the `irreversible` risk tier.
+          required: true
