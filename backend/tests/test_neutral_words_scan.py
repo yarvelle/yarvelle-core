@@ -82,7 +82,6 @@ ALLOWLIST = {
     "search/adapters/spector.py": {"clinical"},
     "search/adapters/sqlite.py": {"clinical"},
     "search/__init__.py": {"clinical"},
-    "tools/mcp_db_toolbox.py": {"vital", "vitals", "fhir", "clinical"},
     "tools/registry.py": {"clinical"},
     "tools/web_search.py": {"clinical"},
     "platform/email_drafts.py": {"clinical"},
