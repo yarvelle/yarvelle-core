@@ -25,6 +25,7 @@ from typing import FrozenSet
 
 AGENT_ORCHESTRATOR: str = "orchestrator"
 AGENT_DOCUMENT_EXTRACTOR: str = "document-extractor"
+AGENT_DB_OPERATOR: str = "db-operator"
 AGENT_VISIT_STEWARD: str = "visit-steward"
 AGENT_BENEFITS_GUIDE: str = "benefits-guide"
 AGENT_HABIT_COMPANION: str = "habit-companion"
@@ -89,6 +90,18 @@ EXPANDED_PHASE_0_REGISTRY: FrozenSet[str] = frozenset({
     TOOL_EXTRACT_STRUCTURED_DATA,
     TOOL_VALIDATE_GROUNDING,
     TOOL_EXTRACT_DOCUMENT_DOSSIER,
+    "db_inspect_schema",
+    "db_execute_query",
+    "db_mutate_records",
+    "upsert_workspace_note",
+    "list_workspace_notes",
+    "get_workspace_note",
+    "delete_workspace_note",
+    "create_profile_reminder",
+    "list_profile_reminders",
+    "update_profile_reminder",
+    "create_email_draft_record",
+    "list_email_draft_records",
 })
 
 

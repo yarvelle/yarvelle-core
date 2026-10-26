@@ -94,7 +94,7 @@ yarvelle-core/
 ├── schemas/                        # Canonical JSON Schemas (pack.schema.json, agent.schema.json, skill.schema.json)
 ├── scripts/                        # License checkers, git-dep validator & JSON schema generator
 └── docs/
-    └── adr/                        # Living Architecture Decision Records (0001-multi-agent-deliberation.md)
+    └── adr/                        # Living Architecture Decision Records (0000–0011)
 ```
 
 ### 2.1 Execution Topologies (`ExecutionMode` in `schemas/plan.py`)
@@ -114,6 +114,7 @@ yarvelle-core/
 2. **`document-extractor`**: Sandboxed attachment ingestion, PII sanitization, structured Pydantic dossier extraction, and numerical grounding verification.
 3. **`skill-generator`**: Synthesis of dynamic skill manifests and validation templates from reference guidelines.
 4. **`suggestion-generator`**: Context-aware follow-up suggestion chips emitted over SSE.
+5. **`db-operator`**: Dynamic SQL query planner and deterministic AST-sandboxed executor (`SELECT`, `INSERT`, `UPDATE`, `DELETE`) across any SQL dialect per [ADR 0002](docs/adr/0002-dynamic-mcp-db-toolbox.md).
 
 ### 2.3 Multi-Agent Blackboard Deliberation ([ADR 0001](docs/adr/0001-multi-agent-deliberation.md))
 
@@ -137,6 +138,7 @@ Agents interact with the environment exclusively through registered, sandboxed t
 - **`list_agents`**: Querying `CatalogPort` for registered specialist agents.
 - **`sanitize_pii`**: Redacts sensitive personal identifiers prior to extraction or external model calls.
 - **`extract_structured_data`** / **`validate_grounding`** / **`extract_document_dossier`**: Structured Pydantic extraction and numerical grounding validation against source text.
+- **`db_inspect_schema`** / **`db_execute_query`** / **`db_mutate_records`**: Dynamic M-Schema database introspection, parameterized `SELECT` query planning/execution, and AST-sandboxed `INSERT` / `UPDATE` / `DELETE` mutations (`tools/mcp_db_toolbox.py`, `tools/sql_ast_sandbox.py`, `db/schema_catalog.py`). Strictly blocks all DDL (`CREATE`, `ALTER`, `DROP`, `TRUNCATE`, `RENAME`) and DCL/TCL/Admin statements while injecting parenthesized `profile_id` + `scope` predicates across SQLite, PostgreSQL, MySQL/MariaDB, SQL Server, and DuckDB.
 
 ### 3.2 Zero-Mock Production Policy
 - No production code in `backend/src/` or `frontend/src/` may employ fake, dummy, or facade mock implementations.

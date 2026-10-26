@@ -66,4 +66,7 @@ frontend/dist/
 # Local planning notes
 /yarvelle-core-plan/
 
+# Documentation build
+site/
+
 /.agents/

@@ -150,6 +150,18 @@ PHASE_0_REGISTRY = frozenset({
     "sanitize_pii",
     "extract_structured_data",
     "validate_grounding",
+    "db_inspect_schema",
+    "db_execute_query",
+    "db_mutate_records",
+    "upsert_workspace_note",
+    "list_workspace_notes",
+    "get_workspace_note",
+    "delete_workspace_note",
+    "create_profile_reminder",
+    "list_profile_reminders",
+    "update_profile_reminder",
+    "create_email_draft_record",
+    "list_email_draft_records",
 })
 SLUG_REGEX = re.compile(r"^[a-zA-Z0-9_\-]+$")
 

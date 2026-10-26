@@ -66,7 +66,7 @@ def _get_init_db_lock() -> asyncio.Lock:
 
 
 def normalize_database_url(url: str) -> str:
-    """Normalizes database URLs to async drivers for SQLite and PostgreSQL."""
+    """Normalizes database URLs to async drivers across SQLite, PostgreSQL, MySQL/MariaDB, and MSSQL."""
     cleaned = url.strip()
     if cleaned == ":memory:":
         return "sqlite+aiosqlite:///:memory:"
@@ -77,6 +77,18 @@ def normalize_database_url(url: str) -> str:
         return "postgresql+asyncpg://" + cleaned[len("postgresql://"):]
     if cleaned.startswith("postgresql+psycopg2://"):
         return "postgresql+asyncpg://" + cleaned[len("postgresql+psycopg2://"):]
+
+    if cleaned.startswith("mysql://"):
+        return "mysql+aiomysql://" + cleaned[len("mysql://"):]
+    if cleaned.startswith("mysql+pymysql://"):
+        return "mysql+aiomysql://" + cleaned[len("mysql+pymysql://"):]
+    if cleaned.startswith("mariadb://"):
+        return "mariadb+aiomysql://" + cleaned[len("mariadb://"):]
+
+    if cleaned.startswith("mssql://"):
+        return "mssql+aioodbc://" + cleaned[len("mssql://"):]
+    if cleaned.startswith("sqlserver://"):
+        return "mssql+aioodbc://" + cleaned[len("sqlserver://"):]
 
     if cleaned.startswith("sqlite://") and not cleaned.startswith("sqlite+"):
         return "sqlite+aiosqlite://" + cleaned[len("sqlite://"):]
