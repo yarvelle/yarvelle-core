@@ -37,6 +37,9 @@ class User(Base):
     """User account entity for authentication and authorization."""
 
     __tablename__ = "users"
+    __table_args__ = (
+        {"comment": "System user accounts storing authentication identity, role, status, and locale preferences."},
+    )
 
     id: Mapped[str] = mapped_column(
         String(36),
@@ -759,6 +762,7 @@ class KnowledgeBase(Base):
 
     __table_args__ = (
         UniqueConstraint("target_type", "target_id", "name", name="uq_kb_target_name"),
+        {"comment": "Reference knowledge base documents attached to agents, skills, or global runtime context."},
     )
 
     user: Mapped[Optional[User]] = relationship("User")
@@ -1037,6 +1041,7 @@ class ProfileAccess(Base):
 
     __table_args__ = (
         UniqueConstraint("profile_id", "user_id", name="uq_profile_access_user"),
+        {"comment": "Access grants authorizing users (stewards, guardians, viewers) to access specific profiles."},
     )
 
     # Relationships
@@ -1167,9 +1172,22 @@ class ScopeGrant(Base):
     __tablename__ = "scope_grants"
     __table_args__ = (
         UniqueConstraint("profile_id", "user_id", "scope", "access_level", name="uq_scope_grants_profile_user_scope_level"),
-        Index("ix_scope_grants_profile_id", "profile_id"),
-        Index("ix_scope_grants_user_id", "user_id"),
-        Index("ix_scope_grants_scope", "scope"),
+        Index(
+            "ix_scope_grants_profile_id",
+            "profile_id",
+            info={"comment": "Index accelerating scope grant lookup by target profile_id."},
+        ),
+        Index(
+            "ix_scope_grants_user_id",
+            "user_id",
+            info={"comment": "Index accelerating scope grant lookup by grantee user_id."},
+        ),
+        Index(
+            "ix_scope_grants_scope",
+            "scope",
+            info={"comment": "Index accelerating cross-domain scope authorization checks by scope pattern."},
+        ),
+        {"comment": "Direct domain scope authorization grants governing read/write/approve access per profile and user."},
     )
 
     id: Mapped[str] = mapped_column(
@@ -1356,7 +1374,13 @@ class Note(ScopedMixin, Base):
 
     __tablename__ = "notes"
     __table_args__ = (
-        Index("ix_notes_profile_id_type", "profile_id", "type"),
+        Index(
+            "ix_notes_profile_id_type",
+            "profile_id",
+            "type",
+            info={"comment": "Composite index accelerating note queries filtered by profile_id and note category type."},
+        ),
+        {"comment": "Scoped user and agent workspace notes, preparation checklists, and structured markdown summaries per profile."},
     )
 
     id: Mapped[str] = mapped_column(
@@ -2151,6 +2175,7 @@ class ProfileKey(Base):
     __tablename__ = "profile_keys"
     __table_args__ = (
         UniqueConstraint("profile_id", "dek_version", name="uq_profile_keys_profile_id_dek_version"),
+        {"comment": "Envelope-encrypted Data Encryption Keys (DEKs) per profile and version for local vault cryptography."},
     )
 
     id: Mapped[str] = mapped_column(
@@ -2495,10 +2520,29 @@ class Reminder(Base, ScopedMixin):
 
     __tablename__ = "reminders"
     __table_args__ = (
-        Index("ix_reminders_next_due_at", "next_due_at"),
-        Index("ix_reminders_status", "status"),
-        Index("ix_reminders_category", "category"),
-        Index("ix_reminders_profile_status_due", "profile_id", "status", "next_due_at"),
+        Index(
+            "ix_reminders_next_due_at",
+            "next_due_at",
+            info={"comment": "Index accelerating chronological queries and due-window scans on next_due_at."},
+        ),
+        Index(
+            "ix_reminders_status",
+            "status",
+            info={"comment": "Index accelerating filtering of reminders by lifecycle status (pending, completed, snoozed, missed, cancelled)."},
+        ),
+        Index(
+            "ix_reminders_category",
+            "category",
+            info={"comment": "Index accelerating filtering of reminders by category (task, event, prep, general)."},
+        ),
+        Index(
+            "ix_reminders_profile_status_due",
+            "profile_id",
+            "status",
+            "next_due_at",
+            info={"comment": "Composite index accelerating profile-scoped reminder queries filtered by status and ordered by next_due_at."},
+        ),
+        {"comment": "Scoped profile reminders supporting one-shot and RFC 5545 RRULE recurring schedules."},
     )
 
     id: Mapped[str] = mapped_column(
@@ -2608,7 +2652,14 @@ class ConsentGrant(Base):
 
     __tablename__ = "consent_grants"
     __table_args__ = (
-        Index("ix_consent_grants_profile_connector_status", "profile_id", "connector_id", "status"),
+        Index(
+            "ix_consent_grants_profile_connector_status",
+            "profile_id",
+            "connector_id",
+            "status",
+            info={"comment": "Composite index accelerating consent verification by profile_id, connector_id, and active/revoked status."},
+        ),
+        {"comment": "Granular consent grants binding profile, connector, data categories, allowed hosts, and purpose."},
     )
 
     id: Mapped[str] = mapped_column(
@@ -2778,7 +2829,13 @@ class SyncRun(Base):
 
     __tablename__ = "sync_runs"
     __table_args__ = (
-        Index("ix_sync_runs_connection_started", "connection_id", "started_at"),
+        Index(
+            "ix_sync_runs_connection_started",
+            "connection_id",
+            "started_at",
+            info={"comment": "Composite index accelerating recent sync run history lookup per connection ordered by started_at."},
+        ),
+        {"comment": "Per-connection synchronization run telemetry tracking fetched, upserted, and quarantined record counts."},
     )
 
     id: Mapped[str] = mapped_column(
@@ -3046,6 +3103,7 @@ class McpToolPin(Base):
     __tablename__ = "mcp_tool_pins"
     __table_args__ = (
         UniqueConstraint("connection_id", "tool_name", name="uq_mcp_tool_pins_conn_tool"),
+        {"comment": "Cryptographic schema-hash pins for curated remote MCP tools preventing rug-pull schema drift."},
     )
 
     id: Mapped[str] = mapped_column(
@@ -3233,9 +3291,11 @@ class EmailDraft(Base, ScopedMixin):
         )
 
 
-# Register dual-write listeners after all models are loaded
+# Register dual-write listeners and synchronize DDL/ORM comments after all models are loaded
+from yarvelle_core.db.base import ensure_metadata_comments
 from yarvelle_core.scope.adapter import DualWriteAdapter
 
+ensure_metadata_comments(Base.metadata)
 DualWriteAdapter.register_listeners()
 
 

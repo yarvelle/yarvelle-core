@@ -27,6 +27,7 @@ class ScopedMixin:
         server_default="health",
         index=True,
         doc="Domain scope partition identifier (e.g. 'health', 'health.records', 'finance.accounts')",
+        comment="Domain scope partition identifier isolating records by domain and subdomain namespace.",
     )
 
 

@@ -11,7 +11,14 @@
 
 """Yarvelle Core relational database layer with multi-dialect support (SQLite & PostgreSQL)."""
 
-from yarvelle_core.db.base import Base
+from yarvelle_core.db.base import Base, ensure_metadata_comments, ensure_table_comments
+from yarvelle_core.db.schema_catalog import (
+    SYSTEM_DENYLIST_TABLES,
+    SchemaCatalog,
+    get_schema_catalog,
+    infer_table_domain_prefix,
+    register_table_scope,
+)
 from yarvelle_core.db.models import (
     Agent,
     Approval,
@@ -56,6 +63,13 @@ from yarvelle_core.db.session import (
 
 __all__ = [
     "Base",
+    "ensure_metadata_comments",
+    "ensure_table_comments",
+    "SchemaCatalog",
+    "get_schema_catalog",
+    "SYSTEM_DENYLIST_TABLES",
+    "infer_table_domain_prefix",
+    "register_table_scope",
     "User",
     "Session",
     "PasswordReset",
