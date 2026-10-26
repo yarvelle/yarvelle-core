@@ -32,6 +32,7 @@ logger = get_logger("yarvelle_core.db.seeding")
 SYSTEM_AGENT_IDS = frozenset({
     "orchestrator",
     "document-extractor",
+    "db-operator",
     "quality-reviewer",
     "skill-generator",
     "suggestion-generator",

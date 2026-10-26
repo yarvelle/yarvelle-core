@@ -1,314 +1,184 @@
-# Carefold — Healthcare AI Agent Marketplace & Runtime
+# Yarvelle Core — Domain-Neutral AI Agent Runtime & Execution Engine
 # Copyright 2026 Spectrayan (https://spectrayan.com)
 #
 # Licensed under the PolyForm Noncommercial License 1.0.0 and the
-# Carefold Additional Terms (see LICENSE and ADDITIONAL-TERMS.md).
+# Yarvelle Core Additional Terms (see LICENSE and ADDITIONAL-TERMS.md).
 # Personal and household local use only. Commercial use, hosted service
 # offering, rebranding, white-labeling, and redistribution of modified
 # forks are prohibited without a written commercial license from Spectrayan.
 #
 # Required Notice: Copyright 2026 Spectrayan (https://spectrayan.com)
 
-# Declarative MCP Toolbox for Databases (googleapis/genai-toolbox) configuration
-# for Carefold profile-scoped relational persistence (Mode L SQLite & Mode S PostgreSQL).
-#
-# Security Invariants:
-# 1. Parameterized SQL Only: Agents invoke named tools with typed parameters; raw SQL
-#    generation by the LLM is strictly impossible.
-# 2. Context-Bound Tenant Isolation: `:profile_id`, `:id`, `:locale`, `:now`, and
-#    `:content_hash` are bound automatically from `ToolContext` and never exposed
-#    in the LLM-writable JSON Schema.
-# 3. 4-Tier Policy Gate: Every tool declares `risk_tier` ('read' or 'write_local')
-#    enforced by `ToolExecutionGate` and recorded in `AuditEventRecord`.
+# ============================================================================
+# Yarvelle Core Declarative & Dynamic MCP Database Toolbox Configuration
+# Dialect-agnostic SQL specification supporting SQLite, PostgreSQL, MySQL,
+# MariaDB, MS SQL Server, and DuckDB, paired with dynamic AST-sandboxed DQL/DML.
+# ============================================================================
 
 sources:
+  yarvelle-db:
+    kind: sql
+    database_env: DATABASE_URL
+    description: >-
+      Primary Yarvelle Core relational database source supporting any SQLAlchemy
+      dialect (SQLite, PostgreSQL, MySQL/MariaDB, MS SQL Server, DuckDB).
   yarvelle-sqlite:
     kind: sqlite
-    database: ${YARVELLE_DB_PATH:~/.yarvelle/yarvelle.db}
+    database_env: DATABASE_URL
+    description: Local SQLite database alias for backward compatibility.
   yarvelle-postgres:
     kind: postgres
-    host: ${YARVELLE_PG_HOST:127.0.0.1}
-    port: ${YARVELLE_PG_PORT:5432}
-    database: ${YARVELLE_PG_DATABASE:carefold}
+    database_env: DATABASE_URL
+    description: PostgreSQL database alias for server/cloud deployments.
+  yarvelle-mysql:
+    kind: mysql
+    database_env: DATABASE_URL
+    description: MySQL / MariaDB relational database source.
+  yarvelle-mssql:
+    kind: mssql
+    database_env: DATABASE_URL
+    description: Microsoft SQL Server (T-SQL) relational database source.
+  yarvelle-duckdb:
+    kind: duckdb
+    database_env: DATABASE_URL
+    description: DuckDB analytical SQL database source.
 
 tools:
-  upsert_clinical_note:
-    kind: sqlite-sql
-    source: yarvelle-sqlite
+  upsert_workspace_note:
+    kind: sql
+    source: yarvelle-db
     risk_tier: write_local
     entity: note
     description: >-
-      Create or update a clinical visit preparation checklist, symptom log, question list,
-      after-visit summary, or general note directly in the patient's profile database.
+      Create or update a profile-scoped workspace note, checklist, or structured
+      markdown summary in the notes table.
     statement: |
       INSERT INTO notes (
-        id, profile_id, slug, title, type, content, locale, tags_json,
-        linked_appointment_id, created_at, updated_at
+        id, type, user_id, profile_id, scope, slug, title, content, tags_json, locale, linked_appointment_id, created_at, updated_at
       ) VALUES (
-        :id, :profile_id, :slug, :title, :note_type, :content, :locale, :tags_json,
-        :linked_appointment_id, :now, :now
+        :id, :type, :user_id, :profile_id, :scope, :slug, :title, :content, :tags_json, :locale, :linked_appointment_id, :now, :now
       )
-      RETURNING id, profile_id, slug, title, type, locale, created_at, updated_at;
+      ON CONFLICT(id) DO UPDATE SET
+        type = excluded.type,
+        title = excluded.title,
+        content = excluded.content,
+        tags_json = excluded.tags_json,
+        locale = excluded.locale,
+        linked_appointment_id = excluded.linked_appointment_id,
+        updated_at = excluded.updated_at
+      RETURNING id, slug, title, type, scope, profile_id, locale, updated_at;
     parameters:
       - name: slug
         type: string
-        description: URL-safe note slug (e.g. 'urology-visit-plan', 'cardiology-questions').
-        required: false
-        default: ""
+        description: Unique URL-safe slug identifier for the note (e.g. 'weekly-review-2026-10').
+        required: true
       - name: title
         type: string
-        description: Human-readable title for the note.
+        description: Human-readable title of the note.
         required: true
-      - name: note_type
-        type: string
-        description: Note category ('visit', 'symptom', 'question', 'after_visit', 'school', 'scratchpad', 'general').
-        required: false
-        default: "visit"
       - name: content
         type: string
-        description: Markdown-formatted note body content.
+        description: Markdown body of the note.
         required: true
+      - name: type
+        type: string
+        description: Note category ('scratchpad', 'prep', 'summary', 'general').
+        required: false
+        default: "scratchpad"
       - name: tags_json
         type: string
-        description: JSON array of string tags (e.g. '["urology", "visit-prep"]').
+        description: JSON array string of taxonomy tags (e.g. '["planning", "q4"]').
         required: false
         default: "[]"
+      - name: locale
+        type: string
+        description: IETF BCP 47 locale tag of the note content (e.g. 'en-US').
+        required: false
+        default: "en-US"
       - name: linked_appointment_id
         type: string
-        description: Optional appointment UUID to associate with this note.
+        description: Optional linked entity or event UUID.
         required: false
-        default: null
+        default: ""
 
-  list_clinical_notes:
-    kind: sqlite-sql
-    source: yarvelle-sqlite
+  list_workspace_notes:
+    kind: sql
+    source: yarvelle-db
     risk_tier: read
     entity: note
     description: >-
-      List saved clinical and navigation notes for the active patient profile,
-      ordered by most recently updated.
+      List recent profile-scoped workspace notes, optionally filtered by note type.
     statement: |
-      SELECT id, profile_id, slug, title, type, locale, tags_json, linked_appointment_id, created_at, updated_at
+      SELECT id, slug, title, type, scope, tags_json, locale, linked_appointment_id, created_at, updated_at
       FROM notes
       WHERE profile_id = :profile_id
-        AND (:note_type = '' OR type = :note_type)
+        AND (:type = '' OR type = :type)
       ORDER BY updated_at DESC
       LIMIT :limit;
     parameters:
-      - name: note_type
+      - name: type
         type: string
-        description: Optional filter by note type ('visit', 'symptom', 'question', 'after_visit', 'general').
+        description: Optional note category filter ('scratchpad', 'prep', 'summary', 'general').
         required: false
         default: ""
       - name: limit
         type: integer
-        description: Maximum number of notes to return (1-50).
+        description: Maximum number of notes to return (1 to 100).
         required: false
         default: 20
 
-  get_clinical_note:
-    kind: sqlite-sql
-    source: yarvelle-sqlite
+  get_workspace_note:
+    kind: sql
+    source: yarvelle-db
     risk_tier: read
     entity: note
     description: >-
-      Retrieve the full markdown content and metadata of a saved clinical note by its slug.
+      Retrieve the full markdown content and metadata of a specific workspace note by slug or ID.
     statement: |
-      SELECT id, profile_id, slug, title, type, content, locale, tags_json, linked_appointment_id, created_at, updated_at
+      SELECT id, slug, title, type, scope, content, tags_json, locale, linked_appointment_id, created_at, updated_at
       FROM notes
-      WHERE profile_id = :profile_id AND slug = :slug
+      WHERE profile_id = :profile_id
+        AND (slug = :identifier OR id = :identifier)
       ORDER BY updated_at DESC
       LIMIT 1;
     parameters:
-      - name: slug
+      - name: identifier
         type: string
-        description: Note slug identifier (e.g. 'urology-visit-plan').
+        description: Note slug or UUID identifier.
         required: true
 
-  record_vital_reading:
-    kind: sqlite-sql
-    source: yarvelle-sqlite
-    risk_tier: write_local
-    entity: health_resource
+  delete_workspace_note:
+    kind: sql
+    source: yarvelle-db
+    risk_tier: irreversible
+    entity: note
     description: >-
-      Persist a structured vital sign observation (blood pressure, heart rate, blood glucose,
-      SpO2, weight, height, or temperature) into the patient's health_resources table with
-      automated acute red-flag evaluation.
+      Delete a specific workspace note belonging to the active profile by slug or ID.
     statement: |
-      INSERT INTO health_resources (
-        id, profile_id, resource_type, source_type, source_ref, source_id,
-        content_hash, data, status, locale, effective_at, recorded_at, created_at, updated_at
-      ) VALUES (
-        :id, :profile_id, 'observation', :source_type, :source_ref, :source_id,
-        :content_hash, :data, 'active', :locale, :effective_at, :now, :now, :now
-      )
-      RETURNING id, profile_id, resource_type, source_type, effective_at, status;
-    parameters:
-      - name: vital_type
-        type: string
-        description: Vital category ('blood_pressure', 'heart_rate', 'blood_glucose', 'spo2', 'weight', 'height', 'temperature').
-        required: true
-      - name: systolic
-        type: number
-        description: Systolic blood pressure in mmHg (required when vital_type is 'blood_pressure').
-        required: false
-        default: null
-      - name: diastolic
-        type: number
-        description: Diastolic blood pressure in mmHg (required when vital_type is 'blood_pressure').
-        required: false
-        default: null
-      - name: value
-        type: number
-        description: Numeric measurement value for single-value vitals (heart_rate, blood_glucose, spo2, weight, height, temperature).
-        required: false
-        default: null
-      - name: unit
-        type: string
-        description: Measurement unit (e.g. 'mmHg', 'bpm', 'mg/dL', '%', 'kg', 'cm', 'C').
-        required: false
-        default: ""
-      - name: effective_at
-        type: string
-        description: Optional ISO-8601 timestamp when the measurement was taken.
-        required: false
-        default: ""
-
-  list_vital_readings:
-    kind: sqlite-sql
-    source: yarvelle-sqlite
-    risk_tier: read
-    entity: health_resource
-    description: >-
-      List recent vital sign observations stored in health_resources for the active profile.
-    statement: |
-      SELECT id, profile_id, resource_type, source_type, data, status, locale, effective_at, recorded_at
-      FROM health_resources
+      DELETE FROM notes
       WHERE profile_id = :profile_id
-        AND LOWER(resource_type) = 'observation'
-        AND status = 'active'
-      ORDER BY effective_at DESC
-      LIMIT :limit;
+        AND (slug = :identifier OR id = :identifier)
+      RETURNING id, slug, title;
     parameters:
-      - name: limit
-        type: integer
-        description: Maximum number of vital readings to return (1-50).
-        required: false
-        default: 20
-
-  create_appointment_record:
-    kind: sqlite-sql
-    source: yarvelle-sqlite
-    risk_tier: write_local
-    entity: appointment
-    description: >-
-      Persist an upcoming or scheduled healthcare appointment to the patient's profile database.
-    statement: |
-      INSERT INTO appointments (
-        id, profile_id, title, provider_name, specialty, location, clinic_phone,
-        start_time, end_time, timezone, status, reason, preparation_notes, created_at, updated_at
-      ) VALUES (
-        :id, :profile_id, :title, :provider_name, :specialty, :location, :clinic_phone,
-        :start_time, :end_time, :timezone, :status, :reason, :preparation_notes, :now, :now
-      )
-      RETURNING id, profile_id, title, provider_name, specialty, location, start_time, end_time, timezone, status;
-    parameters:
-      - name: title
+      - name: identifier
         type: string
-        description: Appointment title (e.g. 'Urology Consultation').
+        description: Note slug or UUID identifier to delete.
         required: true
-      - name: start_time
-        type: string
-        description: Scheduled start timestamp in ISO-8601 format.
-        required: true
-      - name: end_time
-        type: string
-        description: Scheduled end timestamp in ISO-8601 format (defaults to 30 minutes after start_time if omitted).
-        required: false
-        default: ""
-      - name: provider_name
-        type: string
-        description: Clinician, physician, or clinic name.
-        required: false
-        default: ""
-      - name: specialty
-        type: string
-        description: Medical specialty (e.g. 'Urology', 'Cardiology', 'Endocrinology').
-        required: false
-        default: ""
-      - name: location
-        type: string
-        description: Physical clinic address or telehealth link.
-        required: false
-        default: ""
-      - name: clinic_phone
-        type: string
-        description: Clinic phone number.
-        required: false
-        default: ""
-      - name: timezone
-        type: string
-        description: IANA timezone identifier (e.g. 'America/Chicago', 'UTC').
-        required: false
-        default: "UTC"
-      - name: status
-        type: string
-        description: Appointment status ('requested', 'scheduled', 'confirmed').
-        required: false
-        default: "scheduled"
-      - name: reason
-        type: string
-        description: Primary visit reason or chief complaint.
-        required: false
-        default: ""
-      - name: preparation_notes
-        type: string
-        description: Pre-visit checklist or preparation instructions.
-        required: false
-        default: ""
-
-  list_appointment_records:
-    kind: sqlite-sql
-    source: yarvelle-sqlite
-    risk_tier: read
-    entity: appointment
-    description: >-
-      List upcoming and historical healthcare appointments for the active profile.
-    statement: |
-      SELECT id, profile_id, title, provider_name, specialty, location, start_time, end_time, timezone, status, reason, preparation_notes
-      FROM appointments
-      WHERE profile_id = :profile_id
-        AND (:status = '' OR status = :status)
-      ORDER BY start_time ASC
-      LIMIT :limit;
-    parameters:
-      - name: status
-        type: string
-        description: Optional status filter ('requested', 'scheduled', 'confirmed', 'completed', 'cancelled').
-        required: false
-        default: ""
-      - name: limit
-        type: integer
-        description: Maximum number of appointments to return (1-50).
-        required: false
-        default: 20
 
   create_profile_reminder:
-    kind: sqlite-sql
-    source: yarvelle-sqlite
+    kind: sql
+    source: yarvelle-db
     risk_tier: write_local
     entity: reminder
     description: >-
-      Create a scheduled clinical prep, medication, vitals, or follow-up reminder in the database.
+      Create a scheduled one-shot or recurring RFC 5545 RRULE reminder for the active profile.
     statement: |
       INSERT INTO reminders (
-        id, profile_id, title, description, category, rrule, timezone,
-        next_due_at, status, created_at, updated_at
+        id, profile_id, scope, title, description, category, rrule, timezone, next_due_at, status, created_at, updated_at
       ) VALUES (
-        :id, :profile_id, :title, :description, :category, :rrule, :timezone,
-        :next_due_at, 'pending', :now, :now
+        :id, :profile_id, :scope, :title, :description, :category, :rrule, :timezone, :next_due_at, 'pending', :now, :now
       )
-      RETURNING id, profile_id, title, category, next_due_at, timezone, status;
+      RETURNING id, profile_id, scope, title, category, rrule, timezone, next_due_at, status, created_at;
     parameters:
       - name: title
         type: string
@@ -316,129 +186,111 @@ tools:
         required: true
       - name: next_due_at
         type: string
-        description: ISO-8601 due timestamp.
+        description: ISO-8601 UTC timestamp for next scheduled trigger.
         required: true
       - name: description
         type: string
-        description: Optional instructions or context.
+        description: Optional detailed context or instructions.
         required: false
         default: ""
       - name: category
         type: string
-        description: Category ('medication', 'vitals', 'appointment', 'prep', 'general').
+        description: Reminder category ('task', 'event', 'prep', 'general').
         required: false
-        default: "prep"
+        default: "general"
       - name: rrule
         type: string
         description: Optional RFC 5545 recurrence rule (e.g. 'FREQ=DAILY;INTERVAL=1').
         required: false
-        default: null
+        default: ""
       - name: timezone
         type: string
-        description: IANA timezone identifier.
+        description: Local IANA timezone identifier (e.g. 'UTC', 'America/Chicago').
         required: false
         default: "UTC"
 
   list_profile_reminders:
-    kind: sqlite-sql
-    source: yarvelle-sqlite
+    kind: sql
+    source: yarvelle-db
     risk_tier: read
     entity: reminder
     description: >-
-      List reminders for the active patient profile from the database.
+      List scheduled reminders for the active profile, optionally filtered by status or category.
     statement: |
-      SELECT id, profile_id, title, description, category, rrule, timezone, next_due_at, status
+      SELECT id, profile_id, scope, title, description, category, rrule, timezone, next_due_at, status, snooze_until, last_triggered_at, updated_at
       FROM reminders
       WHERE profile_id = :profile_id
         AND (:status = '' OR status = :status)
+        AND (:category = '' OR category = :category)
       ORDER BY next_due_at ASC
       LIMIT :limit;
     parameters:
       - name: status
         type: string
-        description: Optional status filter ('pending', 'snoozed', 'completed', 'missed', 'cancelled').
+        description: Optional status filter ('pending', 'completed', 'snoozed', 'missed', 'cancelled').
+        required: false
+        default: ""
+      - name: category
+        type: string
+        description: Optional category filter ('task', 'event', 'prep', 'general').
         required: false
         default: ""
       - name: limit
         type: integer
-        description: Maximum number of reminders to return (1-50).
+        description: Maximum number of reminders to return (1 to 100).
         required: false
         default: 25
 
-  update_preventive_record:
-    kind: sqlite-sql
-    source: yarvelle-sqlite
+  update_profile_reminder:
+    kind: sql
+    source: yarvelle-db
     risk_tier: write_local
-    entity: preventive_record
+    entity: reminder
     description: >-
-      Record or update the status of a preventive care screening or immunisation item in the database.
+      Update the status, next_due_at, or snooze_until timestamp of an existing profile reminder.
     statement: |
-      INSERT INTO preventive_records (
-        id, profile_id, rule_id, status, completed_at, notes, schedule_source, created_at, updated_at
-      ) VALUES (
-        :id, :profile_id, :rule_id, :status, :completed_at, :notes, :schedule_source, :now, :now
-      )
-      ON CONFLICT(profile_id, rule_id) DO UPDATE SET
-        status = excluded.status,
-        completed_at = excluded.completed_at,
-        notes = excluded.notes,
-        schedule_source = excluded.schedule_source,
-        updated_at = excluded.updated_at
-      RETURNING id, profile_id, rule_id, status, completed_at, notes, schedule_source;
+      UPDATE reminders
+      SET status = :status,
+          next_due_at = COALESCE(NULLIF(:next_due_at, ''), next_due_at),
+          snooze_until = NULLIF(:snooze_until, ''),
+          updated_at = :now
+      WHERE id = :reminder_id
+        AND profile_id = :profile_id
+      RETURNING id, profile_id, title, category, status, next_due_at, snooze_until, updated_at;
     parameters:
-      - name: rule_id
+      - name: reminder_id
         type: string
-        description: Preventive care rule identifier (e.g. 'uspstf-colorectal-screening').
+        description: Unique UUID of the reminder to update.
         required: true
       - name: status
         type: string
-        description: Updated status ('due', 'completed', 'not_applicable', 'declined').
+        description: New status ('pending', 'completed', 'snoozed', 'missed', 'cancelled').
         required: true
-      - name: notes
+      - name: next_due_at
         type: string
-        description: Optional clinical or patient notes.
+        description: Optional updated ISO-8601 UTC due timestamp.
         required: false
         default: ""
-      - name: completed_at
+      - name: snooze_until
         type: string
-        description: Optional ISO-8601 completion timestamp.
+        description: Optional ISO-8601 UTC timestamp until which the reminder is snoozed.
         required: false
-        default: null
-      - name: schedule_source
-        type: string
-        description: Schedule source ('aap_2026' or 'cdc').
-        required: false
-        default: "aap_2026"
-
-  list_preventive_records:
-    kind: sqlite-sql
-    source: yarvelle-sqlite
-    risk_tier: read
-    entity: preventive_record
-    description: >-
-      List saved preventive care screening and immunisation statuses from the database for the active profile.
-    statement: |
-      SELECT id, profile_id, rule_id, status, completed_at, notes, schedule_source, updated_at
-      FROM preventive_records
-      WHERE profile_id = :profile_id
-      ORDER BY updated_at DESC;
-    parameters: []
+        default: ""
 
   create_email_draft_record:
-    kind: sqlite-sql
-    source: yarvelle-sqlite
+    kind: sql
+    source: yarvelle-db
     risk_tier: write_local
     entity: email_draft
     description: >-
-      Persist a local email draft (for clinic scheduling, records requests, or insurance questions)
-      in the database. Never sends email automatically.
+      Persist a local email draft in the database for user review. Never sends email automatically.
     statement: |
       INSERT INTO email_drafts (
-        id, profile_id, recipient, subject, body, category, status, created_at, updated_at
+        id, profile_id, scope, recipient, subject, body, category, status, created_at, updated_at
       ) VALUES (
-        :id, :profile_id, :recipient, :subject, :body, :category, 'draft', :now, :now
+        :id, :profile_id, :scope, :recipient, :subject, :body, :category, 'draft', :now, :now
       )
-      RETURNING id, profile_id, recipient, subject, category, status, created_at;
+      RETURNING id, profile_id, scope, recipient, subject, category, status, created_at;
     parameters:
       - name: subject
         type: string
@@ -455,52 +307,77 @@ tools:
         default: ""
       - name: category
         type: string
-        description: Draft category ('appointment', 'school', 'insurance', 'general').
+        description: Draft category ('appointment', 'school', 'records', 'general').
         required: false
         default: "general"
 
+  list_email_draft_records:
+    kind: sql
+    source: yarvelle-db
+    risk_tier: read
+    entity: email_draft
+    description: >-
+      List saved local email drafts for the active profile, optionally filtered by status.
+    statement: |
+      SELECT id, profile_id, scope, recipient, subject, category, status, sent_at, created_at, updated_at
+      FROM email_drafts
+      WHERE profile_id = :profile_id
+        AND (:status = '' OR status = :status)
+      ORDER BY updated_at DESC
+      LIMIT :limit;
+    parameters:
+      - name: status
+        type: string
+        description: Optional draft status filter ('draft', 'exported', 'sent_via_approved_mcp', 'archived').
+        required: false
+        default: ""
+      - name: limit
+        type: integer
+        description: Maximum number of email drafts to return.
+        required: false
+        default: 20
+
 toolsets:
-  clinical_assist_db:
-    - upsert_clinical_note
-    - list_clinical_notes
-    - get_clinical_note
-    - record_vital_reading
-    - list_vital_readings
-    - create_appointment_record
-    - list_appointment_records
+  core_db:
+    - upsert_workspace_note
+    - list_workspace_notes
+    - get_workspace_note
+    - delete_workspace_note
     - create_profile_reminder
     - list_profile_reminders
-    - update_preventive_record
-    - list_preventive_records
+    - update_profile_reminder
+    - create_email_draft_record
+    - list_email_draft_records
+  assist_db:
+    - upsert_workspace_note
+    - list_workspace_notes
+    - get_workspace_note
+    - create_profile_reminder
+    - list_profile_reminders
+    - update_profile_reminder
   navigation_db:
-    - upsert_clinical_note
-    - list_clinical_notes
-    - get_clinical_note
-    - create_appointment_record
-    - list_appointment_records
+    - upsert_workspace_note
+    - list_workspace_notes
+    - get_workspace_note
     - create_profile_reminder
     - list_profile_reminders
+    - update_profile_reminder
     - create_email_draft_record
+    - list_email_draft_records
   wellness_db:
-    - upsert_clinical_note
-    - list_clinical_notes
-    - get_clinical_note
-    - record_vital_reading
-    - list_vital_readings
+    - upsert_workspace_note
+    - list_workspace_notes
+    - get_workspace_note
     - create_profile_reminder
     - list_profile_reminders
-    - update_preventive_record
-    - list_preventive_records
+    - update_profile_reminder
   all_db_tools:
-    - upsert_clinical_note
-    - list_clinical_notes
-    - get_clinical_note
-    - record_vital_reading
-    - list_vital_readings
-    - create_appointment_record
-    - list_appointment_records
+    - upsert_workspace_note
+    - list_workspace_notes
+    - get_workspace_note
+    - delete_workspace_note
     - create_profile_reminder
     - list_profile_reminders
-    - update_preventive_record
-    - list_preventive_records
+    - update_profile_reminder
     - create_email_draft_record
+    - list_email_draft_records
