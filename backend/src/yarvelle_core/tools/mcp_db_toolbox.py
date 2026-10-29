@@ -141,9 +141,11 @@ def register_db_tool_hook(tool_name: str, hook_fn: DbToolHookFn) -> None:
 
 def register_db_tools_yaml(yaml_path: Union[str, Path]) -> None:
     """Register an additional domain-pack db_tools.yaml manifest."""
+    global _DEFAULT_TOOLBOX
     resolved = Path(yaml_path).resolve()
     if resolved not in _REGISTERED_PACK_YAML_PATHS:
         _REGISTERED_PACK_YAML_PATHS.append(resolved)
+        _DEFAULT_TOOLBOX = None
 
 
 class DbParameterSpec(BaseModel):
@@ -429,7 +431,11 @@ class McpDatabaseToolbox:
         """Maps an agent's domain / risk_class to its authorized MCP DB toolset."""
         dom = (domain or "").strip().lower()
         rc = (risk_class or "").strip().lower()
-        if dom == "navigation" or rc == "admin":
+        if f"{dom}_assist_db" in self.manifest.toolsets:
+            base_tools = self.get_toolset(f"{dom}_assist_db")
+        elif f"{dom}_{rc}_db" in self.manifest.toolsets:
+            base_tools = self.get_toolset(f"{dom}_{rc}_db")
+        elif dom == "navigation" or rc == "admin":
             base_tools = self.get_toolset("navigation_db")
         elif dom == "wellness" or rc == "wellness":
             base_tools = self.get_toolset("wellness_db")
@@ -900,6 +906,7 @@ class McpDatabaseToolbox:
             profile_id=str(raw_profile_id).strip(),
             user_id=user_id,
             scope=scope,
+            ctx=ctx,
         )
 
     async def execute(
@@ -911,6 +918,7 @@ class McpDatabaseToolbox:
         user_id: Optional[str] = None,
         scope: Optional[str] = None,
         session: Optional[AsyncSession] = None,
+        ctx: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """Execute a registered MCP DB tool inside a profile-isolated database session."""
         if not profile_id or not str(profile_id).strip():
@@ -996,6 +1004,10 @@ class McpDatabaseToolbox:
             "scope": scope or DEFAULT_SCOPE,
             "now": now_iso,
         }
+        if ctx is not None:
+            exec_params["_ctx"] = ctx
+            if getattr(ctx, "locale", None) and "locale" not in exec_params:
+                exec_params["locale"] = getattr(ctx, "locale")
         exec_params.setdefault("id", str(uuid.uuid4()))
 
         if session is not None:
@@ -1028,6 +1040,8 @@ class McpDatabaseToolbox:
                 session,
             )
             if hook_res is not None:
+                if cfg.risk_tier != "read":
+                    await session.commit()
                 return hook_res
 
         if tool_name == "upsert_workspace_note":
