@@ -18,7 +18,7 @@ import importlib.abc as _importlib_abc
 import importlib.machinery as _machinery
 import sys as _sys
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 
 class _AliasLoader(_importlib_abc.Loader):

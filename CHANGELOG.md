@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-10-29
+
+### Added
+- **Multi-Agent Blackboard Deliberation (`ExecutionMode.DELIBERATE`)**: Added bounded scoped blackboard deliberation engine (`Propose -> CrossExamine -> ConvergenceGate -> SelectiveRevise -> Synthesize & Gate`) with `TypedClaim` cross-domain exports, Disagree-or-Commit peer review, deterministic `SharedConstraint` budget auditing, universal human approval on panel-staged actions (`Approval.agent_id`), live deliberation SSE events, and `@yarvelle/ui` `DeliberationRoundtable` / `RoundtableCard` components (`workflows.deliberation`, `ADR-0001`).
+- **Dynamic Multi-Dialect MCP Database Toolbox & `db-operator`**: Added M-Schema `SchemaCatalog` introspection, 5-stage `sqlglot` AST sandbox (`SELECT`, `INSERT`, `UPDATE`, `DELETE` with parenthesized `profile_id` + `scope` tenant predicate injection and strict DDL/DCL/TCL rejection across SQLite, PostgreSQL, MySQL/MariaDB, SQL Server, and DuckDB), dynamic tools (`db_inspect_schema`, `db_execute_query`, `db_mutate_records`), declarative `db_tools.yaml` registry, and the `db-operator` system agent (`db.schema_catalog`, `tools.sql_ast_sandbox`, `tools.mcp_db_toolbox`, `ADR-0002`).
+- **Living Architecture Decision Records & Docs Site**: Migrated core ADRs (`0000`–`0011`), added `AGENTS.md` v1.0.0 manifest, GitHub PR/issue templates, and MkDocs Material GitHub Pages publishing.
+
+### Fixed
+- **Pack Database Tool Hooks & Cache Invalidation**: Committed write-hook sessions on mutation completion, forwarded `ToolContext` as `_ctx` to registered pack hooks, invalidated cached toolboxes on `register_db_tools_yaml`, and resolved pack-declared `<domain>_<risk>_db` toolsets in `get_toolset_for_domain` (`tools.mcp_db_toolbox`).
+
 ## [0.1.1] - 2026-10-21
 
 ### Added
