@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from yarvelle_core.engine.safety_policy import SafetyPolicy
 from yarvelle_core.engine.tool_registry import ToolSpec
+from yarvelle_core.schemas.orchestration import PackOrchestrationSpec
 from yarvelle_core.schemas.routing import RoutingHints
 
 
@@ -202,6 +203,9 @@ class PackManifest(BaseModel):
     )
     migrations: Optional[PackMigrationsSpec] = Field(default=None, description="Database migration branch spec")
     compat: Optional[Dict[str, Any]] = Field(default=None, description="Compatibility metadata")
+    orchestration: Optional[PackOrchestrationSpec] = Field(
+        default=None, description="Default agent, fixed routes and limits for multi-agent orchestration"
+    )
 
     @field_validator("id")
     @classmethod
@@ -253,6 +257,9 @@ class PackSpec(BaseModel):
     )
     provides: Optional[PackProvidesSpec] = Field(default=None, description="Optional provides specification")
     agents: List[str] = Field(default_factory=list, description="Agent identifiers contributed by this pack")
+    orchestration: Optional[PackOrchestrationSpec] = Field(
+        default=None, description="Default agent, fixed routes and limits for multi-agent orchestration"
+    )
 
     @field_validator("id", "domain")
     @classmethod

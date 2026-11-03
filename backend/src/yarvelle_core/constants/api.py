@@ -183,6 +183,17 @@ SSE_DELIBERATION_EVENTS: tuple[str, ...] = (
     SSE_EVENT_DELIBERATION_END,
 )
 
+# Multi-agent orchestration status events
+SSE_EVENT_ORCHESTRATION_PLAN: str = "orchestration_plan"
+SSE_EVENT_TASK_STATUS: str = "task_status"
+SSE_EVENT_ORCHESTRATION_NOTICE: str = "orchestration_notice"
+
+SSE_ORCHESTRATION_EVENTS: tuple[str, ...] = (
+    SSE_EVENT_ORCHESTRATION_PLAN,
+    SSE_EVENT_TASK_STATUS,
+    SSE_EVENT_ORCHESTRATION_NOTICE,
+)
+
 # Aliases without SSE_ prefix (for convenience and backward-compatibility)
 EVENT_MESSAGE: str = SSE_EVENT_MESSAGE
 EVENT_TOKEN: str = SSE_EVENT_TOKEN

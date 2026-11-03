@@ -31,6 +31,125 @@
       "title": "CrossPackGrantSpec",
       "type": "object"
     },
+    "FixedRoute": {
+      "additionalProperties": false,
+      "description": "A pack-declared deterministic route, evaluated before planning in declared order.",
+      "properties": {
+        "route_id": {
+          "pattern": "^[a-z0-9_-]{1,64}$",
+          "title": "Route Id",
+          "type": "string"
+        },
+        "when": {
+          "discriminator": {
+            "mapping": {
+              "guardrail_flag": "#/$defs/GuardrailFlagTrigger",
+              "has_attachments": "#/$defs/HasAttachmentsTrigger"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/HasAttachmentsTrigger"
+            },
+            {
+              "$ref": "#/$defs/GuardrailFlagTrigger"
+            }
+          ],
+          "title": "When"
+        },
+        "agent_id": {
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        }
+      },
+      "required": [
+        "route_id",
+        "when",
+        "agent_id"
+      ],
+      "title": "FixedRoute",
+      "type": "object"
+    },
+    "GuardrailFlagTrigger": {
+      "additionalProperties": false,
+      "description": "Fires when the input guardrail raises the named flag.",
+      "properties": {
+        "kind": {
+          "const": "guardrail_flag",
+          "default": "guardrail_flag",
+          "title": "Kind",
+          "type": "string"
+        },
+        "flag": {
+          "pattern": "^[a-z0-9_-]{1,64}$",
+          "title": "Flag",
+          "type": "string"
+        }
+      },
+      "required": [
+        "flag"
+      ],
+      "title": "GuardrailFlagTrigger",
+      "type": "object"
+    },
+    "HasAttachmentsTrigger": {
+      "additionalProperties": false,
+      "description": "Fires when the user turn carries attachments, optionally of given media types.",
+      "properties": {
+        "kind": {
+          "const": "has_attachments",
+          "default": "has_attachments",
+          "title": "Kind",
+          "type": "string"
+        },
+        "mime_types": {
+          "description": "Optional media types or 'type/*' wildcards; empty matches any attachment.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Mime Types",
+          "type": "array"
+        }
+      },
+      "title": "HasAttachmentsTrigger",
+      "type": "object"
+    },
+    "OrchestrationLimits": {
+      "additionalProperties": false,
+      "description": "Per-turn bounds on fan-out and wall-clock time.",
+      "properties": {
+        "max_agents": {
+          "default": 4,
+          "description": "Maximum number of agent steps in one plan.",
+          "maximum": 16,
+          "minimum": 1,
+          "title": "Max Agents",
+          "type": "integer"
+        },
+        "agent_timeout_s": {
+          "default": 60.0,
+          "description": "Wall-clock timeout for a single agent task, in seconds.",
+          "exclusiveMinimum": 0,
+          "title": "Agent Timeout S",
+          "type": "number"
+        },
+        "turn_timeout_s": {
+          "default": 120.0,
+          "description": "Wall-clock budget for the whole turn, in seconds.",
+          "exclusiveMinimum": 0,
+          "title": "Turn Timeout S",
+          "type": "number"
+        }
+      },
+      "title": "OrchestrationLimits",
+      "type": "object"
+    },
     "PackMigrationsSpec": {
       "description": "Specification of Alembic database migration branch contributed by a pack.",
       "properties": {
@@ -69,6 +188,37 @@
         "version_table"
       ],
       "title": "PackMigrationsSpec",
+      "type": "object"
+    },
+    "PackOrchestrationSpec": {
+      "additionalProperties": false,
+      "description": "Pack-level orchestration config (``orchestration:`` in pack.yaml).\n\n``default_agent`` handles the turn when no model is configured (after fixed\nroutes) and when planning fails; both cases carry a user-visible notice.",
+      "properties": {
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "default_agent": {
+          "title": "Default Agent",
+          "type": "string"
+        },
+        "fixed_routes": {
+          "items": {
+            "$ref": "#/$defs/FixedRoute"
+          },
+          "title": "Fixed Routes",
+          "type": "array"
+        },
+        "limits": {
+          "$ref": "#/$defs/OrchestrationLimits"
+        }
+      },
+      "required": [
+        "default_agent"
+      ],
+      "title": "PackOrchestrationSpec",
       "type": "object"
     },
     "PackPanelSpec": {
@@ -544,6 +694,18 @@
       "default": null,
       "description": "Compatibility metadata",
       "title": "Compat"
+    },
+    "orchestration": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PackOrchestrationSpec"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Default agent, fixed routes and limits for multi-agent orchestration"
     }
   },
   "required": [
