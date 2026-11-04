@@ -23,7 +23,10 @@ function printHelp() {
 
 Options:
   --config <path>    Path to config YAML or JSON (e.g. yarvelle.yaml)
-  --packs <list>     Comma-separated list of enabled pack IDs (e.g. health,finance)
+  --packs <list>     Comma-separated list of enabled pack IDs (e.g. finance,education)
+  --pack-module <id>=<module>
+                     Module that exports the pack's UI as <id>Ui (repeatable,
+                     e.g. finance=@acme/finance-ui)
   --out <path>       Output path for pack-registry.generated.ts (default: src/pack-registry.generated.ts)
   --help             Show this help message
 `);
@@ -34,12 +37,17 @@ function parseArgs() {
   let configPath = null;
   let packs = [];
   let outPath = 'src/pack-registry.generated.ts';
+  const packUiModules = {};
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--config' && args[i + 1]) {
       configPath = args[++i];
     } else if (args[i] === '--packs' && args[i + 1]) {
       packs = args[++i].split(',').map((p) => p.trim()).filter(Boolean);
+    } else if (args[i] === '--pack-module' && args[i + 1]) {
+      const [id, ...rest] = args[++i].split('=');
+      const specifier = rest.join('=').trim();
+      if (id && id.trim() && specifier) packUiModules[id.trim()] = specifier;
     } else if (args[i] === '--out' && args[i + 1]) {
       outPath = args[++i];
     } else if (args[i] === '--help') {
@@ -61,18 +69,19 @@ function parseArgs() {
     }
   }
 
-  return { packs, outPath };
+  return { packs, outPath, packUiModules };
 }
 
-export function generatePackRegistryCode(packs) {
+export function generatePackRegistryCode(packs, packUiModules = {}) {
   const imports = [];
   const packEntries = [];
 
   for (const pack of packs) {
     const varName = `${pack.replace(/[^a-zA-Z0-9]/g, '_')}Ui`;
-    if (pack === 'health') {
-      imports.push(`import { healthUi } from '@carefold/health-ui';`);
-      packEntries.push(`  health: healthUi,`);
+    const specifier = packUiModules[pack];
+    if (specifier) {
+      imports.push(`import { ${varName} } from '${specifier}';`);
+      packEntries.push(`  ${JSON.stringify(pack)}: ${varName},`);
     } else {
       imports.push(`// Pack ${pack} UI contribution`);
       packEntries.push(`  // ${pack}: ${varName},`);
@@ -103,9 +112,9 @@ export function getAllSlotContributions(): SlotContribution[] {
 }
 
 function main() {
-  const { packs, outPath } = parseArgs();
-  const finalPacks = packs.length > 0 ? packs : ['health'];
-  const code = generatePackRegistryCode(finalPacks);
+  const { packs, outPath, packUiModules } = parseArgs();
+  const finalPacks = packs;
+  const code = generatePackRegistryCode(finalPacks, packUiModules);
   const resolvedOut = path.resolve(process.cwd(), outPath);
   fs.mkdirSync(path.dirname(resolvedOut), { recursive: true });
   fs.writeFileSync(resolvedOut, code);

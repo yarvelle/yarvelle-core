@@ -128,12 +128,12 @@ class MockChatModel(BaseChatModel):
     - Compatibility adapter for legacy ModelClient protocol
     """
 
-    model_name: str = "carefold-mock"
+    model_name: str = "yarvelle-mock"
     temperature: float = 0.2
     _queued_responses: List[Union[str, Dict[str, Any], Any]] = PrivateAttr(default_factory=list)
     _calls: List[Dict[str, Any]] = PrivateAttr(default_factory=list)
 
-    def __init__(self, model_name: str = "carefold-mock", temperature: float = 0.2, **kwargs: Any) -> None:
+    def __init__(self, model_name: str = "yarvelle-mock", temperature: float = 0.2, **kwargs: Any) -> None:
         super().__init__(model_name=model_name, temperature=temperature, **kwargs)
         self._queued_responses = []
         self._calls = []
@@ -154,7 +154,7 @@ class MockChatModel(BaseChatModel):
 
     @property
     def _llm_type(self) -> str:
-        return "carefold-mock-chat"
+        return "yarvelle-mock-chat"
 
     def get_model_name(self) -> str:
         return self.model_name
@@ -766,7 +766,7 @@ class MockChatModel(BaseChatModel):
 class MockModelClient:
     """Offline deterministic model client supporting queued and rule-based generation."""
 
-    def __init__(self, model_name: str = "carefold-mock") -> None:
+    def __init__(self, model_name: str = "yarvelle-mock") -> None:
         self.model_name = model_name
         self._queued_responses: List[Union[str, Dict[str, Any]]] = []
 

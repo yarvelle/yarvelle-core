@@ -138,7 +138,7 @@ def test_canonical_schemas_committed_freshness():
             f"Schema drift detected across {len(drift_failures)} committed schema file(s)!\n\n"
             + "\n".join(drift_failures)
             + "\n\nRemediation:\n"
-            + "  Run '/Users/bharatjoshi/git/carefold/backend/.venv/bin/python scripts/generate_schemas.py' "
+            + "  Run 'python scripts/generate_schemas.py' "
             + "and commit the regenerated schema files."
         )
         pytest.fail(msg)
