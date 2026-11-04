@@ -21,6 +21,7 @@ from yarvelle_core.pack.loader import (
 from yarvelle_core.pack.routing import (
     collect_routing_hints,
     compose_orchestrator_routing_prompt,
+    resolve_default_agent,
 )
 from yarvelle_core.pack.spec import (
     CrossPackGrantSpec,
@@ -49,6 +50,7 @@ __all__ = [
     "discover_and_load_packs",
     "collect_routing_hints",
     "compose_orchestrator_routing_prompt",
+    "resolve_default_agent",
     "CrossPackGrantSpec",
     "PackEvalsSpec",
     "PackManifest",

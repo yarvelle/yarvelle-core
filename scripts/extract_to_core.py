@@ -239,7 +239,6 @@ FILES_TO_COPY = [
     ("workflows/nodes/tool_validator.py", "workflows/nodes/tool_validator.py"),
     ("workflows/nodes/tool_validator_node.py", "workflows/nodes/tool_validator_node.py"),
     ("workflows/subgraphs/__init__.py", "workflows/subgraphs/__init__.py"),
-    ("workflows/subgraphs/supervisor.py", "workflows/subgraphs/supervisor.py"),
     ("workflows/subgraphs/extraction/__init__.py", "workflows/subgraphs/extraction/__init__.py"),
     ("workflows/subgraphs/extraction/graph.py", "workflows/subgraphs/extraction/graph.py"),
     ("workflows/subgraphs/extraction/grounding.py", "workflows/subgraphs/extraction/grounding.py"),

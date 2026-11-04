@@ -29,7 +29,7 @@ from pydantic import BaseModel, Field
 
 from yarvelle_core.agents.registry import AgentRegistry, _extract_first_line
 from yarvelle_core.config import settings
-from yarvelle_core.constants.agents import AGENT_ORCHESTRATOR, DEFAULT_ROUTING_FALLBACK_AGENT
+from yarvelle_core.constants.agents import AGENT_DOCUMENT_EXTRACTOR, AGENT_ORCHESTRATOR
 from yarvelle_core.constants.paths import AGENTS_DIR, SKILLS_DIR
 from yarvelle_core.memory.ports.catalog_port import CatalogPort
 from yarvelle_core.resources.loader import get_resource_loader
@@ -135,7 +135,7 @@ class OrchestratorDecision(BaseModel):
 
     agent_id: str = Field(
         ...,
-        description="ID of the chosen specialist agent to delegate to (e.g., 'visit-steward', 'benefits-guide', 'habit-companion', 'document-extractor').",
+        description="ID of the chosen specialist agent to delegate to, taken from the available agent list.",
     )
     reasoning: str = Field(
         ...,
@@ -170,9 +170,14 @@ class OrchestratorNode(BaseNode):
         skill_generator: Optional[Any] = None,
         routing_hints: Optional[Sequence[RoutingHints]] = None,
         name: str = "orchestrator",
+        default_agent: Optional[str] = None,
     ) -> None:
         super().__init__(name=name)
         self.model = model
+        # Pack-configured fallback (orchestration.default_agent). Core has no
+        # default of its own: when this is unset and routing cannot pick a
+        # registered agent, the turn fails with an error.
+        self.default_agent = (default_agent or "").strip() or None
         self._registry = registry
         self.catalog = catalog
         self._skill_generator = skill_generator
@@ -264,7 +269,10 @@ class OrchestratorNode(BaseNode):
         return render_template("orchestrator_routing_prompt", context)
 
     def _resolve_pattern_fallback(self, state: Dict[str, Any], prompt_text: str) -> str:
-        """Resolves target agent using attachments and externalized YAML routing patterns."""
+        """Resolves target agent using attachments, routing patterns, then the pack default.
+
+        Returns an empty string when nothing matches and no default agent is configured.
+        """
         has_attachment = bool(
             state.get("attachments")
             or state.get("document_dossiers")
@@ -272,7 +280,7 @@ class OrchestratorNode(BaseNode):
             or state.get("raw_text")
         )
         if has_attachment:
-            return "document-extractor"
+            return AGENT_DOCUMENT_EXTRACTOR
 
         try:
             routing_patterns = get_resource_loader().get_routing_patterns()
@@ -287,7 +295,16 @@ class OrchestratorNode(BaseNode):
         except Exception as err:
             logger.debug("Failed loading external routing patterns: %s", err)
 
-        return DEFAULT_ROUTING_FALLBACK_AGENT
+        return self.default_agent or ""
+
+    def _no_route_error(self, reason: str) -> Dict[str, Any]:
+        """Returns an error state when no agent can be chosen and no pack default is set."""
+        err_msg = (
+            f"Could not route the request: {reason}, and no default agent is configured "
+            "(set orchestration.default_agent in the pack)."
+        )
+        logger.error(err_msg)
+        return {"error": err_msg, "next_step": "error"}
 
     async def _execute_single_hop(
         self,
@@ -965,13 +982,17 @@ class OrchestratorNode(BaseNode):
 
         # 3. Validate selected agent_id exists in registry or candidates
         selected_id = str(decision.agent_id).strip().lower().replace("_", "-")
+        if not selected_id:
+            return self._no_route_error("routing produced no agent")
         candidate_ids = {c.id for c in candidates} if candidates else set()
         if not self.registry.get(selected_id) and selected_id not in candidate_ids:
             if candidates:
                 fallback_id = candidates[0].id
             else:
                 delegatable = self.registry.get_delegatable_agents(exclude=AGENT_ORCHESTRATOR)
-                fallback_id = delegatable[0].id if delegatable else DEFAULT_ROUTING_FALLBACK_AGENT
+                fallback_id = delegatable[0].id if delegatable else self.default_agent
+            if not fallback_id:
+                return self._no_route_error(f"routing chose unknown agent '{decision.agent_id}'")
             decision.reasoning += f" (original choice '{decision.agent_id}' not found in registry; fell back to '{fallback_id}')"
             selected_id = fallback_id
 

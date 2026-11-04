@@ -51,6 +51,7 @@ from typing import (
 from urllib.parse import urlparse
 
 from yarvelle_core.audit.redaction import redact_tool_args
+from yarvelle_core.constants.agents import UNKNOWN_AGENT_ID
 from yarvelle_core.schemas.age_band import CHILD_UNDER_13, canonical_age_band
 from yarvelle_core.engine.tool_registry import (
     DataFlows,
@@ -951,7 +952,7 @@ async def _record_tool_audit(
     dur_ms: float,
     reason: Optional[str] = None,
 ) -> None:
-    """Best-effort audit recording through carefold.audit.logger."""
+    """Best-effort audit recording through yarvelle_core.audit.logger."""
     try:
         from yarvelle_core.audit.logger import record_audit
         from yarvelle_core.config import settings
@@ -966,7 +967,7 @@ async def _record_tool_audit(
             else (ws_root / LOGS_DIR / DEFAULT_AUDIT_LOG_FILE)
         )
         agent_obj = getattr(ctx, "agent", None)
-        agent_id = getattr(agent_obj, "id", None) or "carefold-agent"
+        agent_id = getattr(agent_obj, "id", None) or UNKNOWN_AGENT_ID
 
         session_factory = getattr(ctx, "session_factory", None) or (
             ctx.extra.get("session_factory") if isinstance(getattr(ctx, "extra", None), dict) else None

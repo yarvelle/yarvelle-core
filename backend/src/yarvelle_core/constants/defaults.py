@@ -70,7 +70,7 @@ MAX_THREAD_HISTORY: int = 50
 
 MAX_NOTE_SLUG_LENGTH: int = 80
 DEFAULT_NOTE_SLUG: str = "note"
-DEFAULT_NOTE_AGENT_ID: str = "carefold-agent"
+DEFAULT_NOTE_AGENT_ID: str = "unknown"
 
 
 # ============================================================================
@@ -91,7 +91,7 @@ DEFAULT_PORT: int = 8010
 DEFAULT_VERSION: str = "0.1.2"
 APP_TITLE: str = "Yarvelle Core Local-First AI Runtime"
 APP_DESCRIPTION: str = (
-    "Local-first agentic runtime, tools sandbox, safety refusal, and audit logging for health specialists."
+    "Local-first agentic runtime, tools sandbox, safety refusal, and audit logging for specialist agents."
 )
 
 DEFAULT_CORS_ORIGINS: Tuple[str, ...] = (
@@ -110,21 +110,18 @@ DEFAULT_CORS_ORIGINS: Tuple[str, ...] = (
 # 7. Bundled Reference Packs & Phase 0 Tools
 # ============================================================================
 
+# System agents shipped with core (agents/_system); see constants.agents.
 BUNDLED_AGENT_IDS: FrozenSet[str] = frozenset({
     "orchestrator",
-    "visit-steward",
-    "benefits-guide",
-    "habit-companion",
     "document-extractor",
+    "db-operator",
+    "skill-generator",
     "suggestion-generator",
 })
 
 
-BUNDLED_SKILL_IDS: FrozenSet[str] = frozenset({
-    "visit-prep",
-    "benefits-explainer",
-    "habit-checkin",
-})
+# Core ships no domain skills; packs bring their own.
+BUNDLED_SKILL_IDS: FrozenSet[str] = frozenset()
 
 PHASE_0_TOOLS: FrozenSet[str] = frozenset({
     "attach-read",

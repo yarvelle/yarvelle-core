@@ -63,6 +63,7 @@ from langgraph.store.base import BaseStore
 
 from yarvelle_core.audit.logger import record_audit
 from yarvelle_core.config import settings
+from yarvelle_core.constants.agents import UNKNOWN_AGENT_ID
 from yarvelle_core.constants.api import (
     SSE_EVENT_REFUSAL,
     SSE_EVENT_SUGGESTIONS,
@@ -294,7 +295,7 @@ async def tools_node(state: AgentState) -> Dict[str, Any]:
     effective_tools = state.get("effective_tools", [])
     node = ToolNode(allowed_tools=effective_tools)
     res = await node.execute(state)
-    agent_id = str(state.get("current_agent") or state.get("agent_id") or "carefold-agent")
+    agent_id = str(state.get("current_agent") or state.get("agent_id") or UNKNOWN_AGENT_ID)
     audit_events = [
         {
             "agent_id": agent_id,

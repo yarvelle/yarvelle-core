@@ -63,6 +63,7 @@ from langgraph.store.base import BaseStore
 
 from yarvelle_core.audit.logger import record_audit
 from yarvelle_core.config import settings
+from yarvelle_core.constants.agents import UNKNOWN_AGENT_ID
 from yarvelle_core.constants.api import (
     SSE_EVENT_REFUSAL,
     SSE_EVENT_SUGGESTIONS,
@@ -139,9 +140,14 @@ class GraphBuilder:
         use_dynamic_orchestrator: bool = True,
         store: Optional[BaseStore] = None,
         safety_policy: Optional[SafetyPolicy] = None,
+        default_agent: Optional[str] = None,
         **kwargs: Any,
     ) -> None:
-        """Initialize GraphBuilder configuration."""
+        """Initialize GraphBuilder configuration.
+
+        ``default_agent`` is the pack's ``orchestration.default_agent``; the
+        orchestrator uses it only when routing cannot pick a registered agent.
+        """
         self.model = model
         self.checkpointer = checkpointer
         self.store = store
@@ -162,6 +168,7 @@ class GraphBuilder:
         self.registry = registry
         self.tool_registry = tool_registry
         self.use_dynamic_orchestrator = use_dynamic_orchestrator
+        self.default_agent = default_agent
         self.suggestion_model = kwargs.get("suggestion_model")
         self.extra_kwargs = kwargs
 
@@ -211,6 +218,11 @@ class GraphBuilder:
     def with_dynamic_orchestrator(self, enabled: bool = True) -> GraphBuilder:
         """Enable or disable dynamic LLM orchestrator routing."""
         self.use_dynamic_orchestrator = enabled
+        return self
+
+    def with_default_agent(self, agent_id: Optional[str]) -> GraphBuilder:
+        """Sets the pack-configured default agent used when routing finds no agent."""
+        self.default_agent = agent_id
         return self
 
     def with_model(self, model: BaseChatModel) -> GraphBuilder:
@@ -323,6 +335,7 @@ class GraphBuilder:
                 supervisor_node = OrchestratorNode(
                     model=self.model,
                     registry=self.registry,
+                    default_agent=self.default_agent,
                 )
             else:
                 supervisor_node = SupervisorNode()
@@ -522,7 +535,7 @@ class GraphBuilder:
                 if settings.audit_log_path
                 else (Path(ws_root) / LOGS_DIR / DEFAULT_AUDIT_LOG_FILE)
             )
-            agent_id = str(state.get("current_agent") or state.get("agent_id") or "carefold-agent")
+            agent_id = str(state.get("current_agent") or state.get("agent_id") or UNKNOWN_AGENT_ID)
             store_bodies = bool(state.get("store_bodies", settings.audit_store_bodies))
 
             all_traces = res.get("tool_traces", [])
@@ -676,6 +689,8 @@ class GraphBuilder:
         # Supervisor conditional routing
         if self.include_supervisor:
             def route_supervisor(state: AgentState) -> str:
+                if state.get("next_step") == "error" and self.include_error_node:
+                    return "error"
                 target = (
                     state.get("routed_subgraph")
                     or state.get("current_agent")
@@ -717,6 +732,8 @@ class GraphBuilder:
                 super_destinations["dispatcher"] = "dispatcher"
             if self.include_synthesizer and synthesizer_node is not None:
                 super_destinations["response_synthesizer"] = "response_synthesizer"
+            if self.include_error_node:
+                super_destinations["error"] = "error"
             for sg_k in self.subgraphs.keys():
                 super_destinations[sg_k] = sg_k
             builder.add_conditional_edges("supervisor", route_supervisor, super_destinations)
