@@ -17,7 +17,6 @@ import calendar
 from datetime import datetime, timedelta, timezone
 import json
 import re
-import sys
 from typing import Any, Dict, List, Optional
 import uuid
 from zoneinfo import ZoneInfo
@@ -357,7 +356,9 @@ def generate_ics_calendar(
         Valid RFC 5545 iCalendar stream string.
     """
     if app_name is None:
-        app_name = "Carefold" if "carefold" in sys.modules else "Yarvelle Core"
+        from yarvelle_core.config import settings
+
+        app_name = settings.product_name
 
     lines = [
         "BEGIN:VCALENDAR",

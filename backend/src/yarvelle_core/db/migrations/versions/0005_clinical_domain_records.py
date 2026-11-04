@@ -125,10 +125,7 @@ def upgrade() -> None:
 
     copy_notes = None
     if context.is_offline_mode():
-        try:
-            from yarvelle_core.db.base import Base
-        except ImportError:
-            from carefold.db.base import Base
+        from yarvelle_core.db.base import Base
         raw_notes = Base.metadata.tables.get("notes")
         if raw_notes is not None:
             copy_notes = sa.Table(
@@ -173,10 +170,7 @@ def downgrade() -> None:
 
     copy_notes = None
     if context.is_offline_mode():
-        try:
-            from yarvelle_core.db.base import Base
-        except ImportError:
-            from carefold.db.base import Base
+        from yarvelle_core.db.base import Base
         copy_notes = Base.metadata.tables.get("notes")
 
     # 1. Revert notes additions via batch alter

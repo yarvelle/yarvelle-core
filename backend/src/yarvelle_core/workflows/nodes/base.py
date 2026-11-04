@@ -73,7 +73,7 @@ class BaseNode(ABC):
             **kwargs: Extra parameters ignored by base class for flexible subclassing.
         """
         self.name = name or self.__class__.__name__
-        self._logger = logging.getLogger(f"carefold.workflows.nodes.{self.name}")
+        self._logger = logging.getLogger(f"yarvelle_core.workflows.nodes.{self.name}")
 
     @property
     def node_name(self) -> str:
@@ -84,7 +84,7 @@ class BaseNode(ABC):
     def logger(self) -> logging.Logger:
         """Return the effective logger instance."""
         return getattr(self, "_logger", None) or logging.getLogger(
-            f"carefold.workflows.nodes.{self.node_name}"
+            f"yarvelle_core.workflows.nodes.{self.node_name}"
         )
 
     @abstractmethod

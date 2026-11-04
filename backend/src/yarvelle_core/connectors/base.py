@@ -9,7 +9,7 @@
 #
 # Required Notice: Copyright 2026 Spectrayan (https://spectrayan.com)
 
-"""Core data structures and runtime protocol for Carefold connectors."""
+"""Core data structures and runtime protocol for connectors."""
 
 from __future__ import annotations
 
@@ -117,7 +117,7 @@ class ToolSpec:
 
 @runtime_checkable
 class Connector(Protocol):
-    """Core protocol for all Carefold external data source and EHR connectors."""
+    """Core protocol for all external data source connectors."""
 
     @property
     def manifest(self) -> ConnectorManifest:

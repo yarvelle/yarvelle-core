@@ -22,8 +22,8 @@ from pydantic import ValidationError
 
 from yarvelle_core.constants.defaults import DEFAULT_VERSION
 from yarvelle_core.constants.paths import (
-    CAREFOLD_YAML_FILENAME,
-    CAREFOLD_YAML_MIGRATED_FILENAME,
+    YARVELLE_YAML_FILENAME,
+    YARVELLE_YAML_MIGRATED_FILENAME,
     REFERENCES_DIR,
     SKILL_MANIFEST_FILENAME,
 )
@@ -75,7 +75,7 @@ def find_skill_dir(skills_dir: Union[Path, str], skill_id: str) -> Optional[Path
 
 
 def load_skill(skill_dir: Union[Path, str]) -> SkillManifest:
-    """Loads and validates a skill directory containing SKILL.md and optional carefold.yaml."""
+    """Loads and validates a skill directory containing SKILL.md and optional yarvelle_core.yaml."""
     skill_path = Path(skill_dir).resolve()
     if not skill_path.is_dir():
         raise ManifestValidationError(f'Skill directory not found: "{skill_path}"')
@@ -96,8 +96,8 @@ def load_skill(skill_dir: Union[Path, str]) -> SkillManifest:
         raise ManifestValidationError(f'Invalid frontmatter in "{skill_md_path}": {err}') from err
 
     target_yaml_path = None
-    yarvelle_yaml_path = (skill_path / CAREFOLD_YAML_FILENAME).resolve()
-    migrated_yaml_path = (skill_path / CAREFOLD_YAML_MIGRATED_FILENAME).resolve()
+    yarvelle_yaml_path = (skill_path / YARVELLE_YAML_FILENAME).resolve()
+    migrated_yaml_path = (skill_path / YARVELLE_YAML_MIGRATED_FILENAME).resolve()
 
     if yarvelle_yaml_path.is_relative_to(skill_path) and yarvelle_yaml_path.is_file():
         target_yaml_path = yarvelle_yaml_path
@@ -153,7 +153,7 @@ def load_skill(skill_dir: Union[Path, str]) -> SkillManifest:
             if f.is_file() and not f.name.startswith(".") and (ref_dir / f.name).resolve().is_relative_to(ref_dir)
         ])
 
-    # 4. Check for carefold.yaml / carefold.yaml.migrated
+    # 4. Check for yarvelle_core.yaml / yarvelle_core.yaml.migrated
     cf: Optional[YarvelleYaml] = None
     if target_yaml_path is not None:
         try:
@@ -179,7 +179,7 @@ def load_skill(skill_dir: Union[Path, str]) -> SkillManifest:
     if tools:
         validate_tools_in_phase0(tools, f'skill "{skill_id}"')
 
-    # 6. Resolve taxonomy fields across carefold.yaml and SKILL.md frontmatter
+    # 6. Resolve taxonomy fields across yarvelle_core.yaml and SKILL.md frontmatter
     domain_val = None
     if meta and meta.domain is not None:
         domain_val = meta.domain
@@ -286,7 +286,7 @@ def load_skill(skill_dir: Union[Path, str]) -> SkillManifest:
             unverified=False,
         )
 
-    # Missing carefold.yaml fallback per CF-S11
+    # Missing yarvelle_core.yaml fallback per CF-S11
     return SkillManifest(
         id=skill_id,
         name=fm.name,

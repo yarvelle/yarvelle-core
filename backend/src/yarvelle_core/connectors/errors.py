@@ -9,7 +9,7 @@
 #
 # Required Notice: Copyright 2026 Spectrayan (https://spectrayan.com)
 
-"""Exception hierarchy for Carefold connectors framework."""
+"""Exception hierarchy for the connectors framework."""
 
 from __future__ import annotations
 

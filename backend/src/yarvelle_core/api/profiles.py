@@ -104,7 +104,7 @@ class ProfileDetailResponse(_BaseProfileDetailResponse):
     )
 
 
-logger = get_logger("carefold.api.profiles")
+logger = get_logger("yarvelle_core.api.profiles")
 
 router = APIRouter()
 

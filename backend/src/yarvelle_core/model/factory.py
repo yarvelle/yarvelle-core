@@ -145,7 +145,7 @@ def resolve_api_key(
     Resolution hierarchy:
     1. SystemSetting table via SettingsPort (models.<provider>_api_key)
     2. Server environment variables (OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_API_KEY, etc.)
-    3. Application settings (carefold.config.settings)
+    3. Application settings (yarvelle_core.config.settings)
     4. Client-supplied key fallback only when no server configuration exists (e.g. testing stubs)
 
     Server-side credentials strictly take precedence over client-supplied keys per AU-15.
@@ -225,7 +225,7 @@ def resolve_base_url(
     Resolution hierarchy:
     1. SystemSetting table via SettingsPort (models.<provider>_url)
     2. Server environment variables ($OLLAMA_URL, $CUSTOM_BASE_URL, etc.)
-    3. Application settings (carefold.config.settings)
+    3. Application settings (yarvelle_core.config.settings)
     4. Client-supplied base URL fallback only when no server configuration exists
     """
     prov_lower = provider.lower().strip() if provider else PROVIDER_OLLAMA

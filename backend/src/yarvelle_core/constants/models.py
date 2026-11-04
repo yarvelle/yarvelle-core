@@ -62,7 +62,7 @@ DEFAULT_GOOGLE_MODEL: str = "gemini-2.0-flash"
 DEFAULT_ANTHROPIC_MODEL: str = "claude-3-5-sonnet-latest"
 DEFAULT_OPENAI_MODEL: str = "gpt-4o"
 DEFAULT_CUSTOM_MODEL: str = "custom"
-DEFAULT_MOCK_MODEL: str = "carefold-mock"
+DEFAULT_MOCK_MODEL: str = "yarvelle-mock"
 
 DEFAULT_MODELS: Dict[str, str] = {
     PROVIDER_OLLAMA: DEFAULT_OLLAMA_MODEL,

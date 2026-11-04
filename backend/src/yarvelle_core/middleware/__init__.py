@@ -14,14 +14,14 @@
 from __future__ import annotations
 
 from yarvelle_core.middleware.skills import (
-    CAREFOLD_SKILLS_PROMPT,
+    SKILLS_SYSTEM_PROMPT,
     YarvelleSkillsMiddleware,
     create_yarvelle_skills_middleware,
     create_skills_middleware,
 )
 
 __all__ = [
-    "CAREFOLD_SKILLS_PROMPT",
+    "SKILLS_SYSTEM_PROMPT",
     "YarvelleSkillsMiddleware",
     "create_yarvelle_skills_middleware",
     "create_skills_middleware",

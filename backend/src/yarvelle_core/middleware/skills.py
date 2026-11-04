@@ -19,7 +19,7 @@ from typing import Any, Optional, Sequence, Union
 
 logger = logging.getLogger(__name__)
 
-CAREFOLD_SKILLS_PROMPT = """\
+SKILLS_SYSTEM_PROMPT = """\
 ## Yarvelle Core Skill Catalog
 
 ⚠ **SAFETY BOUNDARY**: You are a specialized task assistant.
@@ -62,7 +62,7 @@ class YarvelleSkillsMiddleware(SkillsMiddleware):
         sources: Sequence[Any],
         system_prompt: Optional[str] = None,
     ) -> None:
-        prompt = system_prompt if system_prompt is not None else CAREFOLD_SKILLS_PROMPT
+        prompt = system_prompt if system_prompt is not None else SKILLS_SYSTEM_PROMPT
         super().__init__(
             backend=backend,
             sources=sources,
@@ -138,14 +138,14 @@ def create_yarvelle_skills_middleware(
     return YarvelleSkillsMiddleware(
         backend=backend,
         sources=sources,
-        system_prompt=system_prompt or CAREFOLD_SKILLS_PROMPT,
+        system_prompt=system_prompt or SKILLS_SYSTEM_PROMPT,
     )
 
 
 create_skills_middleware = create_yarvelle_skills_middleware
 
 __all__ = [
-    "CAREFOLD_SKILLS_PROMPT",
+    "SKILLS_SYSTEM_PROMPT",
     "YarvelleSkillsMiddleware",
     "create_yarvelle_skills_middleware",
     "create_skills_middleware",

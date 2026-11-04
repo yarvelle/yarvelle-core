@@ -9,7 +9,7 @@
 #
 # Required Notice: Copyright 2026 Spectrayan (https://spectrayan.com)
 
-"""Cached ResourceLoader for external YAML resources in carefold.resources.
+"""Cached ResourceLoader for external YAML resources in yarvelle_core.resources.
 
 Loads and caches:
 - disclaimers.yaml: Intended use notices and refusal disclaimers.
@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 
 class RefusalPattern(NamedTuple):
-    """Named tuple matching carefold.safety.classifier contract."""
+    """Named tuple matching the yarvelle_core.safety classifier contract."""
     category: str
     regex: re.Pattern
     description: str

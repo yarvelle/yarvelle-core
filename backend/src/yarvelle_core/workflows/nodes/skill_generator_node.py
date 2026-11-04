@@ -21,10 +21,8 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from pathlib import Path
 import re
-import sys
 from typing import Any, Dict, List, Optional, Union
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -32,7 +30,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from pydantic import BaseModel, Field
 
 from yarvelle_core.config import settings
-from yarvelle_core.constants.paths import SKILLS_DIR
+from yarvelle_core.constants.paths import SKILLS_DIR, YARVELLE_YAML_FILENAME
 from yarvelle_core.resources.loader import get_resource_loader
 from yarvelle_core.schemas.manifest import RiskClass, SkillManifest
 from yarvelle_core.workflows.nodes.base import BaseNode
@@ -282,7 +280,7 @@ class SkillGeneratorNode(BaseNode):
 
         context_section = f"\n## Operational Context & User Inquiry\n{user_query}\n\n" if user_query else "\n"
 
-        app_brand = "Carefold" if "carefold" in sys.modules or os.environ.get("CAREFOLD_HOME") else "Yarvelle Core"
+        app_brand = settings.product_name
         return (
             f"# {clean_stem}\n\n"
             f"**Skill Domain**: {skill_title}  \n"
@@ -493,7 +491,7 @@ class SkillGeneratorNode(BaseNode):
                 skill_folder = target_skills_dir / sid
                 if not skill_folder.exists():
                     skill_folder.mkdir(parents=True, exist_ok=True)
-                    # Write carefold.yaml
+                    # Write the skill's tool/forbidden config (read by the skill loader)
                     cf_yaml = (
                         f"id: {sid}\n"
                         f"version: 0.1.0\n"
@@ -508,7 +506,7 @@ class SkillGeneratorNode(BaseNode):
                         f"  - replace_emergency_care\n"
                         f"  - instruct_stop_medication\n"
                     )
-                    (skill_folder / "carefold.yaml").write_text(cf_yaml, encoding="utf-8")
+                    (skill_folder / YARVELLE_YAML_FILENAME).write_text(cf_yaml, encoding="utf-8")
 
                     # Write SKILL.md
                     skill_md = (

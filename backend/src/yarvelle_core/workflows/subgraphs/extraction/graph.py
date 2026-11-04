@@ -9,7 +9,7 @@
 #
 # Required Notice: Copyright 2026 Spectrayan (https://spectrayan.com)
 
-"""Alias module for carefold.workflows.subgraphs.extraction.subgraph.
+"""Alias module for yarvelle_core.workflows.subgraphs.extraction.subgraph.
 
 Kept so the extraction subgraph is importable from either module path.
 """

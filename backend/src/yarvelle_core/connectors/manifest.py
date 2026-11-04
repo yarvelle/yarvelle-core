@@ -9,7 +9,7 @@
 #
 # Required Notice: Copyright 2026 Spectrayan (https://spectrayan.com)
 
-"""Declarative manifest schema for Carefold connectors."""
+"""Declarative manifest schema for connectors."""
 
 from __future__ import annotations
 
@@ -106,7 +106,7 @@ class McpToolAllowlistEntry(BaseModel):
     description: str = Field(default="", description="Expected tool description for schema-hash pinning")
     risk_tier: Literal["read", "write_local", "write_external", "irreversible"] = Field(
         default="read",
-        description="Assigned Carefold risk tier",
+        description="Assigned connector risk tier",
     )
     input_schema: Dict[str, Any] = Field(
         default_factory=dict,

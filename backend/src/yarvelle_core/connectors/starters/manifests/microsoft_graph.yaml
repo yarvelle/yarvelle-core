@@ -1,4 +1,4 @@
-# Carefold — Healthcare AI Agent Marketplace & Runtime
+# Yarvelle Core — Domain-Neutral AI Agent Runtime & Execution Engine
 # Copyright 2026 Spectrayan
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
