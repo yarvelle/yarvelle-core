@@ -12,27 +12,25 @@
 """Guard: core must not carry product agent ids or the downstream product name.
 
 Core is domain-neutral. Specialist agents, their ids, and product branding belong
-to domain packs and applications. This test fails when:
+to domain packs and applications. Runtime identity (environment variable prefix,
+home directory, database file, cookie, OAuth client ids, URL scheme, keychain
+service, vault salt) comes from ``yarvelle_core.identity`` settings, so core needs
+no product names at all. This test fails when:
 
-1. A known product specialist agent id appears anywhere in core source, the
-   bundled agents and skill template, or the canonical schemas. There is no
-   allowlist for these.
-2. The downstream product name appears in a file that is not pinned below, or
-   more often than its pin. The pins cover runtime identity that a separate,
-   coordinated rename has to move (environment variable names, the home
-   directory and database file name, cookies, OAuth client ids, the relay URL
-   scheme, service unit names, locale strings) and values that are pinned for
-   compatibility forever (vault salt and keyring service names). The pins can
-   only go down: when a count drops, lower or delete its pin in the same change.
+1. A known product specialist agent id appears in core source, the bundled
+   agents and skill template, the canonical schemas, or the frontend.
+2. The downstream product name appears, in any letter case, in a file path or a
+   file's text anywhere in that scope, including migrations, prompts, locales
+   and templates. There are no allowances.
 
-The id list is a deny-list, so it necessarily names the ids it forbids.
+The lists below are deny-lists, so they necessarily name what they forbid.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 import re
-from typing import Dict, Iterator, List, Tuple
+from typing import Iterator, List, Tuple
 
 import pytest
 
@@ -43,11 +41,25 @@ SCAN_ROOTS = (
     "agents",
     "skills/_template",
     "schemas",
+    "frontend/src",
+    "frontend/bin",
+    "frontend/scripts",
+    "frontend/stories",
+    "frontend/tokens",
 )
+
+SCAN_FILES = (
+    "frontend/package.json",
+    "backend/pyproject.toml",
+)
+
+SKIP_PARTS = {"__pycache__", ".venv", "node_modules", "dist"}
 
 TEXT_SUFFIXES = {
     ".py", ".yaml", ".yml", ".md", ".json", ".mako", ".hbs", ".txt",
     ".toml", ".jinja", ".j2", ".html", ".ini", ".cfg",
+    ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".css", ".scss", ".svg",
+    ".sql",
 }
 
 # Specialist agent ids that belong to a downstream product pack, never to core.
@@ -85,62 +97,27 @@ _ID_PATTERNS = [
 
 PRODUCT_NAME = re.compile(r"carefold", re.IGNORECASE)
 
-# path (relative to the repository root) -> maximum allowed occurrences.
-PRODUCT_NAME_PINS: Dict[str, int] = {
-    "backend/src/yarvelle_core/api/attachments.py": 5,
-    "backend/src/yarvelle_core/api/connections.py": 1,
-    "backend/src/yarvelle_core/api/deps.py": 1,
-    "backend/src/yarvelle_core/audit/logger.py": 1,
-    "backend/src/yarvelle_core/auth/adapters/disabled_adapter.py": 1,
-    "backend/src/yarvelle_core/auth/adapters/oidc_adapter.py": 2,
-    "backend/src/yarvelle_core/auth/factory.py": 2,
-    "backend/src/yarvelle_core/config.py": 22,
-    "backend/src/yarvelle_core/connectors/lifecycle.py": 1,
-    "backend/src/yarvelle_core/connectors/loader.py": 4,
-    "backend/src/yarvelle_core/connectors/oauth.py": 3,
-    "backend/src/yarvelle_core/connectors/relay.py": 6,
-    "backend/src/yarvelle_core/connectors/starters/__init__.py": 2,
-    "backend/src/yarvelle_core/constants/__init__.py": 2,
-    "backend/src/yarvelle_core/constants/models.py": 1,
-    "backend/src/yarvelle_core/constants/paths.py": 10,
-    "backend/src/yarvelle_core/db/models.py": 1,
-    "backend/src/yarvelle_core/db/session.py": 1,
-    "backend/src/yarvelle_core/engine/agent_factory.py": 1,
-    "backend/src/yarvelle_core/engine/graph.py": 2,
-    "backend/src/yarvelle_core/memory/factory.py": 3,
-    "backend/src/yarvelle_core/migration/runtime_migrator.py": 14,
-    "backend/src/yarvelle_core/model/egress.py": 8,
-    "backend/src/yarvelle_core/model/providers/ollama_provider.py": 1,
-    "backend/src/yarvelle_core/packaging/service.py": 25,
-    "backend/src/yarvelle_core/platform/reminders.py": 1,
-    "backend/src/yarvelle_core/resources/locales/ar-SA.json": 12,
-    "backend/src/yarvelle_core/resources/locales/en-US.json": 12,
-    "backend/src/yarvelle_core/resources/locales/es-ES.json": 12,
-    "backend/src/yarvelle_core/resources/locales/fr-FR.json": 12,
-    "backend/src/yarvelle_core/resources/locales/hi-IN.json": 12,
-    "backend/src/yarvelle_core/search/factory.py": 3,
-    "backend/src/yarvelle_core/storage/adapters/local_adapter.py": 1,
-    "backend/src/yarvelle_core/storage/cas.py": 13,
-    "backend/src/yarvelle_core/storage/factory.py": 1,
-    "backend/src/yarvelle_core/tools/attach_read.py": 1,
-    "backend/src/yarvelle_core/tools/web_search.py": 5,
-    "backend/src/yarvelle_core/tools/workspace_note.py": 1,
-    "backend/src/yarvelle_core/vault/kek.py": 10,
-}
-
-
-def _iter_files() -> Iterator[Tuple[str, str]]:
+def _iter_paths() -> Iterator[Path]:
     for root in SCAN_ROOTS:
         base = REPO_ROOT / root
         if not base.is_dir():
             continue
         for path in sorted(base.rglob("*")):
-            if not path.is_file() or path.suffix not in TEXT_SUFFIXES:
+            if SKIP_PARTS.intersection(path.relative_to(REPO_ROOT).parts):
                 continue
-            if "__pycache__" in path.parts or ".venv" in path.parts:
-                continue
-            rel = path.relative_to(REPO_ROOT).as_posix()
-            yield rel, path.read_text(encoding="utf-8", errors="ignore")
+            yield path
+    for rel in SCAN_FILES:
+        path = REPO_ROOT / rel
+        if path.is_file():
+            yield path
+
+
+def _iter_files() -> Iterator[Tuple[str, str]]:
+    for path in _iter_paths():
+        if not path.is_file() or path.suffix not in TEXT_SUFFIXES:
+            continue
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        yield rel, path.read_text(encoding="utf-8", errors="ignore")
 
 
 def _require_source() -> None:
@@ -159,25 +136,26 @@ def test_no_product_agent_ids_in_core() -> None:
     assert not hits, "Product agent ids found in core (move them to the pack):\n" + "\n".join(hits)
 
 
-def test_product_name_only_in_pinned_files() -> None:
+def test_product_name_absent_from_core() -> None:
     _require_source()
-    problems: List[str] = []
-    seen: Dict[str, int] = {}
+    hits: List[str] = []
+    for path in _iter_paths():
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        if PRODUCT_NAME.search(rel):
+            hits.append(f"{rel}: product name in path")
     for rel, text in _iter_files():
-        count = len(PRODUCT_NAME.findall(text))
-        if count:
-            seen[rel] = count
-        pin = PRODUCT_NAME_PINS.get(rel, 0)
-        if count > pin:
-            problems.append(f"{rel}: {count} occurrence(s), pinned at {pin}")
-        elif count < pin:
-            problems.append(f"{rel}: {count} occurrence(s), pin is {pin}; lower the pin to {count}")
-    for rel in PRODUCT_NAME_PINS:
-        if rel not in seen and (REPO_ROOT / rel).exists():
-            continue
-        if rel not in seen:
-            problems.append(f"{rel}: file is gone; delete its pin")
-    assert not problems, "Product name pins are out of date:\n" + "\n".join(problems)
+        for lineno, line in enumerate(text.splitlines(), 1):
+            if PRODUCT_NAME.search(line):
+                hits.append(f"{rel}:{lineno}: {line.strip()[:120]}")
+    assert not hits, (
+        "Product name found in core (use yarvelle_core.identity settings or move it to the app):\n"
+        + "\n".join(hits)
+    )
+
+
+def test_product_name_pattern_is_case_insensitive() -> None:
+    for sample in ("carefold", "Carefold", "CAREFOLD_HOME", "~/.carefold", "carefold://x"):
+        assert PRODUCT_NAME.search(sample)
 
 
 def test_id_patterns_catch_both_spellings() -> None:
