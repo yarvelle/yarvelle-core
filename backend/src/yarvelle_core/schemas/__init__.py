@@ -73,6 +73,17 @@ from yarvelle_core.schemas.notes import (
     NoteDetailResponse,
 )
 from yarvelle_core.schemas.routing import RoutingHints
+from yarvelle_core.schemas.orchestration import (
+    FixedRoute,
+    GuardrailFlagTrigger,
+    HasAttachmentsTrigger,
+    OrchestrationLimits,
+    PackOrchestrationSpec,
+    RouteDecision,
+    RouteSource,
+    SSEOrchestrationNoticeEvent,
+    SSETaskStatusEvent,
+)
 
 __all__ = [
     "RiskClass",
@@ -122,6 +133,15 @@ __all__ = [
     "NoteSummary",
     "NoteDetailResponse",
     "RoutingHints",
+    "FixedRoute",
+    "GuardrailFlagTrigger",
+    "HasAttachmentsTrigger",
+    "OrchestrationLimits",
+    "PackOrchestrationSpec",
+    "RouteDecision",
+    "RouteSource",
+    "SSEOrchestrationNoticeEvent",
+    "SSETaskStatusEvent",
 ]
 
 

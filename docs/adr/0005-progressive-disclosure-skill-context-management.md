@@ -4,13 +4,13 @@
 
 | Property | Value |
 |---|---|
-| **Status** | `Proposed` |
+| **Status** | `Accepted` (2026-11-03; implementation in progress) |
 | **Date** | 2026-10-02 |
 | **Authors** | Spectrayan Architecture Team (`architecture@spectrayan.com`) |
 | **Deciders** | Yarvelle Core Maintainers, Architecture Working Group, Clinical AI Reviewers |
 | **Consulted** | Medical Informatics Lead, Security Engineering Team |
 | **Informed** | Yarvelle & Carefold Open-Source Communities |
-| **Supersedes** | Partially supersedes skill-provisioning aspects of ADR-0003 §Phase 3 |
+| **Supersedes** | Partially supersedes skill-provisioning aspects of ADR-0003 §Phase 3, and ADR-0003 §Phase 4 (Multi-Agent Dispatch) per the 2026-11-03 amendment |
 | **Related** | ADR-0003 (Orchestrator Architecture), ADR-0004 (Hexagonal Memory Ports) |
 
 ---
@@ -877,6 +877,28 @@ def migrate_agent_yaml(agent_dir: Path):
 
 ---
 
+## Amendment (2026-11-03): Subagent Runtime and Hybrid Routing
+
+On acceptance, this ADR also fixes how multi-agent turns run. Core adopts **Deep Agents subagents** (the main agent's built-in `task` tool) as the runtime for local multi-agent work, with **hybrid routing**:
+
+1. **Deterministic fixed routes first.** A pack's `orchestration:` block (`PackOrchestrationSpec`) declares fixed routes (for example, attachments or an input-guardrail flag) and a default agent. Fixed routes are evaluated before any model call; a match goes straight to the named agent.
+2. **The main Deep Agents agent for everything else.** Registered agents are exposed as subagents (`SubAgent` / `CompiledSubAgent`). The main agent decides which subagents to call, with what input, and how to combine their results. Several `task` calls in one turn run in parallel; sequential calls give pipeline behaviour.
+
+This supersedes the dispatch phase of ADR-0003 (Phase 4, `ExecutionDispatcher`): parallel and pipeline execution, the per-agent tool loop and result hand-off move to the `task` tool. ADR-0003's central control is preserved, because subagents are called as tools by one main agent rather than handing control to each other (ADR-0003 Option 2 remains rejected).
+
+### Constraints
+
+- **Middleware on every subagent.** Isolated subagents do not inherit the main agent's custom middleware. The tool-policy gate (ADR-0006) and per-hand-off audit middleware must be attached to every subagent spec, and a test must fail if any registered subagent lacks them.
+- **No implicit agents or tools.** The built-in general-purpose subagent and the default filesystem tools are disabled; only registered subagents and declared tools are reachable. An unknown agent id is an error, never a silent fallback.
+- **Version floors.** `langchain>=1.3.14`, `langgraph>=1.2.14`, `deepagents>=0.7.13`, declared explicitly in `backend/pyproject.toml`.
+- **Deliberation.** The ADR-0001 deliberation protocol (scoped blackboard, Disagree-or-Commit, convergence gate) stays a bounded LangGraph subgraph, wrapped as a `CompiledSubAgent` so the main agent invokes it like any other subagent.
+- **Encrypted checkpoints.** Checkpointers use LangGraph's `EncryptedSerializer` (`serde=`), with a cipher keyed from the vault (ADR-0007).
+- **No up-front plan model for now.** The main agent's `task` calls are the plan. Bounds come from `OrchestrationLimits` (fan-out per turn, per-agent and per-turn timeouts) and per-call validation; a separate plan schema can be reintroduced later if plan preview or approval is needed.
+- **Timeouts and partial failure are explicit.** Each `task` call runs under the per-agent timeout, and a failed or timed-out subagent returns an error result to the main agent instead of failing the turn; the user sees an `orchestration_notice`.
+- **Agent-to-agent (A2A) wire contracts are deferred** until there is a remote transport; in-process hand-offs use the `task` tool's own inputs and outputs.
+
+---
+
 ## Consequences
 
 ### Positive Consequences
@@ -923,9 +945,9 @@ def migrate_agent_yaml(agent_dir: Path):
 # pyproject.toml
 [project]
 dependencies = [
-    "deepagents>=0.7",
-    "langgraph>=0.3",
-    "langchain>=0.4",
+    "deepagents>=0.7.13",
+    "langgraph>=1.2.14",
+    "langchain>=1.3.14",
 ]
 ```
 
