@@ -73,35 +73,16 @@ from yarvelle_core.schemas.notes import (
     NoteDetailResponse,
 )
 from yarvelle_core.schemas.routing import RoutingHints
-from yarvelle_core.schemas.a2a import (
-    A2AArtifact,
-    A2AMessage,
-    A2ATask,
-    A2ATaskState,
-    A2ATaskStatus,
-    DataPart,
-    FilePart,
-    FileRef,
-    TextPart,
-)
 from yarvelle_core.schemas.orchestration import (
-    AgentTaskEnvelope,
-    AgentTaskResult,
     FixedRoute,
     GuardrailFlagTrigger,
     HasAttachmentsTrigger,
-    OrchestrationAuditRecord,
     OrchestrationLimits,
-    OrchestrationPlan,
     PackOrchestrationSpec,
-    PlanStep,
     RouteDecision,
     RouteSource,
     SSEOrchestrationNoticeEvent,
-    SSEOrchestrationPlanEvent,
     SSETaskStatusEvent,
-    TaskProvenance,
-    TaskStatus,
 )
 
 __all__ = [
@@ -152,32 +133,15 @@ __all__ = [
     "NoteSummary",
     "NoteDetailResponse",
     "RoutingHints",
-    "A2AArtifact",
-    "A2AMessage",
-    "A2ATask",
-    "A2ATaskState",
-    "A2ATaskStatus",
-    "DataPart",
-    "FilePart",
-    "FileRef",
-    "TextPart",
-    "AgentTaskEnvelope",
-    "AgentTaskResult",
     "FixedRoute",
     "GuardrailFlagTrigger",
     "HasAttachmentsTrigger",
-    "OrchestrationAuditRecord",
     "OrchestrationLimits",
-    "OrchestrationPlan",
     "PackOrchestrationSpec",
-    "PlanStep",
     "RouteDecision",
     "RouteSource",
     "SSEOrchestrationNoticeEvent",
-    "SSEOrchestrationPlanEvent",
     "SSETaskStatusEvent",
-    "TaskProvenance",
-    "TaskStatus",
 ]
 
 

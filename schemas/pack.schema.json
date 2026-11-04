@@ -33,7 +33,7 @@
     },
     "FixedRoute": {
       "additionalProperties": false,
-      "description": "A pack-declared deterministic route, evaluated before planning in declared order.",
+      "description": "A pack-declared deterministic route, evaluated before the main agent, in declared order.",
       "properties": {
         "route_id": {
           "pattern": "^[a-z0-9_-]{1,64}$",
@@ -122,11 +122,11 @@
     },
     "OrchestrationLimits": {
       "additionalProperties": false,
-      "description": "Per-turn bounds on fan-out and wall-clock time.",
+      "description": "Per-turn bounds on subagent fan-out and wall-clock time.",
       "properties": {
         "max_agents": {
           "default": 4,
-          "description": "Maximum number of agent steps in one plan.",
+          "description": "Maximum number of subagent task calls in one turn.",
           "maximum": 16,
           "minimum": 1,
           "title": "Max Agents",
@@ -134,7 +134,7 @@
         },
         "agent_timeout_s": {
           "default": 60.0,
-          "description": "Wall-clock timeout for a single agent task, in seconds.",
+          "description": "Wall-clock timeout for a single subagent task, in seconds.",
           "exclusiveMinimum": 0,
           "title": "Agent Timeout S",
           "type": "number"
@@ -192,7 +192,7 @@
     },
     "PackOrchestrationSpec": {
       "additionalProperties": false,
-      "description": "Pack-level orchestration config (``orchestration:`` in pack.yaml).\n\n``default_agent`` handles the turn when no model is configured (after fixed\nroutes) and when planning fails; both cases carry a user-visible notice.",
+      "description": "Pack-level orchestration config (``orchestration:`` in pack.yaml).\n\n``default_agent`` handles the turn when no model is configured (after fixed\nroutes) and when the main agent cannot run; both cases carry a\nuser-visible notice. It is never substituted silently for an unknown id.",
       "properties": {
         "schema_version": {
           "const": 1,

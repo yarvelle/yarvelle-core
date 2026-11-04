@@ -9,74 +9,35 @@
 #
 # Required Notice: Copyright 2026 Spectrayan (https://spectrayan.com)
 
-"""Unit tests for the orchestration data contracts (plan, tasks, routing, stream, audit)."""
+"""Unit tests for the orchestration data contracts (limits, routing, stream, audit)."""
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict
 import pytest
 from pydantic import TypeAdapter, ValidationError
 import yaml
 
 from yarvelle_core.constants.api import SSE_ORCHESTRATION_EVENTS
 from yarvelle_core.pack.spec import PackManifest, PackSpec
-from yarvelle_core.schemas.a2a import A2AMessage, TextPart
+from yarvelle_core.schemas.audit import AuditEvent, audit_durability
 from yarvelle_core.schemas.orchestration import (
     DEFAULT_AGENT_TIMEOUT_S,
     DEFAULT_MAX_AGENTS,
     DEFAULT_TURN_TIMEOUT_S,
-    ORCHESTRATION_SCHEMA_VERSION,
-    AgentTaskEnvelope,
-    AgentTaskResult,
     FixedRoute,
     GuardrailFlagTrigger,
     HasAttachmentsTrigger,
-    OrchestrationAuditRecord,
     OrchestrationLimits,
-    OrchestrationPlan,
     OrchestrationStreamEvent,
     PackOrchestrationSpec,
     RouteDecision,
     RouteSource,
     SSEOrchestrationNoticeEvent,
-    SSEOrchestrationPlanEvent,
     SSETaskStatusEvent,
-    TaskStatus,
-    audit_durability,
-    content_sha256,
 )
-from yarvelle_core.schemas.plan import ExecutionMode
-
-T0 = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
-IN_HASH = content_sha256("input")
-
-
-def _steps(*agents: str, deps: Dict[int, List[int]] | None = None) -> List[Dict[str, Any]]:
-    deps = deps or {}
-    return [
-        {"step_id": f"s{i}", "agent_id": a, "depends_on": [f"s{d}" for d in deps.get(i, [])]}
-        for i, a in enumerate(agents)
-    ]
-
-
-def _plan(mode: str, steps: List[Dict[str, Any]], **kw: Any) -> OrchestrationPlan:
-    return OrchestrationPlan.model_validate({"mode": mode, "steps": steps, **kw})
-
-
-def _prov(**kw: Any) -> Dict[str, Any]:
-    base: Dict[str, Any] = {
-        "agent_id": "agent-a",
-        "plan_id": "p1",
-        "step_id": "s0",
-        "turn_id": "turn-1",
-        "input_hash": IN_HASH,
-    }
-    base.update(kw)
-    return base
-
 
 # ---------------------------------------------------------------------------
 # Limits
@@ -103,213 +64,6 @@ def test_limits_defaults() -> None:
 def test_limits_reject_invalid(data: Dict[str, Any]) -> None:
     with pytest.raises(ValidationError):
         OrchestrationLimits.model_validate(data)
-
-
-# ---------------------------------------------------------------------------
-# Plan
-# ---------------------------------------------------------------------------
-
-
-def test_single_plan() -> None:
-    plan = _plan("single", _steps("agent-a"), rationale="one agent covers it")
-    assert plan.schema_version == ORCHESTRATION_SCHEMA_VERSION
-    assert plan.mode is ExecutionMode.SINGLE
-    assert plan.execution_order() == [["s0"]]
-    assert plan.agent_ids() == ["agent-a"]
-
-
-def test_parallel_plan_runs_in_one_wave() -> None:
-    plan = _plan("parallel", _steps("agent-a", "agent-b", "agent-c"))
-    assert plan.execution_order() == [["s0", "s1", "s2"]]
-
-
-def test_pipeline_plan_orders_waves_deterministically() -> None:
-    plan = _plan("pipeline", _steps("agent-a", "agent-b", "agent-c", "agent-d", deps={1: [0], 2: [0], 3: [1, 2]}))
-    assert plan.execution_order() == [["s0"], ["s1", "s2"], ["s3"]]
-
-
-def test_deliberate_plan_with_panel() -> None:
-    plan = _plan("deliberate", _steps("agent-a", "agent-b"), panel_id="review-panel")
-    assert plan.panel_id == "review-panel"
-
-
-def test_clarification_plan_has_question_and_no_steps() -> None:
-    plan = _plan("single", [], needs_clarification=True, clarification_question="Which account?")
-    assert plan.steps == []
-    with pytest.raises(ValidationError, match="clarification_question is required"):
-        _plan("single", [], needs_clarification=True)
-    with pytest.raises(ValidationError, match="must not contain steps"):
-        _plan("single", _steps("agent-a"), needs_clarification=True, clarification_question="?")
-    with pytest.raises(ValidationError, match="only allowed when needs_clarification"):
-        _plan("single", _steps("agent-a"), clarification_question="?")
-
-
-@pytest.mark.parametrize(
-    ("mode", "steps", "message"),
-    [
-        ("single", [], "at least one step"),
-        ("single", _steps("agent-a", "agent-b"), "exactly one step"),
-        ("parallel", _steps("agent-a"), "at least two steps"),
-        ("pipeline", _steps("agent-a"), "at least two steps"),
-        ("deliberate", _steps("agent-a"), "at least two steps"),
-        ("parallel", _steps("agent-a", "agent-b", deps={1: [0]}), "only allowed in pipeline"),
-        ("deliberate", _steps("agent-a", "agent-b", deps={1: [0]}), "only allowed in pipeline"),
-        ("pipeline", _steps("agent-a", "agent-b"), "requires at least one dependency"),
-        ("pipeline", _steps("agent-a", "agent-b", deps={0: [1], 1: [0]}), "dependency cycle"),
-        ("pipeline", _steps("agent-a", "agent-b", deps={1: [1]}), "depends on itself"),
-        ("deliberate", _steps("agent-a", "agent-a"), "distinct agents"),
-    ],
-)
-def test_plan_rejects_invalid_topology(mode: str, steps: List[Dict[str, Any]], message: str) -> None:
-    with pytest.raises(ValidationError, match=message):
-        _plan(mode, steps)
-
-
-def test_plan_rejects_unknown_and_duplicate_steps() -> None:
-    steps = _steps("agent-a", "agent-b")
-    steps[1]["depends_on"] = ["missing"]
-    with pytest.raises(ValidationError, match="unknown step 'missing'"):
-        _plan("pipeline", steps)
-    dup = _steps("agent-a", "agent-b")
-    dup[1]["step_id"] = "s0"
-    with pytest.raises(ValidationError, match="duplicate step ids"):
-        _plan("parallel", dup)
-
-
-def test_plan_rejects_bad_ids_and_panel_outside_deliberate() -> None:
-    with pytest.raises(ValidationError, match="Invalid agent id"):
-        _plan("single", [{"step_id": "s0", "agent_id": "bad id!"}])
-    with pytest.raises(ValidationError):
-        _plan("single", [{"step_id": "S 0", "agent_id": "agent-a"}])
-    with pytest.raises(ValidationError, match="panel_id is only allowed"):
-        _plan("parallel", _steps("agent-a", "agent-b"), panel_id="review-panel")
-    with pytest.raises(ValidationError):
-        _plan("single", _steps("agent-a"), confidence=0.9)
-
-
-def test_plan_limit_violations() -> None:
-    plan = _plan("parallel", _steps(*[f"agent-{i}" for i in range(5)]))
-    assert plan.limit_violations(OrchestrationLimits()) == ["plan has 5 steps; the limit is 4"]
-    assert plan.limit_violations(OrchestrationLimits(max_agents=5)) == []
-
-
-def test_plan_round_trips_through_json() -> None:
-    plan = _plan("pipeline", _steps("agent-a", "agent-b", deps={1: [0]}), rationale="b needs a")
-    restored = OrchestrationPlan.model_validate_json(plan.model_dump_json())
-    assert restored == plan
-    assert json.loads(plan.model_dump_json())["mode"] == "pipeline"
-
-
-def test_plan_rejects_unknown_schema_version() -> None:
-    with pytest.raises(ValidationError):
-        _plan("single", _steps("agent-a"), schema_version=2)
-
-
-# ---------------------------------------------------------------------------
-# Task envelope and result
-# ---------------------------------------------------------------------------
-
-
-def _envelope(**kw: Any) -> AgentTaskEnvelope:
-    data: Dict[str, Any] = {
-        "task_id": "task-1",
-        "turn_id": "turn-1",
-        "thread_id": "thread-1",
-        "plan_id": "p1",
-        "step_id": "s0",
-        "agent_id": "agent-a",
-        "message": A2AMessage(role="user", parts=[TextPart(text="do it")], task_id="task-1").model_dump(),
-    }
-    data.update(kw)
-    return AgentTaskEnvelope.model_validate(data)
-
-
-def test_envelope_round_trip_and_defaults() -> None:
-    env = _envelope(upstream_task_ids=["task-0"])
-    assert env.timeout_s == DEFAULT_AGENT_TIMEOUT_S
-    assert AgentTaskEnvelope.model_validate_json(env.model_dump_json()) == env
-
-
-def test_envelope_rejects_inconsistent_message() -> None:
-    agent_msg = A2AMessage(role="agent", parts=[TextPart(text="x")]).model_dump()
-    with pytest.raises(ValidationError, match="role must be 'user'"):
-        _envelope(message=agent_msg)
-    other = A2AMessage(role="user", parts=[TextPart(text="x")], task_id="task-9").model_dump()
-    with pytest.raises(ValidationError, match="must match the envelope task_id"):
-        _envelope(message=other)
-    with pytest.raises(ValidationError, match="cannot list itself"):
-        _envelope(upstream_task_ids=["task-1"])
-    with pytest.raises(ValidationError, match="timezone-aware"):
-        _envelope(created_at=datetime(2026, 1, 1))
-
-
-def test_completed_result() -> None:
-    result = AgentTaskResult(
-        task_id="task-1",
-        status=TaskStatus.COMPLETED,
-        output_text="answer",
-        started_at=T0,
-        ended_at=T0 + timedelta(seconds=2),
-        provenance=_prov(output_hash=content_sha256("answer"), model="local/model"),
-    )
-    assert result.duration_ms == 2000.0
-    assert AgentTaskResult.model_validate_json(result.model_dump_json()) == result
-
-
-def test_status_set_is_closed() -> None:
-    assert {s.value for s in TaskStatus} == {"completed", "failed", "timed_out", "skipped"}
-    with pytest.raises(ValidationError):
-        AgentTaskResult.model_validate({"task_id": "t", "status": "cancelled", "provenance": _prov()})
-
-
-@pytest.mark.parametrize(
-    ("data", "message"),
-    [
-        ({"status": "completed", "provenance": _prov()}, "require output_text"),
-        (
-            {"status": "completed", "output_text": "x", "provenance": _prov(output_hash="0" * 64)},
-            "output_hash must be the SHA-256",
-        ),
-        (
-            {
-                "status": "completed",
-                "output_text": "x",
-                "error_code": "boom",
-                "provenance": _prov(output_hash=content_sha256("x")),
-            },
-            "cannot carry error_code",
-        ),
-        ({"status": "failed", "provenance": _prov()}, "require error_code"),
-        ({"status": "timed_out", "output_text": "partial", "error_code": "timeout", "provenance": _prov()}, "cannot carry output"),
-        ({"status": "failed", "error_code": "boom", "provenance": _prov(output_hash=IN_HASH)}, "only completed"),
-        ({"status": "failed", "error_code": "boom", "provenance": _prov(input_hash=None)}, "require provenance.input_hash"),
-        ({"status": "skipped", "provenance": _prov()}, "require skip_reason"),
-        ({"status": "skipped", "skip_reason": "upstream failed", "started_at": T0, "provenance": _prov()}, "cannot carry output"),
-        (
-            {
-                "status": "failed",
-                "error_code": "boom",
-                "started_at": T0,
-                "ended_at": T0 - timedelta(seconds=1),
-                "provenance": _prov(),
-            },
-            "ended_at cannot be earlier",
-        ),
-    ],
-)
-def test_result_rejects_inconsistent_status(data: Dict[str, Any], message: str) -> None:
-    with pytest.raises(ValidationError, match=message):
-        AgentTaskResult.model_validate({"task_id": "task-1", **data})
-
-
-def test_failed_timed_out_and_skipped_results() -> None:
-    failed = AgentTaskResult(task_id="t1", status="failed", error_code="agent.unavailable", provenance=_prov())
-    timed = AgentTaskResult(task_id="t2", status="timed_out", error_code="timeout", provenance=_prov())
-    skipped = AgentTaskResult(
-        task_id="t3", status="skipped", skip_reason="upstream step s0 failed", provenance=_prov(input_hash=None)
-    )
-    assert [r.status for r in (failed, timed, skipped)] == [TaskStatus.FAILED, TaskStatus.TIMED_OUT, TaskStatus.SKIPPED]
-    assert skipped.duration_ms is None
 
 
 # ---------------------------------------------------------------------------
@@ -417,16 +171,29 @@ def test_pack_manifest_and_spec_accept_orchestration_block() -> None:
 
 
 def test_route_decision_rules() -> None:
-    RouteDecision(source=RouteSource.PLANNER)
-    RouteDecision(source="fixed_route", route_id="attachments")
-    RouteDecision(source="default_agent", fallback_reason="planner_unavailable")
-    RouteDecision(source="default_agent", fallback_reason="planning_failed")
+    RouteDecision(source=RouteSource.MAIN_AGENT)
+    RouteDecision(source="fixed_route", route_id="attachments", agent_id="document-extractor")
+    RouteDecision(source="default_agent", fallback_reason="model_unavailable")
+    RouteDecision(source="default_agent", fallback_reason="main_agent_failed")
     with pytest.raises(ValidationError, match="route_id is required"):
         RouteDecision(source="fixed_route")
     with pytest.raises(ValidationError, match="fallback_reason is required"):
         RouteDecision(source="default_agent")
     with pytest.raises(ValidationError, match="fallback_reason is required"):
-        RouteDecision(source="planner", fallback_reason="planning_failed")
+        RouteDecision(source="main_agent", fallback_reason="main_agent_failed")
+    with pytest.raises(ValidationError, match="Invalid agent id"):
+        RouteDecision(source="main_agent", agent_id="bad id")
+    with pytest.raises(ValidationError):
+        RouteDecision(source="planner")
+
+
+def test_route_decision_folds_into_audit_details() -> None:
+    decision = RouteDecision(source="fixed_route", route_id="attachments", agent_id="document-extractor")
+    event = AuditEvent(agent_id="document-extractor", event="route.fixed", details=decision.to_audit_payload())
+    assert event.details == {
+        "route": {"source": "fixed_route", "route_id": "attachments", "agent_id": "document-extractor"}
+    }
+    assert RouteDecision.model_validate(event.details["route"]) == decision
 
 
 # ---------------------------------------------------------------------------
@@ -435,40 +202,36 @@ def test_route_decision_rules() -> None:
 
 
 def test_stream_event_names_match_constants() -> None:
-    names = {SSEOrchestrationPlanEvent.model_fields["type"].default,
-             SSETaskStatusEvent.model_fields["type"].default,
+    names = {SSETaskStatusEvent.model_fields["type"].default,
              SSEOrchestrationNoticeEvent.model_fields["type"].default}
     assert names == set(SSE_ORCHESTRATION_EVENTS)
-
-
-def test_plan_event_from_plan_omits_instructions() -> None:
-    plan = _plan("parallel", [{"step_id": "s0", "agent_id": "agent-a", "instructions": "secret detail"},
-                              {"step_id": "s1", "agent_id": "agent-b"}])
-    event = SSEOrchestrationPlanEvent.from_plan(plan, turn_id="turn-1")
-    assert event.steps == [{"step_id": "s0", "agent_id": "agent-a"}, {"step_id": "s1", "agent_id": "agent-b"}]
-    assert "secret detail" not in event.model_dump_json()
-    with pytest.raises(ValidationError):
-        SSEOrchestrationPlanEvent(turn_id="t", plan_id="p", mode="single", steps=[{"step_id": "s0"}])
+    assert "orchestration_plan" not in SSE_ORCHESTRATION_EVENTS
 
 
 def test_stream_union_discriminates_by_type() -> None:
     adapter = TypeAdapter(OrchestrationStreamEvent)
     status = adapter.validate_python(
-        {"type": "task_status", "turn_id": "t", "task_id": "k", "step_id": "s0", "agent_id": "a", "state": "timed_out"}
+        {"type": "task_status", "turn_id": "t", "task_id": "call-1", "agent_id": "a", "state": "timed_out"}
     )
     assert isinstance(status, SSETaskStatusEvent)
     notice = adapter.validate_python(
-        {"type": "orchestration_notice", "turn_id": "t", "code": "planning_failed", "message": "Used the default agent."}
+        {"type": "orchestration_notice", "turn_id": "t", "code": "main_agent_failed", "message": "Used the default agent."}
     )
     assert isinstance(notice, SSEOrchestrationNoticeEvent)
+    with pytest.raises(ValidationError):
+        adapter.validate_python({"type": "orchestration_plan", "turn_id": "t", "plan_id": "p", "mode": "single"})
     with pytest.raises(ValidationError):
         adapter.validate_python({"type": "token", "delta": "x"})
     with pytest.raises(ValidationError):
         adapter.validate_python(
-            {"type": "task_status", "turn_id": "t", "task_id": "k", "step_id": "s0", "agent_id": "a", "state": "streaming"}
+            {"type": "task_status", "turn_id": "t", "task_id": "call-1", "agent_id": "a", "state": "skipped"}
         )
     with pytest.raises(ValidationError):
-        adapter.validate_python({"type": "orchestration_notice", "turn_id": "t", "code": "other", "message": "x"})
+        adapter.validate_python(
+            {"type": "task_status", "turn_id": "t", "task_id": "call-1", "step_id": "s0", "agent_id": "a", "state": "started"}
+        )
+    with pytest.raises(ValidationError):
+        adapter.validate_python({"type": "orchestration_notice", "turn_id": "t", "code": "planning_failed", "message": "x"})
 
 
 # ---------------------------------------------------------------------------
@@ -479,61 +242,54 @@ def test_stream_union_discriminates_by_type() -> None:
 @pytest.mark.parametrize(
     ("event", "expected"),
     [
-        ("plan.created", "strict"),
-        ("plan.rejected", "strict"),
-        ("plan.fallback", "strict"),
         ("route.fixed", "strict"),
+        ("route.default", "strict"),
         ("task.started", "strict"),
+        ("task.completed", "strict"),
+        ("task.failed", "strict"),
         ("task.timed_out", "strict"),
-        ("tool.called", "strict"),
-        ("synthesis.completed", "strict"),
-        ("telemetry.stream", "best_effort"),
+        ("run", "best_effort"),
+        ("tool", "best_effort"),
+        ("synthesis", "best_effort"),
     ],
 )
 def test_audit_durability(event: str, expected: str) -> None:
     assert audit_durability(event) == expected
 
 
-def test_audit_record_with_bodies_and_redaction() -> None:
-    record = OrchestrationAuditRecord(
+def test_audit_event_carries_task_hand_off_fields() -> None:
+    event = AuditEvent(
+        agent_id="agent-a",
         event="task.completed",
         thread_id="thread-1",
         turn_id="turn-1",
-        plan_id="p1",
-        task_id="task-1",
-        agent_id="agent-a",
-        input_hash=content_sha256("in"),
-        output_hash=content_sha256("out"),
-        input_body="in",
-        output_body="out",
+        task_id="call-1",
+        input_hash="a" * 64,
+        output_hash="b" * 64,
         duration_ms=12.5,
     )
-    assert record.durability == "strict"
-    stripped = record.without_bodies()
-    assert stripped.input_body is None and stripped.output_body is None
-    assert stripped.input_hash == record.input_hash and stripped.output_hash == record.output_hash
-    assert OrchestrationAuditRecord.model_validate_json(record.model_dump_json()) == record
+    assert AuditEvent.model_validate_json(event.model_dump_json()) == event
 
 
 @pytest.mark.parametrize(
-    ("data", "message"),
+    "data",
     [
-        ({"event": "task.started", "agent_id": "a"}, "require task_id and agent_id"),
-        ({"event": "plan.created"}, "require plan_id"),
-        ({"event": "tool.called", "task_id": "k"}, "require tool and task_id"),
-        ({"event": "telemetry.stream", "output_body": "x"}, "output_hash must be"),
-        ({"event": "telemetry.stream", "input_body": "x", "input_hash": "0" * 64}, "input_hash must be"),
-        ({"event": "run"}, "Input should be"),
-        ({"event": "telemetry.stream", "duration_ms": -1}, "greater than or equal"),
+        {"event": "plan.created"},
+        {"event": "task.skipped"},
+        {"event": "task.completed", "input_hash": "not-a-hash"},
+        {"event": "task.failed", "error_code": "Bad Code"},
     ],
 )
-def test_audit_record_rejects_invalid(data: Dict[str, Any], message: str) -> None:
-    with pytest.raises(ValidationError, match=message):
-        OrchestrationAuditRecord.model_validate({"thread_id": "thread-1", "turn_id": "turn-1", **data})
+def test_audit_event_rejects_invalid_orchestration_fields(data: Dict[str, Any]) -> None:
+    with pytest.raises(ValidationError):
+        AuditEvent.model_validate({"agent_id": "agent-a", **data})
 
 
 def test_committed_pack_schema_includes_orchestration() -> None:
     repo_root = Path(__file__).resolve().parents[2]
-    schema = json.loads((repo_root / "schemas" / "pack.schema.json").read_text(encoding="utf-8"))
-    assert "orchestration" in schema["properties"]
-    assert "PackOrchestrationSpec" in schema["$defs"]
+    for path in (repo_root / "schemas" / "pack.schema.json",
+                 repo_root / "backend" / "src" / "yarvelle_core" / "schemas" / "pack.schema.json"):
+        schema = json.loads(path.read_text(encoding="utf-8"))
+        assert "orchestration" in schema["properties"]
+        assert "PackOrchestrationSpec" in schema["$defs"]
+        assert "OrchestrationPlan" not in schema["$defs"]

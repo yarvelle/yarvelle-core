@@ -183,13 +183,11 @@ SSE_DELIBERATION_EVENTS: tuple[str, ...] = (
     SSE_EVENT_DELIBERATION_END,
 )
 
-# Multi-agent orchestration status events
-SSE_EVENT_ORCHESTRATION_PLAN: str = "orchestration_plan"
+# Multi-agent orchestration status events (subagent task status and notices)
 SSE_EVENT_TASK_STATUS: str = "task_status"
 SSE_EVENT_ORCHESTRATION_NOTICE: str = "orchestration_notice"
 
 SSE_ORCHESTRATION_EVENTS: tuple[str, ...] = (
-    SSE_EVENT_ORCHESTRATION_PLAN,
     SSE_EVENT_TASK_STATUS,
     SSE_EVENT_ORCHESTRATION_NOTICE,
 )
