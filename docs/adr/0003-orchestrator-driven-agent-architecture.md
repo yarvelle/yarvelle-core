@@ -10,6 +10,7 @@
 | **Deciders** | Yarvelle Core Maintainers, Architecture Working Group, Clinical AI Reviewers |
 | **Consulted** | Medical Informatics Lead, Security Engineering Team |
 | **Informed** | Yarvelle & Carefold Open-Source Communities |
+| **Superseded in part by** | ADR-0005 (2026-11-03 amendment): Phase 4 (Multi-Agent Dispatch) |
 
 ---
 
@@ -176,6 +177,8 @@ sequenceDiagram
 ```
 
 ### Phase 4: Multi-Agent Dispatch
+> **Note (2026-11-03):** Superseded by ADR-0005. Multi-agent dispatch moves to Deep Agents subagents (the main agent's `task` tool) with hybrid routing: pack-declared fixed routes first, the main agent for the rest. The text below records the original design.
+
 - **Implementation**: `backend/src/yarvelle_core/workflows/dispatcher.py` (`ExecutionDispatcher`).
 - Executes according to `ExecutionPlan.mode`:
   - `SINGLE`: Invokes `AgentExecutionNode` for the designated specialist.

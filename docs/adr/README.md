@@ -23,6 +23,7 @@ stateDiagram-v2
 | Status | Definition |
 |---|---|
 | **`Proposed`** | The decision is under active review by maintainers and the Architecture Working Group (AWG). |
+| **`Accepted`** | The decision has been approved; implementation is in progress. |
 | **`Accepted (Implemented)`** | The decision has been approved, merged, and fully verified against production code. |
 | **`Superseded`** | A subsequent ADR has replaced or significantly amended this decision (links to newer ADR). |
 | **`Rejected`** | The proposal was evaluated but not adopted. Retained for historical record. |
@@ -52,9 +53,9 @@ stateDiagram-v2
 | **[0000](0000-template.md)** | Architecture Decision Record Template | `Accepted` | 2026-10-02 | — |
 | **[0001](0001-multi-agent-deliberation.md)** | Multi-Agent Deliberation (`ExecutionMode.DELIBERATE`) | `Accepted (Implemented)` | 2026-10-24 | `yarvelle_core/workflows/deliberation/`, `yarvelle_core/schemas/plan.py` |
 | **[0002](0002-dynamic-mcp-db-toolbox.md)** | Dynamic Multi-Dialect MCP Database Toolbox, M-Schema Catalog, and AST Sandbox | `Accepted (Implemented)` | 2026-10-25 | `yarvelle_core/db/schema_catalog.py`, `yarvelle_core/tools/sql_ast_sandbox.py`, `yarvelle_core/tools/mcp_db_toolbox.py`, `yarvelle_core/workflows/subgraphs/db_toolbox/` |
-| **[0003](0003-orchestrator-driven-agent-architecture.md)** | Orchestrator-Driven Multi-Agent Architecture | `Accepted (Implemented)` | 2026-10-02 | `yarvelle_core/workflows/`, `yarvelle_core/loaders/` |
+| **[0003](0003-orchestrator-driven-agent-architecture.md)** | Orchestrator-Driven Multi-Agent Architecture | `Accepted (Implemented)`; Phase 4 superseded by ADR-0005 | 2026-10-02 | `yarvelle_core/workflows/`, `yarvelle_core/loaders/` |
 | **[0004](0004-hexagonal-memory-and-catalog-ports.md)** | Hexagonal Memory & Catalog Ports Architecture | `Accepted (Implemented)` | 2026-10-02 | `yarvelle_core/memory/ports/`, `yarvelle_core/memory/adapters/sqlite/` |
-| **[0005](0005-progressive-disclosure-skill-context-management.md)** | Progressive Disclosure & Deep Agents Context Management | `Accepted (Implemented)` | 2026-10-02 | `yarvelle_core/engine/`, `skills/*/SKILL.md`, `agents/*/` |
+| **[0005](0005-progressive-disclosure-skill-context-management.md)** | Progressive Disclosure & Deep Agents Context Management | `Accepted` | 2026-10-02 | `yarvelle_core/engine/`, `skills/*/SKILL.md`, `agents/*/` |
 | **[0006](0006-policy-approvals-and-resume.md)** | Policy Approvals, Single-Use Tokens, and Atomic Resumption | `Accepted (Implemented)` | 2026-10-12 | `yarvelle_core/engine/tool_exec.py`, `yarvelle_core/api/approvals.py`, `yarvelle_core/db/models.py` |
 | **[0007](0007-vault-threat-model-and-kek-sources.md)** | Cryptographic Keyring Vault Threat Model & KEK Hierarchy | `Accepted (Implemented)` | 2026-10-12 | `yarvelle_core/vault/crypto.py`, `yarvelle_core/vault/kek.py`, `yarvelle_core/vault/dek.py` |
 | **[0008](0008-deployment-modes-and-requirement-tiers.md)** | Deployment Modes (Mode L vs Mode S) and Requirement Tiers | `Accepted (Implemented)` | 2026-10-12 | `yarvelle_core/config.py`, `scripts/` |
