@@ -321,3 +321,65 @@ def test_main_agent_failure_falls_back_to_default(registry: AgentRegistry) -> No
     assert outcome.decision.fallback_reason == "main_agent_failed"
     assert [n.code for n in outcome.notices] == ["main_agent_failed"]
     assert sink.kinds() == ["route.default"]
+
+
+# ------------------------------------------------------------------ graph wiring
+
+
+def test_orchestrator_node_takes_fixed_route_without_model(registry: AgentRegistry) -> None:
+    from yarvelle_core.workflows.nodes import OrchestratorNode
+
+    node = OrchestratorNode(model=None, registry=registry, orchestration=_spec())
+    result = asyncio.run(node.execute(_turn(guardrail_flags=["crisis"])))
+    assert result["next_step"] == "trip-organizer"
+    assert result["route_decision"]["route_id"] == "crisis"
+    assert "orchestration_notices" not in result
+
+
+def test_orchestrator_node_never_guesses_from_keywords(registry: AgentRegistry) -> None:
+    from yarvelle_core.workflows.nodes import OrchestratorNode
+
+    node = OrchestratorNode(model=None, registry=registry, orchestration=_spec())
+    result = asyncio.run(node.execute(_turn("please coordinate a trip and deliberate on the budget")))
+    assert result["next_step"] == "budget-planner"
+    assert result["execution_plan"]["mode"] == "single"
+    assert [n["code"] for n in result["orchestration_notices"]] == ["model_unavailable"]
+
+
+def test_orchestrator_node_hands_model_turns_to_main_agent(registry: AgentRegistry) -> None:
+    from yarvelle_core.workflows.nodes import OrchestratorNode
+
+    model = ScriptedModel(script=[])
+    node = OrchestratorNode(model=model, registry=registry, orchestration=_spec(), main_agent_enabled=True)
+    result = asyncio.run(node.execute(_turn("plan a weekend")))
+    assert result["next_step"] == "main-agent"
+    assert model.calls == 0
+
+
+def test_main_agent_node_returns_answer_messages(registry: AgentRegistry) -> None:
+    from yarvelle_core.workflows.nodes import MainAgentNode
+
+    model = ScriptedModel(
+        script=[_task_call("budget-planner", "b-1"), AIMessage(content="Save 10%."), AIMessage(content="Plan: save 10%.")]
+    )
+    sink = Sink()
+    node = MainAgentNode(model=model, registry=registry, orchestration=_spec(), audit_sink=sink)
+    result = asyncio.run(node.execute(_turn("budget help")))
+    assert result["next_step"] == "output_guardrail"
+    assert result["messages"][-1].content == "Plan: save 10%."
+    assert result["route_decision"] == {"source": "main_agent"}
+    assert sink.kinds() == ["task.started", "task.completed"]
+
+
+def test_builder_wires_main_agent_node(registry: AgentRegistry) -> None:
+    from yarvelle_core.engine.builder import GraphBuilder
+
+    builder = GraphBuilder(
+        model=ScriptedModel(script=[]),
+        registry=registry,
+        orchestration=_spec(),
+        orchestration_audit_sink=Sink(),
+    )
+    graph = builder.build()
+    nodes = set(graph.get_graph().nodes)
+    assert {"supervisor", "main_agent"} <= nodes

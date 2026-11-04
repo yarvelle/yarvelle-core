@@ -23,6 +23,7 @@ from yarvelle_core.workflows.nodes.audit_node import AuditNode
 from yarvelle_core.workflows.nodes.base import BaseNode
 from yarvelle_core.workflows.nodes.error_node import ErrorNode
 from yarvelle_core.workflows.nodes.input_guardrail_node import InputGuardrailNode
+from yarvelle_core.workflows.nodes.main_agent_node import MainAgentNode
 from yarvelle_core.workflows.nodes.orchestrator_node import OrchestratorDecision, OrchestratorNode
 from yarvelle_core.workflows.nodes.output_guardrail_node import OutputGuardrailNode
 from yarvelle_core.workflows.nodes.reflection_node import ReflectionNode
@@ -30,7 +31,6 @@ from yarvelle_core.workflows.nodes.refusal_node import RefusalNode
 from yarvelle_core.workflows.nodes.response_synthesizer_node import ResponseSynthesizerNode
 from yarvelle_core.workflows.nodes.skill_generator_node import SkillGeneratorNode
 from yarvelle_core.workflows.nodes.suggestion_node import SuggestionNode
-from yarvelle_core.workflows.nodes.supervisor_node import SupervisorNode
 from yarvelle_core.workflows.nodes.tool_node import ToolNode
 from yarvelle_core.workflows.nodes.tool_validator_node import ToolValidatorNode
 
@@ -41,6 +41,7 @@ __all__ = [
     "BaseNode",
     "ErrorNode",
     "InputGuardrailNode",
+    "MainAgentNode",
     "OrchestratorDecision",
     "OrchestratorNode",
     "OutputGuardrailNode",
@@ -49,7 +50,6 @@ __all__ = [
     "ResponseSynthesizerNode",
     "SkillGeneratorNode",
     "SuggestionNode",
-    "SupervisorNode",
     "ToolNode",
     "ToolValidatorNode",
 ]

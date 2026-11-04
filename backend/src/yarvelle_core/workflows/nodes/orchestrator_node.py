@@ -9,11 +9,12 @@
 #
 # Required Notice: Copyright 2026 Spectrayan (https://spectrayan.com)
 
-"""Dynamic LLM-driven OrchestratorNode for multi-agent routing (F-47).
+"""OrchestratorNode: the routing step at the top of the agent graph.
 
-Replaces static regex-based SupervisorNode with dynamic LLM structured output.
-Discovers available specialist agents dynamically from AgentRegistry, formats
-their descriptions and tools into the prompt, and reliably routes inquiries.
+Order: an explicit agent choice, then pack fixed routes (no model call), then
+the main agent when it is wired in. Without a model the pack default agent
+takes the turn with a ``model_unavailable`` notice. Routing never guesses from
+prompt keywords and never substitutes an unknown agent silently.
 """
 
 from __future__ import annotations
@@ -29,6 +30,8 @@ from pydantic import BaseModel, Field
 
 from yarvelle_core.agents.registry import AgentRegistry, _extract_first_line
 from yarvelle_core.config import settings
+from yarvelle_core.engine.orchestration.routing import has_attachments, select_fixed_route
+from yarvelle_core.engine.orchestration.runtime import MAIN_AGENT_ID
 from yarvelle_core.constants.agents import AGENT_DOCUMENT_EXTRACTOR, AGENT_ORCHESTRATOR
 from yarvelle_core.constants.paths import AGENTS_DIR, SKILLS_DIR
 from yarvelle_core.memory.ports.catalog_port import CatalogPort
@@ -40,6 +43,7 @@ from yarvelle_core.schemas.plan import (
     ExecutionMode,
     ExecutionPlan,
 )
+from yarvelle_core.schemas.orchestration import PackOrchestrationSpec
 from yarvelle_core.schemas.routing import RoutingHints
 from yarvelle_core.templates.engine import render_template
 from yarvelle_core.workflows.nodes.base import BaseNode
@@ -159,6 +163,12 @@ class OrchestratorDecision(BaseModel):
     )
 
 
+_NOTICE_TEXT = {
+    "model_unavailable": "No model is configured, so the default agent took this turn.",
+    "main_agent_failed": "Routing could not pick an agent, so the default agent took this turn.",
+}
+
+
 class OrchestratorNode(BaseNode):
     """Dynamic LLM-driven orchestrator node for multi-agent planning and routing."""
 
@@ -171,13 +181,22 @@ class OrchestratorNode(BaseNode):
         routing_hints: Optional[Sequence[RoutingHints]] = None,
         name: str = "orchestrator",
         default_agent: Optional[str] = None,
+        orchestration: Optional[PackOrchestrationSpec] = None,
+        main_agent_enabled: bool = False,
     ) -> None:
         super().__init__(name=name)
         self.model = model
+        # Pack orchestration config: fixed routes run before any model call.
+        self.orchestration = orchestration
+        # When set, model-routed turns go to the main agent node (task tool).
+        self.main_agent_enabled = main_agent_enabled
         # Pack-configured fallback (orchestration.default_agent). Core has no
         # default of its own: when this is unset and routing cannot pick a
         # registered agent, the turn fails with an error.
-        self.default_agent = (default_agent or "").strip() or None
+        self.default_agent = (
+            (default_agent or "").strip()
+            or (orchestration.default_agent if orchestration is not None else "")
+        ) or None
         self._registry = registry
         self.catalog = catalog
         self._skill_generator = skill_generator
@@ -268,34 +287,22 @@ class OrchestratorNode(BaseNode):
         }
         return render_template("orchestrator_routing_prompt", context)
 
-    def _resolve_pattern_fallback(self, state: Dict[str, Any], prompt_text: str) -> str:
-        """Resolves target agent using attachments, routing patterns, then the pack default.
-
-        Returns an empty string when nothing matches and no default agent is configured.
-        """
-        has_attachment = bool(
-            state.get("attachments")
-            or state.get("document_dossiers")
-            or state.get("document_text")
-            or state.get("raw_text")
+    def _fallback_to_default(self, reason: str, turn_state: Dict[str, Any]) -> Optional[OrchestratorDecision]:
+        """Routes to the pack default agent and records an orchestration notice."""
+        if not self.default_agent:
+            return None
+        notice = {
+            "type": "orchestration_notice",
+            "code": reason,
+            "message": _NOTICE_TEXT[reason],
+            "agent_ids": [self.default_agent],
+        }
+        turn_state.setdefault("orchestration_notices", []).append(notice)
+        return OrchestratorDecision(
+            agent_id=self.default_agent,
+            reasoning=f"Default agent ({reason}).",
+            instructions="",
         )
-        if has_attachment:
-            return AGENT_DOCUMENT_EXTRACTOR
-
-        try:
-            routing_patterns = get_resource_loader().get_routing_patterns()
-            prompt_lower = prompt_text.lower()
-            for agent_key, patterns in routing_patterns.items():
-                if agent_key == "dossier_types" or not isinstance(patterns, list):
-                    continue
-                for pat in patterns:
-                    import re
-                    if re.search(pat, prompt_lower, re.IGNORECASE):
-                        return agent_key
-        except Exception as err:
-            logger.debug("Failed loading external routing patterns: %s", err)
-
-        return self.default_agent or ""
 
     def _no_route_error(self, reason: str) -> Dict[str, Any]:
         """Returns an error state when no agent can be chosen and no pack default is set."""
@@ -365,23 +372,23 @@ class OrchestratorNode(BaseNode):
                     pass
 
                 if decision is None:
-                    target = self._resolve_pattern_fallback(state, prompt_text)
+                    target = (self.default_agent or "")
                     decision = OrchestratorDecision(
                         agent_id=target,
-                        reasoning=f"Parsed unstructured model response or fallback to {target}: {content[:100]}",
+                        reasoning=f"Unparseable routing response; default agent {target or '(none)'}",
                         instructions="",
                     )
         except Exception as exc:
             logger.warning("Orchestrator structured model call failed (%s); triggering fallback", exc)
-            target = self._resolve_pattern_fallback(state, prompt_text)
+            target = (self.default_agent or "")
             decision = OrchestratorDecision(
                 agent_id=target,
-                reasoning=f"Routing model error fallback to {target}: {exc}",
+                reasoning=f"Routing model error ({type(exc).__name__}); default agent {target or '(none)'}",
                 instructions="",
             )
 
         if decision is None:
-            target = self._resolve_pattern_fallback(state, prompt_text)
+            target = (self.default_agent or "")
             decision = OrchestratorDecision(
                 agent_id=target,
                 reasoning="Default decision fallback",
@@ -493,11 +500,11 @@ class OrchestratorNode(BaseNode):
 
         # Step 4: If 0 candidates, fall back to pattern fallback
         if not candidates:
-            target = self._resolve_pattern_fallback(state, prompt_text)
+            target = (self.default_agent or "")
             return (
                 OrchestratorDecision(
                     agent_id=target,
-                    reasoning=f"Catalog fallback chain returned 0 candidates; pattern fallback to {target}",
+                    reasoning=f"Catalog returned no candidates; default agent {target or '(none)'}",
                     instructions="",
                 ),
                 [],
@@ -564,10 +571,10 @@ class OrchestratorNode(BaseNode):
             decision = None
 
         if decision is None:
-            fallback_id = candidates[0].id if candidates else self._resolve_pattern_fallback(state, prompt_text)
+            fallback_id = self.default_agent or ""
             decision = OrchestratorDecision(
                 agent_id=fallback_id,
-                reasoning=f"Tier-2 structured invocation fallback to candidate: {fallback_id}",
+                reasoning=f"Tier-2 picker gave no decision; default agent {fallback_id or '(none)'}",
                 instructions="",
             )
 
@@ -596,22 +603,10 @@ class OrchestratorNode(BaseNode):
         elif isinstance(existing_plan, ExecutionPlan):
             return existing_plan
 
-        prompt_lower = prompt_text.lower()
-
-        # 2. Check for explicit deliberation configuration or panel request
+        # 2. Structured deliberation request (panel or config set by the caller)
         deliberation_config = state.get("deliberation_config")
         panel_id = state.get("panel_id")
-        deliberation_keywords = (
-            "deliberate",
-            "deliberation",
-            "roundtable",
-            "panel discussion",
-            "committee review",
-            "peer review",
-        )
-        wants_deliberation = any(dk in prompt_lower for dk in deliberation_keywords)
-
-        if deliberation_config or panel_id or wants_deliberation:
+        if deliberation_config or panel_id:
             target_agents = [target_agent]
             if candidates:
                 for c in candidates:
@@ -644,35 +639,7 @@ class OrchestratorNode(BaseNode):
                     reasoning=f"Multi-agent deliberation requested among: {', '.join(target_agents)}",
                 )
 
-        # 3. Check for multi-agent coordination (parallel mode)
-        coordination_keywords = (
-            "coordinate",
-            "consult both",
-            "both specialists",
-            "multi-specialist",
-            "multiple specialists",
-            "team of specialists",
-            "concurrent",
-        )
-        if any(ck in prompt_lower for ck in coordination_keywords) and candidates and len(candidates) >= 2:
-            coord_agents = [target_agent] + [c.id for c in candidates if c.id != target_agent]
-            tasks = [
-                AgentTask(
-                    agent_id=ag_id,
-                    instructions=f"Coordinate assessment for {ag_id}",
-                    task_description=f"Specialist contribution from {ag_id}",
-                    priority=1,
-                )
-                for ag_id in coord_agents
-            ]
-            return ExecutionPlan(
-                mode=ExecutionMode.PARALLEL,
-                target_agents=coord_agents,
-                tasks=tasks,
-                reasoning=f"Multi-agent coordination plan across: {', '.join(coord_agents)}",
-            )
-
-        # 4. Standard single-agent mode
+        # 3. Single-agent mode (multi-agent work goes through the main agent)
         instructions = decision.instructions if decision and decision.instructions else ""
         reasoning = decision.reasoning if decision and decision.reasoning else f"Delegation to {target_agent}"
         return ExecutionPlan(
@@ -953,48 +920,68 @@ class OrchestratorNode(BaseNode):
                 res_dict["generated_skill"] = gen_sk
             return res_dict
 
-        # 2. Check model availability and routing mode
+        # 2. Pack fixed routes, evaluated before any model call
+        fixed = select_fixed_route(self.orchestration, state)
+        builtin_doc_route = (
+            fixed is None
+            and self.orchestration is None
+            and has_attachments(state)
+            and self.registry.get(AGENT_DOCUMENT_EXTRACTOR) is not None
+        )
         candidates: List[AgentManifest] = []
         raw_messages = list(state.get("messages", []))
+        decision: Optional[OrchestratorDecision]
 
-        if self.model is None:
-            # Fallback when model is not provided (e.g. offline unit tests)
-            target = self._resolve_pattern_fallback(state, prompt_text)
+        if fixed is not None and fixed.agent_id:
             decision = OrchestratorDecision(
-                agent_id=target,
-                reasoning=f"Model unconfigured; externalized pattern or fallback match: {target}",
+                agent_id=fixed.agent_id,
+                reasoning=f"Fixed route '{fixed.route_id}'.",
                 instructions="",
             )
+            state["route_decision"] = fixed.model_dump(mode="json", exclude_none=True)
+        elif builtin_doc_route:
+            # Without pack routes, attachments go to the built-in document agent.
+            decision = OrchestratorDecision(
+                agent_id=AGENT_DOCUMENT_EXTRACTOR,
+                reasoning="Turn carries attachments.",
+                instructions="",
+            )
+        elif self.model is None:
+            # No model: the pack default takes the turn, with a notice. Never a guess.
+            decision = self._fallback_to_default("model_unavailable", state)
+            if decision is None:
+                return self._no_route_error("no model is configured")
+        elif self.main_agent_enabled:
+            # The main agent hands work to registered agents through the task tool.
+            return {
+                "current_agent": MAIN_AGENT_ID,
+                "routed_subgraph": MAIN_AGENT_ID,
+                "agent_id": MAIN_AGENT_ID,
+                "orchestrator_reasoning": "Main agent coordinates this turn.",
+                "orchestrator_instructions": "",
+                "next_step": MAIN_AGENT_ID,
+            }
         elif self.catalog is None:
-            # Backward compatibility: execute single-hop routing flow
             decision = await self._execute_single_hop(state, prompt_text, raw_messages)
         else:
-            # Two-Hop routing flow via CatalogPort
             decision, candidates = await self._execute_two_hop(state, prompt_text, raw_messages)
 
-        if decision is None:
-            target = self._resolve_pattern_fallback(state, prompt_text)
-            decision = OrchestratorDecision(
-                agent_id=target,
-                reasoning="Default decision fallback",
-                instructions="",
-            )
+        if decision is None or not str(decision.agent_id).strip():
+            decision = self._fallback_to_default("main_agent_failed", state)
+            if decision is None:
+                return self._no_route_error("routing produced no agent")
 
-        # 3. Validate selected agent_id exists in registry or candidates
+        # 3. The selected agent must be registered; no silent substitution
         selected_id = str(decision.agent_id).strip().lower().replace("_", "-")
-        if not selected_id:
-            return self._no_route_error("routing produced no agent")
         candidate_ids = {c.id for c in candidates} if candidates else set()
-        if not self.registry.get(selected_id) and selected_id not in candidate_ids:
-            if candidates:
-                fallback_id = candidates[0].id
-            else:
-                delegatable = self.registry.get_delegatable_agents(exclude=AGENT_ORCHESTRATOR)
-                fallback_id = delegatable[0].id if delegatable else self.default_agent
-            if not fallback_id:
+        is_default = bool(self.default_agent) and selected_id == self.default_agent
+        if not is_default and not self.registry.get(selected_id) and selected_id not in candidate_ids:
+            fallback = self._fallback_to_default("main_agent_failed", state)
+            if fallback is None:
                 return self._no_route_error(f"routing chose unknown agent '{decision.agent_id}'")
-            decision.reasoning += f" (original choice '{decision.agent_id}' not found in registry; fell back to '{fallback_id}')"
-            selected_id = fallback_id
+            fallback.reasoning = f"Routing chose unknown agent '{decision.agent_id}'; default agent took the turn."
+            decision = fallback
+            selected_id = str(decision.agent_id)
 
         # Route execution plan
         plan = self._route(
@@ -1041,6 +1028,10 @@ class OrchestratorNode(BaseNode):
             "provisioned_references": state.get("provisioned_references", {}),
             "provisioned_docs": list(state.get("provisioned_references", {}).keys()),
         }
+        if state.get("orchestration_notices"):
+            result_payload["orchestration_notices"] = list(state["orchestration_notices"])
+        if state.get("route_decision"):
+            result_payload["route_decision"] = state["route_decision"]
         if generated_skills:
             result_payload["generated_skills"] = generated_skills
         if generated_skill:

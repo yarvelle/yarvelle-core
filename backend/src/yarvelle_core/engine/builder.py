@@ -103,13 +103,19 @@ if TYPE_CHECKING:
         RefusalNode,
         ResponseSynthesizerNode,
         SuggestionNode,
-        SupervisorNode,
         ToolNode,
         ToolValidatorNode,
     )
 from yarvelle_core.workflows.state import AgentState
 
 logger = logging.getLogger(__name__)
+
+
+async def _record_orchestration_audit(event: Any) -> None:
+    """Default sink for route.* / task.* audit events."""
+    from yarvelle_core.audit.logger import record_audit
+
+    await record_audit(event)
 
 
 class GraphBuilder:
@@ -141,6 +147,8 @@ class GraphBuilder:
         store: Optional[BaseStore] = None,
         safety_policy: Optional[SafetyPolicy] = None,
         default_agent: Optional[str] = None,
+        orchestration: Optional[Any] = None,
+        orchestration_audit_sink: Optional[Callable[..., Any]] = None,
         **kwargs: Any,
     ) -> None:
         """Initialize GraphBuilder configuration.
@@ -169,6 +177,10 @@ class GraphBuilder:
         self.tool_registry = tool_registry
         self.use_dynamic_orchestrator = use_dynamic_orchestrator
         self.default_agent = default_agent
+        # Pack ``orchestration`` block (PackOrchestrationSpec): fixed routes,
+        # default agent and per-turn limits for the main agent.
+        self.orchestration = orchestration
+        self.orchestration_audit_sink = orchestration_audit_sink
         self.suggestion_model = kwargs.get("suggestion_model")
         self.extra_kwargs = kwargs
 
@@ -223,6 +235,11 @@ class GraphBuilder:
     def with_default_agent(self, agent_id: Optional[str]) -> GraphBuilder:
         """Sets the pack-configured default agent used when routing finds no agent."""
         self.default_agent = agent_id
+        return self
+
+    def with_orchestration(self, orchestration: Optional[Any]) -> GraphBuilder:
+        """Sets the pack orchestration spec (fixed routes, default agent, limits)."""
+        self.orchestration = orchestration
         return self
 
     def with_model(self, model: BaseChatModel) -> GraphBuilder:
@@ -316,6 +333,7 @@ class GraphBuilder:
             AuditNode,
             ErrorNode,
             InputGuardrailNode,
+            MainAgentNode,
             OrchestratorDecision,
             OrchestratorNode,
             OutputGuardrailNode,
@@ -323,22 +341,42 @@ class GraphBuilder:
             RefusalNode,
             ResponseSynthesizerNode,
             SuggestionNode,
-            SupervisorNode,
             ToolNode,
             ToolValidatorNode,
         )
 
         input_guard_node = self._custom_nodes.get("input_guardrail") or InputGuardrailNode(safety_policy=self.safety_policy)
         supervisor_node = self._custom_nodes.get("supervisor") or self._custom_nodes.get("orchestrator")
+        main_agent_node: Optional[Any] = self._custom_nodes.get("main_agent")
         if supervisor_node is None:
             if self.use_dynamic_orchestrator:
+                if (
+                    main_agent_node is None
+                    and self.model is not None
+                    and self.registry is not None
+                    and self.registry.get_delegatable_agents(exclude="")
+                ):
+                    main_agent_node = MainAgentNode(
+                        model=self.model,
+                        registry=self.registry,
+                        orchestration=self.orchestration,
+                        default_agent=self.default_agent,
+                        audit_sink=self.orchestration_audit_sink or _record_orchestration_audit,
+                    )
                 supervisor_node = OrchestratorNode(
                     model=self.model,
                     registry=self.registry,
                     default_agent=self.default_agent,
+                    orchestration=self.orchestration,
+                    main_agent_enabled=main_agent_node is not None,
                 )
             else:
-                supervisor_node = SupervisorNode()
+                supervisor_node = OrchestratorNode(
+                    registry=self.registry,
+                    default_agent=self.default_agent,
+                    orchestration=self.orchestration,
+                    name="supervisor",
+                )
 
         agent_node = self._custom_nodes.get("agent") or self._custom_nodes.get("agent_execution")
         if agent_node is None:
@@ -646,6 +684,8 @@ class GraphBuilder:
         if self.include_synthesizer and synthesizer_node is not None:
             builder.add_node("response_synthesizer", _synthesizer_wrapper)
         builder.add_node("agent", agent_node)
+        if self.include_supervisor and main_agent_node is not None:
+            builder.add_node("main_agent", main_agent_node)
         builder.add_node("tools", _tool_wrapper)
         if self.include_tool_validator:
             builder.add_node("tool_validator", tool_validator_node)
@@ -698,6 +738,8 @@ class GraphBuilder:
                     or ""
                 )
                 target_norm = str(target).lower().replace("-", "_")
+                if target_norm == "main_agent" and main_agent_node is not None:
+                    return "main_agent"
                 for sg_k in self.subgraphs.keys():
                     if sg_k.lower().replace("-", "_") == target_norm or (
                         "extract" in sg_k.lower() and ("extract" in target_norm or "document" in target_norm)
@@ -736,7 +778,22 @@ class GraphBuilder:
                 super_destinations["error"] = "error"
             for sg_k in self.subgraphs.keys():
                 super_destinations[sg_k] = sg_k
+            if main_agent_node is not None:
+                super_destinations["main_agent"] = "main_agent"
             builder.add_conditional_edges("supervisor", route_supervisor, super_destinations)
+
+            if main_agent_node is not None:
+                def route_main_agent(state: AgentState) -> str:
+                    if state.get("next_step") == "error" and self.include_error_node:
+                        return "error"
+                    if state.get("next_step") == "agent":
+                        return "agent"  # default-agent fallback
+                    return "output_guardrail"
+
+                main_destinations = {"agent": "agent", "output_guardrail": "output_guardrail"}
+                if self.include_error_node:
+                    main_destinations["error"] = "error"
+                builder.add_conditional_edges("main_agent", route_main_agent, main_destinations)
 
         # Dispatcher conditional routing
         if self.include_dispatcher and dispatcher_node is not None:
