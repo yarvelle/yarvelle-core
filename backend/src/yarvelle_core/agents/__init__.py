@@ -11,6 +11,18 @@
 
 """Yarvelle Core agents module: declarative registry and catalog formatting."""
 
-from yarvelle_core.agents.registry import AgentRegistry, get_agent_registry
+from yarvelle_core.agents.errors import AgentNotFoundError, DuplicateAgentError, SubagentHookError
+from yarvelle_core.agents.registry import AgentConflict, AgentRegistry, get_agent_registry
+from yarvelle_core.agents.sources import AgentSource, DbAgentSource, FilesystemAgentSource
 
-__all__ = ["AgentRegistry", "get_agent_registry"]
+__all__ = [
+    "AgentConflict",
+    "AgentNotFoundError",
+    "AgentRegistry",
+    "AgentSource",
+    "DbAgentSource",
+    "DuplicateAgentError",
+    "FilesystemAgentSource",
+    "SubagentHookError",
+    "get_agent_registry",
+]

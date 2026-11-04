@@ -12,7 +12,7 @@
 """Delegation meta-tools for dynamic orchestrator routing (Feature F-50 & Milestone 6).
 
 Exports:
-- ListAgentsTool: enables discovery of available specialist agents and capabilities.
+- ListAgentsTool: searches the AgentRegistry catalog for specialist agents and capabilities.
 - DelegateToAgentTool: signals LangGraph dynamic routing to a target specialist agent.
 """
 
@@ -39,17 +39,22 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 class ListAgentsInput(BaseModel):
-    """Input argument schema for ListAgentsTool (parameterless discovery)."""
-    pass
+    """Input argument schema for ListAgentsTool (optional catalog search)."""
+
+    query: str = Field(
+        default="",
+        description="Optional keywords to match against agent ids, titles, descriptions and tags. Empty lists all.",
+    )
+    limit: Optional[int] = Field(default=None, ge=1, le=50, description="Maximum number of agents to return.")
 
 
 class ListAgentsTool(BaseTool):
-    """LangChain tool allowing the Orchestrator to inspect available specialist agents."""
+    """LangChain tool for searching the live agent catalog (AgentRegistry)."""
 
     name: str = TOOL_LIST_AGENTS
     description: str = (
-        "List all available specialist agents and their capabilities from the live agent catalog. "
-        "Use this tool to discover which agent is best suited to handle a specific request."
+        "Search the available specialist agents and their capabilities in the live agent catalog. "
+        "Pass keywords in `query` to narrow the list, or leave it empty to list every agent."
     )
     args_schema: Type[BaseModel] = ListAgentsInput
     registry: Any = None
@@ -57,52 +62,31 @@ class ListAgentsTool(BaseTool):
     def __init__(self, registry: Any = None, **kwargs: Any) -> None:
         super().__init__(registry=registry, **kwargs)
 
-    def _run(self, **kwargs: Any) -> str:
-        """Synchronously format agent catalog from registry."""
-        if self.registry is not None and hasattr(self.registry, "format_agent_catalog"):
-            return self.registry.format_agent_catalog(exclude=AGENT_ORCHESTRATOR)
+    def _registry(self) -> Any:
+        if self.registry is not None:
+            return self.registry
+        from yarvelle_core.agents.registry import get_agent_registry
 
-        # Fallback dynamic discovery using loaders
-        try:
-            from yarvelle_core.config import settings
-            from yarvelle_core.constants.paths import SYSTEM_AGENTS_DIR
-            from yarvelle_core.loaders.agent_loader import load_agent
-            agents_dir = settings.get_agents_dir()
-            skills_dir = settings.get_skills_dir()
-            lines = []
-            candidate_dirs = []
-            for entry in sorted(agents_dir.iterdir()):
-                if not entry.is_dir():
-                    continue
-                if entry.name == SYSTEM_AGENTS_DIR:
-                    for subentry in sorted(entry.iterdir()):
-                        if subentry.is_dir() and not subentry.name.startswith((".", "_")):
-                            candidate_dirs.append(subentry)
-                elif not entry.name.startswith((".", "_")):
-                    candidate_dirs.append(entry)
+        return get_agent_registry()
 
-            for entry in candidate_dirs:
-                if entry.name == AGENT_ORCHESTRATOR:
-                    continue
-                try:
-                    manifest, effective_tools, _ = load_agent(entry, skills_dir)
-                    desc = getattr(manifest, "description", "") or (
-                        manifest.persona.role if hasattr(manifest.persona, "role") else ""
-                    )
-                    tools_str = ", ".join(effective_tools)
-                    lines.append(f"- **{manifest.id}** ({manifest.title}): {desc}\n  Tools: [{tools_str}]")
-                except Exception:
-                    continue
-            if lines:
-                return "\n".join(lines)
-        except Exception as exc:
-            logger.debug("ListAgentsTool fallback discovery note: %s", exc)
-
+    def _run(self, query: str = "", limit: Optional[int] = None, **kwargs: Any) -> str:
+        """Formats matching catalog entries from the registry (the only agent source)."""
+        registry = self._registry()
+        if hasattr(registry, "search"):
+            matches = registry.search(query or "", limit=limit, exclude=AGENT_ORCHESTRATOR)
+            if matches:
+                return registry.format_agent_catalog(agents=matches)
+            if query:
+                return f"No agents match {query!r}. Call list_agents with an empty query to see all agents."
+        elif hasattr(registry, "format_agent_catalog"):
+            catalog = registry.format_agent_catalog(exclude=AGENT_ORCHESTRATOR)
+            if catalog:
+                return catalog
         return "No agents registered. Domain packs register specialist agents via Pack API v1."
 
-    async def _arun(self, **kwargs: Any) -> str:
+    async def _arun(self, query: str = "", limit: Optional[int] = None, **kwargs: Any) -> str:
         """Asynchronous execution delegating to _run."""
-        return self._run(**kwargs)
+        return self._run(query=query, limit=limit, **kwargs)
 
 
 # ============================================================================

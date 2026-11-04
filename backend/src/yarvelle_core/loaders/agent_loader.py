@@ -298,9 +298,6 @@ def load_agent(
             f'Agent ID mismatch: Directory name "{agent_path.name}" does not match manifest ID "{agent.id}".'
         )
 
-    # Validate agent-declared tools against Phase 0 closed registry
-    validate_tools_in_phase0(agent.tools, f'agent "{agent.id}"')
-
     # Resolve skills directory
     if skills_dir:
         resolved_skills_dir = Path(skills_dir).resolve()
@@ -316,6 +313,20 @@ def load_agent(
                 break
         else:
             resolved_skills_dir = (agent_path.parent.parent / SKILLS_DIR).resolve()
+
+    explicit_keys = set(parsed_yaml.keys()) | set(meta_dict.keys())
+    effective_tools, loaded_skills = _resolve_agent_skills(agent, resolved_skills_dir, explicit_keys)
+    return agent, effective_tools, loaded_skills
+
+
+def _resolve_agent_skills(
+    agent: AgentManifest,
+    resolved_skills_dir: Path,
+    explicit_keys: set,
+) -> Tuple[List[str], List[SkillManifest]]:
+    """Validates tools, loads declared skills and derives effective tools (shared by file and record loaders)."""
+    # Validate agent-declared tools against Phase 0 closed registry
+    validate_tools_in_phase0(agent.tools, f'agent "{agent.id}"')
 
     # Load and validate declared skills
     loaded_skills: List[SkillManifest] = []
@@ -339,17 +350,45 @@ def load_agent(
     # Populate domain, category, risk_class from primary skill if not explicit
     primary_skill = loaded_skills[0] if loaded_skills else None
     if primary_skill:
-        if "domain" not in parsed_yaml and "domain" not in meta_dict:
+        if "domain" not in explicit_keys:
             agent.domain = primary_skill.domain
-        if "category" not in parsed_yaml and "category" not in meta_dict:
+        if "category" not in explicit_keys:
             agent.category = primary_skill.category
-        if "risk_class" not in parsed_yaml and "risk_class" not in meta_dict:
+        if "risk_class" not in explicit_keys:
             agent.risk_class = primary_skill.risk_class
 
     # Risk class elevation: if any declared skill is clinical_assist, agent is clinical_assist
     if any(s.risk_class == RiskClass.CLINICAL_ASSIST for s in loaded_skills):
         agent.risk_class = RiskClass.CLINICAL_ASSIST
 
+    return effective_tools, loaded_skills
+
+
+def load_agent_from_record(
+    record: Dict[str, Any],
+    skills_dir: Optional[Union[Path, str]] = None,
+) -> Tuple[AgentManifest, List[str], List[SkillManifest]]:
+    """Validates a stored (non-file) agent definition, such as a database row, like an agent.yaml.
+
+    ``record`` holds AgentManifest fields. Raises ManifestValidationError or
+    ToolValidationError on invalid input; never substitutes defaults for an id.
+    """
+    data = {k: v for k, v in dict(record).items() if v is not None}
+    data.setdefault("title", str(data.get("id", "")).replace("-", " ").title())
+    raw_model = data.get("model")
+    if isinstance(raw_model, str) and raw_model and ":" not in raw_model:
+        data["model"] = f"ollama:{raw_model}"
+    try:
+        agent = AgentManifest(**data)
+    except ValidationError as err:
+        issues = ", ".join(f"{e['loc']}: {e['msg']}" for e in err.errors())
+        raise ManifestValidationError(f'Invalid stored agent "{record.get("id")}": {issues}') from err
+    if skills_dir is None and agent.skills:
+        raise ManifestValidationError(
+            f'Stored agent "{agent.id}" declares skills but no skills directory was given'
+        )
+    resolved_skills_dir = Path(skills_dir).resolve() if skills_dir else Path()
+    effective_tools, loaded_skills = _resolve_agent_skills(agent, resolved_skills_dir, set(data.keys()))
     return agent, effective_tools, loaded_skills
 
 
