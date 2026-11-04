@@ -9,11 +9,11 @@
 #
 # Required Notice: Copyright 2026 Spectrayan (https://spectrayan.com)
 
-"""Runtime auto-migration service for Yarvelle Core home storage isolation (~/.carefold).
+"""Runtime auto-migration service for Yarvelle Core home storage isolation (~/.yarvelle).
 
-Migrates legacy repository assets (workspace/carefold.db, workspace/chats/checkpoints.db,
+Migrates legacy repository assets (workspace/yarvelle_core.db, workspace/chats/checkpoints.db,
 workspace/notes/*.md, and logs/audit.jsonl) into the user-isolated home directory.
-Operates idempotently via ~/.carefold/.migration_done sentinel.
+Operates idempotently via ~/.yarvelle/.migration_done sentinel.
 """
 
 from __future__ import annotations
@@ -41,10 +41,10 @@ REQUIRED_DISK_HEADROOM_BYTES = 2_500_000_000  # 2.5 GB safety buffer
 
 
 def run_first_launch_migration(home_dir: Path, workspace_root: Path) -> bool:
-    """Executes safe, idempotent migration from workspace_root to home_dir (~/.carefold).
+    """Executes safe, idempotent migration from workspace_root to home_dir (~/.yarvelle).
 
     Args:
-        home_dir: Canonical home directory for Yarvelle Core data (e.g. ~/.carefold).
+        home_dir: Canonical home directory for Yarvelle Core data (e.g. ~/.yarvelle).
         workspace_root: Repository or execution workspace root.
 
     Returns:
@@ -111,7 +111,7 @@ def run_first_launch_migration(home_dir: Path, workspace_root: Path) -> bool:
         cp_result = _migrate_checkpoints_db(workspace_root, home_dir)
         migration_report["databases"]["checkpoints_db"] = cp_result
 
-        # 2. Migrate carefold.db and Ingest Notes
+        # 2. Migrate yarvelle_core.db and Ingest Notes
         db_result = _migrate_yarvelle_db_and_notes(workspace_root, home_dir)
         migration_report["databases"]["yarvelle_db"] = db_result["database"]
         migration_report["notes"] = db_result["notes"]
@@ -140,7 +140,7 @@ def run_first_launch_migration(home_dir: Path, workspace_root: Path) -> bool:
 
 
 def _ensure_directory_tree(home_dir: Path) -> None:
-    """Pre-creates ~/.carefold directory structure with secure permissions."""
+    """Pre-creates ~/.yarvelle directory structure with secure permissions."""
     home_dir.mkdir(parents=True, exist_ok=True)
     (home_dir / "uploads").mkdir(exist_ok=True)
     (home_dir / "logs").mkdir(exist_ok=True)
@@ -230,7 +230,7 @@ def _retire_migrated_source(source_path: Path) -> None:
 
 
 def _migrate_checkpoints_db(workspace_root: Path, home_dir: Path) -> Dict[str, Any]:
-    """Migrates large LangGraph checkpoints.db (~1.1GB) to ~/.carefold/checkpoints.db."""
+    """Migrates large LangGraph checkpoints.db (~1.1GB) to ~/.yarvelle/checkpoints.db."""
     target_path = home_dir / "checkpoints.db"
     if target_path.is_file():
         return {"migrated": False, "reason": "already_exists", "size_bytes": target_path.stat().st_size}
@@ -258,7 +258,7 @@ def _migrate_checkpoints_db(workspace_root: Path, home_dir: Path) -> Dict[str, A
 
 
 def _migrate_catalog_db(workspace_root: Path, home_dir: Path) -> Dict[str, Any]:
-    """Migrates catalog.db to ~/.carefold/catalog.db."""
+    """Migrates catalog.db to ~/.yarvelle/catalog.db."""
     target_path = home_dir / "catalog.db"
     if target_path.is_file():
         return {"migrated": False, "reason": "already_exists"}
@@ -284,7 +284,7 @@ def _migrate_catalog_db(workspace_root: Path, home_dir: Path) -> Dict[str, Any]:
 
 
 def _migrate_yarvelle_db_and_notes(workspace_root: Path, home_dir: Path) -> Dict[str, Any]:
-    """Copies workspace/carefold.db, ingests 31 loose markdown notes, and verifies integrity."""
+    """Copies workspace/yarvelle_core.db, ingests 31 loose markdown notes, and verifies integrity."""
     target_db = home_dir / "yarvelle_core.db"
     candidate_sources = [
         workspace_root / "workspace" / "yarvelle_core.db",
@@ -300,7 +300,7 @@ def _migrate_yarvelle_db_and_notes(workspace_root: Path, home_dir: Path) -> Dict
     db_report: Dict[str, Any] = {"migrated": False}
     notes_report: Dict[str, Any] = {"ingested_count": 0, "scanned_files": 0}
 
-    # If carefold.db does not exist at destination, stage and copy from source
+    # If yarvelle_core.db does not exist at destination, stage and copy from source
     if not target_db.is_file() and source_db:
         chk_res = _checkpoint_sqlite_database(source_db)
         tmp_db = target_db.with_suffix(".db.tmp")
@@ -317,7 +317,7 @@ def _migrate_yarvelle_db_and_notes(workspace_root: Path, home_dir: Path) -> Dict
             with sqlite3.connect(str(tmp_db)) as conn:
                 res = conn.execute("PRAGMA integrity_check;").fetchall()
                 if res != [("ok",)]:
-                    raise RuntimeError(f"Integrity check failed for staged carefold.db: {res}")
+                    raise RuntimeError(f"Integrity check failed for staged yarvelle_core.db: {res}")
 
             tmp_db.replace(target_db)
             db_report = {
@@ -505,7 +505,7 @@ def _parse_markdown_note(file_path: Path) -> Dict[str, Any]:
 
 
 def _migrate_audit_log(workspace_root: Path, home_dir: Path) -> Dict[str, Any]:
-    """Merges root and workspace audit logs into ~/.carefold/logs/audit.jsonl."""
+    """Merges root and workspace audit logs into ~/.yarvelle/logs/audit.jsonl."""
     target_log = home_dir / "logs" / "audit.jsonl"
     if target_log.is_file() and target_log.stat().st_size > 0:
         return {"migrated": False, "reason": "already_exists"}
@@ -551,7 +551,7 @@ def _migrate_audit_log(workspace_root: Path, home_dir: Path) -> Dict[str, Any]:
 
 
 def _migrate_attachments(workspace_root: Path, home_dir: Path) -> Dict[str, Any]:
-    """Copies any existing legacy attachments to ~/.carefold/uploads/."""
+    """Copies any existing legacy attachments to ~/.yarvelle/uploads/."""
     uploads_dir = home_dir / "uploads"
     candidate_dirs = [
         workspace_root / "attachments",

@@ -12,9 +12,13 @@
 """Key Encryption Key (KEK) Provider Hierarchy for Yarvelle Core Vault.
 
 Implements the 4-tier KEK resolution hierarchy:
-1. Mode L OS Keychain: keyring.get_password("yarvelle_vault", "kek_master")
-2. Mode S Mounted Secret File: path from CAREFOLD_VAULT_KEK_FILE (32 raw bytes or 64 hex chars)
+1. Mode L OS Keychain: keyring.get_password(identity.keyring_service(), "kek_master")
+2. Mode S Mounted Secret File: path from <PREFIX>_VAULT_KEK_FILE (32 raw bytes or 64 hex chars)
 3. Argon2id Passphrase Fallback: 32-byte key derivation (Type ID, 64MB memory, 3 iterations, 4 parallelism, 16-byte salt)
+
+The salt and keychain names come from ``yarvelle_core.identity`` (``<PREFIX>_VAULT_SALT``,
+``<PREFIX>_KEYRING_SERVICE``, ``<PREFIX>_KEYRING_ALT_USERNAME``). An application with
+existing vaults must keep setting the values it was created with.
 4. Fail-closed: missing, empty, or inaccessible KEK raises VaultLockedError.
 """
 
@@ -22,6 +26,8 @@ from __future__ import annotations
 
 import logging
 import os
+
+from yarvelle_core import identity
 from pathlib import Path
 from typing import Dict, Literal, Optional, Protocol
 
@@ -32,7 +38,8 @@ from yarvelle_core.vault.errors import KeyDerivationError, VaultLockedError
 
 logger = logging.getLogger("yarvelle_core.vault.kek")
 
-DEFAULT_ARGON2_SALT = b"carefold_kek_sal"  # Exactly 16 bytes (128-bit fixed instance salt)
+# Neutral default (16 bytes). The active salt is ``identity.vault_salt()``.
+DEFAULT_ARGON2_SALT = identity.DEFAULT_VAULT_SALT.encode("utf-8")
 
 try:
     import keyring
@@ -50,12 +57,13 @@ class KekProvider(Protocol):
         ...
 
 
-def derive_argon2id_kek(passphrase: str, salt: bytes = DEFAULT_ARGON2_SALT) -> bytes:
+def derive_argon2id_kek(passphrase: str, salt: Optional[bytes] = None) -> bytes:
     """Derive a 256-bit (32-byte) KEK from an interactive passphrase using Argon2id.
 
     Args:
         passphrase: User-supplied master passphrase.
-        salt: Salt bytes (truncated or padded to exactly 16 bytes).
+        salt: Salt bytes (truncated or padded to exactly 16 bytes). Defaults to
+            ``identity.vault_salt()``.
 
     Returns:
         32 raw bytes derived encryption key.
@@ -67,6 +75,8 @@ def derive_argon2id_kek(passphrase: str, salt: bytes = DEFAULT_ARGON2_SALT) -> b
     if not passphrase or not passphrase.strip():
         raise VaultLockedError("Passphrase cannot be empty for KEK derivation.")
 
+    if salt is None:
+        salt = identity.vault_salt()
     clean_salt = bytes(salt)[:16].ljust(16, b"0")
 
     try:
@@ -128,8 +138,8 @@ def resolve_kek(
     """Resolve the master KEK through the 4-tier precedence hierarchy.
 
     Hierarchy:
-    1. Mode L OS Keychain: Queries keyring.get_password("yarvelle_vault", "kek_master")
-    2. Mode S Mounted Secret File: Reads CAREFOLD_VAULT_KEK_FILE or kek_file_path
+    1. Mode L OS Keychain: Queries keyring.get_password(identity.keyring_service(), "kek_master")
+    2. Mode S Mounted Secret File: Reads <PREFIX>_VAULT_KEK_FILE or kek_file_path
     3. Argon2id Passphrase Fallback: Derives 32-byte key via derive_argon2id_kek
     4. Fail-closed: Raises VaultLockedError if missing or inaccessible.
 
@@ -172,8 +182,8 @@ def resolve_kek(
         elif HAS_KEYRING and keyring is not None:
             try:
                 raw_str = (
-                    keyring.get_password("carefold_vault", "kek_master")
-                    or keyring.get_password("carefold_vault", "carefold_kek")
+                    keyring.get_password(identity.keyring_service(), "kek_master")
+                    or keyring.get_password(identity.keyring_service(), identity.keyring_alt_username())
                 )
                 if raw_str and raw_str.strip():
                     cleaned = raw_str.strip()
@@ -194,16 +204,16 @@ def resolve_kek(
                 logger.warning("OS keychain lookup failed in Mode L: %s", exc)
 
     # 2. Mode S: Mounted Secret File
-    kek_env_file = kek_file_path or os.environ.get("CAREFOLD_VAULT_KEK_FILE")
+    kek_env_file = kek_file_path or identity.getenv("VAULT_KEK_FILE")
     if kek_env_file:
         return _resolve_from_secret_file(kek_env_file)
     elif mode == "server" and not passphrase:
         raise VaultLockedError(
-            "Mode S server requires CAREFOLD_VAULT_KEK_FILE or mounted secret file. Fail-closed."
+            f"Mode S server requires {identity.env_name('VAULT_KEK_FILE')} or mounted secret file. Fail-closed."
         )
 
     # 3. Interactive Passphrase Fallback (Argon2id)
-    resolved_passphrase = passphrase or os.environ.get("CAREFOLD_VAULT_PASSPHRASE")
+    resolved_passphrase = passphrase or identity.getenv("VAULT_PASSPHRASE")
     if resolved_passphrase is not None:
         return derive_argon2id_kek(resolved_passphrase)
 
@@ -215,6 +225,6 @@ def resolve_kek(
 
 def get_kek() -> bytes:
     """Convenience entry point resolving KEK for production runtime using active environment."""
-    mode_str = os.environ.get("CAREFOLD_MODE", "local").lower()
+    mode_str = identity.getenv("MODE", "local").lower()
     mode: Literal["local", "server"] = "server" if mode_str in ("server", "s") else "local"
     return resolve_kek(mode=mode)

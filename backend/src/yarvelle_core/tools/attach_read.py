@@ -187,7 +187,7 @@ async def execute_attach_read(params: Dict[str, Any], context: Any) -> ToolResul
     1. Fail-closed ToolContext requirement: non-empty user_id and profile_id are mandatory.
     2. Zero root directory fallback: never falls back to root base_dir.
     3. Strict cross-profile blocking: reject cross-profile attempts immediately.
-    4. Database-grounded resolution: verifies attachment record in carefold.db when DB is active.
+    4. Database-grounded resolution: verifies attachment record in yarvelle_core.db when DB is active.
     5. Content-Addressed Storage (CAS) resolution: queries <yarvelle_home>/data/files/<uid>/<pid>/<sha256>.
     6. Cached plain-text fast path: returns extracted_text from DB when available.
     """

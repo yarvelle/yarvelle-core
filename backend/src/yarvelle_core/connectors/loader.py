@@ -17,6 +17,7 @@ import importlib
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
+from yarvelle_core import identity
 from yarvelle_core.connectors.base import Connector
 from yarvelle_core.connectors.errors import ConnectorError
 from yarvelle_core.connectors.manifest import ConnectorManifest
@@ -30,7 +31,7 @@ def _build_starter_factories() -> Dict[str, Callable[[ConnectorManifest], Connec
         "google-calendar": lambda manifest: GoogleCalendarConnector(manifest=manifest),
         "caldav": lambda manifest: CalDavConnector(manifest=manifest),
     }
-    for pkg_prefix in ("carefold", "carefold_health"):
+    for pkg_prefix in identity.pack_packages():
         try:
             epic_mod = importlib.import_module(f"{pkg_prefix}.connectors.starters.epic_smart")
             withings_mod = importlib.import_module(f"{pkg_prefix}.connectors.starters.withings")
@@ -56,7 +57,7 @@ def _build_starter_factories() -> Dict[str, Callable[[ConnectorManifest], Connec
 
 def _extra_manifest_dirs() -> List[Path]:
     dirs: List[Path] = []
-    for pkg_prefix in ("carefold", "carefold_health"):
+    for pkg_prefix in identity.pack_packages():
         try:
             mod = importlib.import_module(f"{pkg_prefix}.connectors.starters")
             if getattr(mod, "__file__", None):

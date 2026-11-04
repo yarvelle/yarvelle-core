@@ -34,7 +34,6 @@ def isolate_test_yarvelle_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     (test_home / "logs").mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setenv("YARVELLE_HOME", str(test_home))
-    monkeypatch.setenv("CAREFOLD_HOME", str(test_home))
     monkeypatch.setenv("YARVELLE_DATABASE_URL", f"sqlite+aiosqlite:///{test_home}/yarvelle.db")
 
     if hasattr(settings, "home_dir"):

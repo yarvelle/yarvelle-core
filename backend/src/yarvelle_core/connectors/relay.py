@@ -14,7 +14,7 @@
 Provides a zero-storage, HMAC-SHA256 state-sealed callback bounce mechanism
 that validates short-lived (`<= 120s` TTL) relay tickets in constant time,
 enforces single-use nonce replay protection, and constructs a strict
-loopback (`http://127.0.0.1:...`) or companion (`carefold://...`) redirect
+loopback (`http://127.0.0.1:...`) or companion (`<url_scheme>://...`) redirect
 without ever exchanging or persisting OAuth tokens or PHI.
 """
 
@@ -28,6 +28,7 @@ import json
 import secrets
 from typing import Any, Dict, Optional, Set, Union
 from urllib.parse import urlparse
+from yarvelle_core import identity
 
 MAX_RELAY_TICKET_TTL_SECONDS: int = 120
 DEFAULT_RELAY_TICKET_TTL_SECONDS: int = 120
@@ -59,11 +60,11 @@ def _normalize_secret_key(secret_key: Union[bytes, str]) -> bytes:
 
 
 def validate_relay_callback_target(loopback_callback_url: str) -> str:
-    """Validates that a callback URL is strictly local loopback or `carefold://` companion scheme.
+    """Validates that a callback URL is strictly local loopback or the app companion URL scheme.
 
     Allowed targets:
     - `http://127.0.0.1(:port)/...`
-    - `carefold://...`
+    - `<url_scheme>://...` (see `identity.url_scheme()`)
 
     Raises:
         ValueError: If the target URL uses an untrusted host, scheme, or contains userinfo.
@@ -78,9 +79,9 @@ def validate_relay_callback_target(loopback_callback_url: str) -> str:
     if parsed.username or parsed.password:
         raise ValueError("loopback_callback_url must not contain userinfo credentials.")
 
-    if scheme == "yarvelle_core":
+    if scheme == identity.url_scheme():
         if not parsed.netloc and not parsed.path:
-            raise ValueError("carefold:// callback URL must specify a target path or host.")
+            raise ValueError(f"{scheme}:// callback URL must specify a target path or host.")
         return clean_url
 
     if scheme == "http":
@@ -95,7 +96,7 @@ def validate_relay_callback_target(loopback_callback_url: str) -> str:
 
     raise ValueError(
         f"Unsupported relay callback URL '{loopback_callback_url}'. "
-        "Only 'http://127.0.0.1:...' or 'carefold://...' targets are permitted."
+        f"Only 'http://127.0.0.1:...' or '{identity.url_scheme()}://...' targets are permitted."
     )
 
 
@@ -115,7 +116,7 @@ def create_relay_ticket(
         user_id: Initiating user identifier.
         profile_id: Target care profile identifier.
         connection_id: Target connection identifier.
-        loopback_callback_url: Validated `http://127.0.0.1:...` or `carefold://...` target URL.
+        loopback_callback_url: Validated `http://127.0.0.1:...` or `<url_scheme>://...` target URL.
         secret_key: HMAC-SHA256 signing key.
         ttl_seconds: Ticket lifetime in seconds (must be in `1..120`, default `120`).
         now_ts: Optional override timestamp for deterministic testing.

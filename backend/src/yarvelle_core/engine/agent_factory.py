@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 import yaml
 
+from yarvelle_core import identity
 from yarvelle_core.constants.paths import AGENTS_DIR, SKILLS_DIR
 from yarvelle_core.loaders.agent_loader import load_subagent_from_yaml
 from yarvelle_core.middleware.skills import create_yarvelle_skills_middleware
@@ -90,7 +91,7 @@ def create_yarvelle_agent(
     # Register harness profile if present
     profile_path = ws / "yarvelle-profile.yaml"
     if not profile_path.is_file():
-        profile_path = ws / "carefold-profile.yaml"
+        profile_path = ws / f"{identity.app_slug()}-profile.yaml"
 
     if profile_path.is_file() and HarnessProfileConfig is not None and register_harness_profile is not None:
         try:

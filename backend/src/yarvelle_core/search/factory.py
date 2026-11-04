@@ -16,6 +16,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+
+from yarvelle_core import identity
 from pathlib import Path
 import socket
 from typing import Any, Dict, Optional, Union
@@ -63,13 +65,13 @@ def create_search_index(
 
     Resolution Priority:
     1. Explicit `backend` argument.
-    2. Environment variable `CAREFOLD_SEARCH_BACKEND`.
+    2. Environment variable `YARVELLE_SEARCH_BACKEND`.
     3. Auto-detection: If Spector is configured and reachable via socket check, selects 'spector'.
        Otherwise transparently falls back to 'sqlite'.
     """
     cfg = settings or global_settings
 
-    raw_backend = backend or os.getenv("CAREFOLD_SEARCH_BACKEND")
+    raw_backend = backend or identity.getenv("SEARCH_BACKEND")
     selected_backend: Optional[str] = raw_backend.lower().strip() if raw_backend else None
 
     target_url = (spector_url or getattr(cfg, "spector_url", "http://localhost:7070")).rstrip("/")
@@ -136,7 +138,7 @@ def get_search_index(
             _search_indexes[_CACHED_SEARCH_INDEX.__class__.__name__] = _CACHED_SEARCH_INDEX
         return _CACHED_SEARCH_INDEX
 
-    target_backend = (os.getenv("CAREFOLD_SEARCH_BACKEND") or "").lower().strip()
+    target_backend = (identity.getenv("SEARCH_BACKEND") or "").lower().strip()
     if _CACHED_SEARCH_INDEX is not None:
         is_spector = _CACHED_SEARCH_INDEX.__class__.__name__ == "SpectorSearchIndex"
         if target_backend == SEARCH_BACKEND_SPECTOR and is_spector:

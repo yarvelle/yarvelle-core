@@ -13,8 +13,8 @@
 
 Generates user-level background daemon definitions for:
 - macOS `launchd` (`~/Library/LaunchAgents/com.spectrayan.yarvelle.plist`)
-- Linux `systemd --user` (`~/.config/systemd/user/carefold.service`)
-- Windows Task Scheduler (`%USERPROFILE%\\.carefold\\carefold-task.xml`)
+- Linux `systemd --user` (`~/.config/systemd/user/yarvelle.service`)
+- Windows Task Scheduler (`%USERPROFILE%\\.yarvelle\\yarvelle-task.xml`)
 
 All descriptors bind strictly to `127.0.0.1` by default (`Mode L` privacy boundary)
 and configure automatic crash recovery (`KeepAlive` / `Restart=on-failure`).
@@ -34,14 +34,14 @@ def _validate_port(port: int) -> int:
 
 
 def generate_macos_launchd_plist(
-    yarvelle_bin: str = "/usr/local/bin/carefold",
-    working_dir: str = "~/.carefold",
+    yarvelle_bin: str = "/usr/local/bin/yarvelle",
+    working_dir: str = "~/.yarvelle",
     port: int = 8000,
 ) -> Dict[str, str]:
     """Generates a macOS `launchd` LaunchAgent plist descriptor bound to `127.0.0.1`."""
     valid_port = _validate_port(port)
-    escaped_bin = xml_escape((yarvelle_bin or "/usr/local/bin/carefold").strip())
-    escaped_dir = xml_escape((working_dir or "~/.carefold").strip())
+    escaped_bin = xml_escape((yarvelle_bin or "/usr/local/bin/yarvelle").strip())
+    escaped_dir = xml_escape((working_dir or "~/.yarvelle").strip())
 
     content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -66,9 +66,9 @@ def generate_macos_launchd_plist(
     <true/>
     <key>EnvironmentVariables</key>
     <dict>
-        <key>CAREFOLD_HOST</key>
+        <key>YARVELLE_HOST</key>
         <string>127.0.0.1</string>
-        <key>CAREFOLD_PORT</key>
+        <key>YARVELLE_PORT</key>
         <string>{valid_port}</string>
     </dict>
 </dict>
@@ -84,24 +84,24 @@ def generate_macos_launchd_plist(
 
 
 def generate_linux_systemd_unit(
-    yarvelle_bin: str = "/usr/local/bin/carefold",
-    working_dir: str = "%h/.carefold",
+    yarvelle_bin: str = "/usr/local/bin/yarvelle",
+    working_dir: str = "%h/.yarvelle",
     port: int = 8000,
 ) -> Dict[str, str]:
     """Generates a Linux `systemd --user` unit descriptor bound to `127.0.0.1`."""
     valid_port = _validate_port(port)
-    clean_bin = (yarvelle_bin or "/usr/local/bin/carefold").strip()
-    clean_dir = (working_dir or "%h/.carefold").strip()
+    clean_bin = (yarvelle_bin or "/usr/local/bin/yarvelle").strip()
+    clean_dir = (working_dir or "%h/.yarvelle").strip()
 
     content = f"""[Unit]
-Description=Yarvelle Core Local-First Healthcare AI Runtime
+Description=Yarvelle Core Local-First AI Runtime
 After=network.target
 
 [Service]
 Type=simple
 WorkingDirectory={clean_dir}
-Environment="CAREFOLD_HOST=127.0.0.1"
-Environment="CAREFOLD_PORT={valid_port}"
+Environment="YARVELLE_HOST=127.0.0.1"
+Environment="YARVELLE_PORT={valid_port}"
 ExecStart={clean_bin} serve --host 127.0.0.1 --port {valid_port}
 Restart=on-failure
 RestartSec=5
@@ -112,26 +112,26 @@ WantedBy=default.target
     return {
         "platform": "linux_systemd",
         "filename": "yarvelle_core.service",
-        "install_path": "~/.config/systemd/user/carefold.service",
+        "install_path": "~/.config/systemd/user/yarvelle.service",
         "content": content,
-        "install_command": "systemctl --user enable --now carefold.service",
+        "install_command": "systemctl --user enable --now yarvelle.service",
     }
 
 
 def generate_windows_task_xml(
-    yarvelle_bin: str = "C:\\Program Files\\Yarvelle Core\\carefold.exe",
-    working_dir: str = "%USERPROFILE%\\.carefold",
+    yarvelle_bin: str = "C:\\Program Files\\Yarvelle Core\\yarvelle.exe",
+    working_dir: str = "%USERPROFILE%\\.yarvelle",
     port: int = 8000,
 ) -> Dict[str, str]:
     """Generates a Windows Task Scheduler XML definition bound to `127.0.0.1`."""
     valid_port = _validate_port(port)
-    escaped_bin = xml_escape((yarvelle_bin or "C:\\Program Files\\Yarvelle Core\\carefold.exe").strip())
-    escaped_dir = xml_escape((working_dir or "%USERPROFILE%\\.carefold").strip())
+    escaped_bin = xml_escape((yarvelle_bin or "C:\\Program Files\\Yarvelle Core\\yarvelle.exe").strip())
+    escaped_dir = xml_escape((working_dir or "%USERPROFILE%\\.yarvelle").strip())
 
     content = f"""<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
-    <Description>Yarvelle Core Local-First Healthcare AI Runtime</Description>
+    <Description>Yarvelle Core Local-First AI Runtime</Description>
   </RegistrationInfo>
   <Triggers>
     <LogonTrigger>
@@ -159,10 +159,10 @@ def generate_windows_task_xml(
 """
     return {
         "platform": "windows_task_scheduler",
-        "filename": "carefold-task.xml",
-        "install_path": "%USERPROFILE%\\.carefold\\carefold-task.xml",
+        "filename": "yarvelle-task.xml",
+        "install_path": "%USERPROFILE%\\.yarvelle\\yarvelle-task.xml",
         "content": content,
-        "install_command": "schtasks /Create /XML carefold-task.xml /TN Yarvelle CoreRuntime",
+        "install_command": "schtasks /Create /XML yarvelle-task.xml /TN Yarvelle CoreRuntime",
     }
 
 

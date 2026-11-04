@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from yarvelle_core import identity
 from yarvelle_core.api.deps import get_current_user, get_db, resolve_owner_user_id
 from yarvelle_core.api.deps import get_user_profile_access
 from yarvelle_core.auth.ports import UserProfile
@@ -460,7 +461,7 @@ async def create_profile_connection(
         )
         authorization_url = build_authorization_url(
             authorization_endpoint=auth_endpoint,
-            client_id=payload.client_id or f"carefold-{connection.connector_id}",
+            client_id=payload.client_id or f"{identity.oauth_client_prefix()}-{connection.connector_id}",
             redirect_uri=redirect_uri,
             state=state_token,
             code_challenge=code_challenge,

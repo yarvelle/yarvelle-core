@@ -19,6 +19,7 @@ from fastapi import Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from yarvelle_core import identity
 from yarvelle_core.auth.adapters.disabled_adapter import (
     DEFAULT_STEWARD_USER,
     DisabledAuthAdapter,
@@ -87,7 +88,7 @@ async def get_current_user(
             token = auth_header.strip()
 
     if not token:
-        token = request.cookies.get("yarvelle_session") or request.cookies.get("carefold_session")
+        token = request.cookies.get(identity.session_cookie_name())
 
 
     if not token:

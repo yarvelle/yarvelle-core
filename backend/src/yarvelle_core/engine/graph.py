@@ -441,9 +441,9 @@ def resolve_checkpointer_path(
 
     Precedence:
     1. settings.db_path if explicitly set
-    2. CAREFOLD_DB_PATH environment variable
+    2. YARVELLE_DB_PATH environment variable
     3. Explicit non-repository workspace_root parameter or existing workspace checkpoints file
-    4. Canonical home directory: settings.get_checkpointer_path() (~/.carefold/checkpoints.db)
+    4. Canonical home directory: settings.get_checkpointer_path() (~/.yarvelle/checkpoints.db)
     """
     if settings.db_path is not None:
         db_path = settings.db_path.resolve()

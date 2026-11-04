@@ -149,7 +149,7 @@ async def record_audit(
 
     Guarantees:
     1. Zero-Body redaction by default (strips prompt and completion unless store_bodies is True).
-    2. Primary persistence to AuditEventRecord in carefold.db via get_session_factory().
+    2. Primary persistence to AuditEventRecord in yarvelle_core.db via get_session_factory().
     3. SHA-256 payload hash computed over canonical JSON representation for tool calls and actions.
     4. Optional secondary sink writing to logs/audit.jsonl.
     5. Non-blocking fault isolation: Database or disk write errors do not crash caller requests.

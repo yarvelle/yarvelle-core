@@ -17,6 +17,7 @@ import logging
 from typing import Any, Dict, List, Optional, Union
 import urllib.parse
 
+from yarvelle_core import identity
 from yarvelle_core.auth.adapters.sql_adapter import SqlAuthAdapter
 from yarvelle_core.auth.ports import (
     AuthPort,
@@ -45,9 +46,9 @@ class OidcAuthAdapter(AuthPort):
         allowed_providers: Optional[List[str]] = None,
     ) -> None:
         self.sql_adapter = sql_adapter or SqlAuthAdapter()
-        self.client_id = client_id or "carefold-client-id"
+        self.client_id = client_id or f"{identity.oauth_client_prefix()}-client-id"
         self.client_secret = client_secret
-        self.issuer_url = issuer_url or "https://auth.carefold.local"
+        self.issuer_url = issuer_url or f"https://auth.{identity.local_domain()}"
         self.allowed_providers = set(allowed_providers or ["google", "github", "keycloak"])
 
     def get_authorization_url(self, provider: str, redirect_uri: str, state: str) -> str:

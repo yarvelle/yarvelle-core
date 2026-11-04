@@ -26,6 +26,8 @@ from __future__ import annotations
 import html
 import logging
 import os
+
+from yarvelle_core import identity
 import re
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 from urllib.parse import urlparse
@@ -235,7 +237,7 @@ async def _load_profile_phi_context(
 
 def _resolve_provider_and_url(args: Dict[str, Any]) -> Tuple[str, str, str]:
     """Resolves search provider, target URL, and verifies host against allowlist."""
-    provider = str(args.get("provider") or os.getenv("CAREFOLD_SEARCH_PROVIDER", "searxng")).strip().lower()
+    provider = str(args.get("provider") or identity.getenv("SEARCH_PROVIDER", "searxng")).strip().lower()
     if provider not in ("searxng", "brave"):
         raise ValueError(f"Unsupported search provider '{provider}'. Supported: 'searxng', 'brave'.")
 
@@ -243,19 +245,19 @@ def _resolve_provider_and_url(args: Dict[str, Any]) -> Tuple[str, str, str]:
     if explicit_url and str(explicit_url).strip():
         target_url = str(explicit_url).strip()
     elif provider == "brave":
-        target_url = os.getenv(
-            "CAREFOLD_BRAVE_SEARCH_URL",
+        target_url = identity.getenv(
+            "BRAVE_SEARCH_URL",
             "https://api.search.brave.com/res/v1/web/search",
         )
     else:
-        base_searx = os.getenv("CAREFOLD_SEARXNG_URL", "https://searx.be").strip().rstrip("/")
+        base_searx = identity.getenv("SEARXNG_URL", "https://searx.be").strip().rstrip("/")
         target_url = base_searx if base_searx.endswith("/search") else f"{base_searx}/search"
 
     parsed = urlparse(target_url if "://" in target_url else f"https://{target_url}")
     target_host = (parsed.hostname or "").strip().lower()
 
     allowed = set(h.lower() for h in DEFAULT_ALLOWED_SEARCH_HOSTS)
-    env_hosts = os.getenv("CAREFOLD_ALLOWED_SEARCH_HOSTS", "")
+    env_hosts = identity.getenv("ALLOWED_SEARCH_HOSTS", "")
     if env_hosts.strip():
         for h in env_hosts.split(","):
             if h.strip():
@@ -282,7 +284,7 @@ async def _fetch_search_results(
     params: Dict[str, Any] = {"q": sanitized_query}
 
     if provider == "brave":
-        api_key = os.getenv("CAREFOLD_BRAVE_API_KEY") or os.getenv("BRAVE_API_KEY") or ""
+        api_key = identity.getenv("BRAVE_API_KEY") or os.getenv("BRAVE_API_KEY") or ""
         if api_key:
             headers["X-Subscription-Token"] = api_key
         params["count"] = max_results
