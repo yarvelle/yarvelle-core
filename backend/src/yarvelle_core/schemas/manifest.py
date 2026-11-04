@@ -187,7 +187,10 @@ class AgentManifest(BaseModel):
     risk_class: RiskClass = RiskClass.WELLNESS
     domain: AgentDomain = AgentDomain.WELLNESS
     category: str = ""
-    care_stages: List[str] = Field(default_factory=list)
+    extensions: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Pack-defined catalog fields (for example UI facets) that core stores but does not interpret.",
+    )
     target_audience: List[str] = Field(default_factory=list)
     tags: List[str] = Field(default_factory=list)
     icon: str = "Shield"
@@ -298,7 +301,10 @@ class AgentSummary(BaseModel):
     risk_class: str = "wellness"
     domain: AgentDomain = AgentDomain.WELLNESS
     category: str = ""
-    care_stages: List[str] = Field(default_factory=list)
+    extensions: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Pack-defined catalog fields (for example UI facets) that core stores but does not interpret.",
+    )
     target_audience: List[str] = Field(default_factory=list)
     tags: List[str] = Field(default_factory=list)
     icon: str = "Shield"
@@ -346,7 +352,10 @@ class AgentDetailResponse(BaseModel):
     risk_class: str = "wellness"
     domain: AgentDomain = AgentDomain.WELLNESS
     category: str = ""
-    care_stages: List[str] = Field(default_factory=list)
+    extensions: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Pack-defined catalog fields (for example UI facets) that core stores but does not interpret.",
+    )
     target_audience: List[str] = Field(default_factory=list)
     tags: List[str] = Field(default_factory=list)
     icon: str = "Shield"
