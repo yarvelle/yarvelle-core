@@ -33,11 +33,9 @@ from langchain_core.messages import (
 
 from yarvelle_core.agents.registry import AgentRegistry, get_agent_registry
 from yarvelle_core.config import settings
-from yarvelle_core.constants.agents import DEFAULT_ROUTING_FALLBACK_AGENT
 from yarvelle_core.constants.paths import AGENTS_DIR, SKILLS_DIR
 from yarvelle_core.loaders.agent_loader import load_agent
 from yarvelle_core.resources.loader import get_resource_loader
-from yarvelle_core.schemas.manifest import AgentManifest
 from yarvelle_core.tools.registry import CLOSED_TOOL_DEFINITIONS
 from yarvelle_core.workflows.nodes.base import BaseNode
 from yarvelle_core.workflows.state import AgentState
@@ -324,11 +322,11 @@ class AgentExecutionNode(BaseNode):
 
     async def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """Executes the active agent's prompt, binds tools, and triggers model invocation."""
-        raw_agent_id = str(
-            state.get("current_agent")
-            or state.get("agent_id")
-            or DEFAULT_ROUTING_FALLBACK_AGENT
-        ).strip()
+        raw_agent_id = str(state.get("current_agent") or state.get("agent_id") or "").strip()
+        if not raw_agent_id:
+            err_msg = "No agent id in state; refusing to pick a default agent"
+            logger.error(err_msg)
+            return {"error": err_msg, "next_step": "error"}
 
         # Check raw ID first (preserves leading underscores like _template)
         agent_id = raw_agent_id
@@ -359,43 +357,13 @@ class AgentExecutionNode(BaseNode):
                 except Exception as err:
                     logger.debug("Failed loading agent '%s' from state workspace_root: %s", agent_id, err)
 
-        # Fallback synthesis for dynamically configured / test agents
         if manifest is None:
-            if (
-                state.get("messages")
-                or state.get("effective_tools") is not None
-                or self.default_tools is not None
-                or self.model is not None
-                or state.get("model") is not None
-            ):
-                fallback_tools = (
-                    list(state["effective_tools"])
-                    if state.get("effective_tools") is not None
-                    else (
-                        [
-                            t.name if hasattr(t, "name") else (t.get("name") if isinstance(t, dict) else str(t))
-                            for t in self.default_tools
-                        ]
-                        if self.default_tools is not None
-                        else []
-                    )
-                )
-                manifest = AgentManifest(
-                    id=agent_id,
-                    title=agent_id.replace("-", " ").title(),
-                    version="0.1.0",
-                    risk_class="wellness",
-                    skills=[],
-                    tools=fallback_tools,
-                    persona={"role": f"Assistant ({agent_id})", "instructions": ""},
-                )
-            else:
-                err_msg = f"Unknown or unregistered agent ID: '{agent_id}'"
-                logger.error(err_msg)
-                return {
-                    "error": err_msg,
-                    "next_step": "error",
-                }
+            err_msg = f"Unknown or unregistered agent ID: '{agent_id}'"
+            logger.error(err_msg)
+            return {
+                "error": err_msg,
+                "next_step": "error",
+            }
 
         # 1. Assemble system prompt
         system_prompt = self._resolve_system_prompt(manifest, state)

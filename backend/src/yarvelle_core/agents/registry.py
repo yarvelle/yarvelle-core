@@ -9,21 +9,64 @@
 #
 # Required Notice: Copyright 2026 Spectrayan (https://spectrayan.com)
 
-"""Runtime declarative AgentRegistry wrapping load_agent infrastructure (Milestone 6)."""
+"""AgentRegistry: one catalog of agents from pack files and stored agents, keyed by id.
+
+Sources (ADR-0005, 2026-11-03 amendment; plan step C2):
+
+* :class:`~yarvelle_core.agents.sources.FilesystemAgentSource` for pack or
+  workspace ``agents/`` directories (including ``agents/_system``), and
+* :class:`~yarvelle_core.agents.sources.DbAgentSource` for stored agents.
+
+Merge rules are deterministic: two file agents (or two stored agents) with the
+same id fail the load with :class:`DuplicateAgentError`; a stored agent whose id
+matches a file agent is ignored and recorded in :attr:`AgentRegistry.conflicts`.
+Unknown ids raise :class:`AgentNotFoundError`; nothing is substituted. There
+are no id aliases.
+
+The registry also builds Deep Agents subagent specs. Every spec carries the
+required policy and audit hooks from :mod:`yarvelle_core.agents.subagent_hooks`.
+"""
 
 from __future__ import annotations
 
 import logging
+import re
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Union
 
+from yarvelle_core.agents.errors import AgentNotFoundError, DuplicateAgentError
+from yarvelle_core.agents.sources import (
+    SOURCE_DB,
+    AgentRecord,
+    AgentSource,
+    DbAgentSource,
+    FilesystemAgentSource,
+    RejectedAgent,
+    fetch_db_agent_rows,
+)
+from yarvelle_core.agents.subagent_hooks import ensure_subagent_hooks, required_subagent_middleware
 from yarvelle_core.config import settings
 from yarvelle_core.constants.agents import AGENT_ORCHESTRATOR
-from yarvelle_core.constants.paths import SYSTEM_AGENTS_DIR
-from yarvelle_core.loaders.agent_loader import load_agent
-from yarvelle_core.schemas.manifest import AgentManifest, AgentPersonaObject, SkillManifest
+from yarvelle_core.schemas.manifest import SLUG_REGEX, AgentManifest, AgentPersonaObject, SkillManifest
 
 logger = logging.getLogger(__name__)
+
+ToolResolver = Callable[[AgentManifest, List[str]], List[Any]]
+MiddlewareFactory = Callable[[AgentManifest], Sequence[Any]]
+
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+
+@dataclass(frozen=True)
+class AgentConflict:
+    """A stored agent ignored because a file agent already uses its id."""
+
+    agent_id: str
+    kept_source: str
+    kept_origin: str
+    ignored_source: str
+    ignored_origin: str
 
 
 def _extract_first_line(persona: Union[str, AgentPersonaObject, Dict[str, Any], None]) -> str:
@@ -56,207 +99,280 @@ def _extract_first_line(persona: Union[str, AgentPersonaObject, Dict[str, Any], 
     return ""
 
 
-class AgentRegistry:
-    """Runtime registry wrapping load_agent() with dynamic catalog formatting.
+def _system_prompt(persona: Union[str, AgentPersonaObject, Dict[str, Any], None]) -> str:
+    """Flattens a persona (markdown string or role/tone/instructions object) into a system prompt."""
+    if not persona:
+        return ""
+    if isinstance(persona, str):
+        return persona.strip()
+    if isinstance(persona, dict):
+        persona = AgentPersonaObject(**{k: persona.get(k) for k in ("role", "tone", "instructions")})
+    parts = [persona.role, f"Tone: {persona.tone}" if persona.tone else None, persona.instructions]
+    return "\n\n".join(p.strip() for p in parts if p and p.strip())
 
-    Discovers agent manifests from filesystem, resolves declared skills and
-    effective tools, and provides dynamic catalog formatting for the orchestrator.
-    """
+
+def _model_string(model: Any) -> Optional[str]:
+    if not model:
+        return None
+    if isinstance(model, str):
+        return model
+    name = getattr(model, "name", None)
+    provider = getattr(model, "provider", None)
+    if not name:
+        return None
+    return f"{provider}:{name}" if provider else str(name)
+
+
+def _tool_definitions(_manifest: AgentManifest, tool_names: List[str]) -> List[Any]:
+    from yarvelle_core.tools.registry import CLOSED_TOOL_DEFINITIONS
+
+    return [CLOSED_TOOL_DEFINITIONS[t] for t in tool_names if t in CLOSED_TOOL_DEFINITIONS]
+
+
+class AgentRegistry:
+    """Catalog of validated agents keyed by id, merged from file and stored sources."""
 
     def __init__(
         self,
-        agents_dir: Union[Path, str],
+        agents_dir: Optional[Union[Path, str]] = None,
         skills_dir: Optional[Union[Path, str]] = None,
+        *,
+        sources: Optional[Sequence[AgentSource]] = None,
+        db_source: Optional[DbAgentSource] = None,
+        tool_resolver: Optional[ToolResolver] = None,
+        middleware_factory: Optional[MiddlewareFactory] = None,
     ) -> None:
-        self._agents_dir = Path(agents_dir).resolve()
+        self._agents_dir = Path(agents_dir).resolve() if agents_dir else None
         self._skills_dir = Path(skills_dir).resolve() if skills_dir else None
+        file_sources: List[AgentSource] = []
+        if self._agents_dir is not None:
+            file_sources.append(FilesystemAgentSource(self._agents_dir, self._skills_dir))
+        file_sources.extend(sources or [])
+        self._sources: List[AgentSource] = file_sources
+        self._db_source = db_source
+        self._tool_resolver = tool_resolver
+        self._middleware_factory = middleware_factory
         self._agents: Dict[str, AgentManifest] = {}
         self._effective_tools: Dict[str, List[str]] = {}
         self._loaded_skills: Dict[str, List[SkillManifest]] = {}
+        self._records: Dict[str, AgentRecord] = {}
+        self.conflicts: List[AgentConflict] = []
+        self.rejected: List[RejectedAgent] = []
+        self.version = 0
         self.reload()
 
+    # ------------------------------------------------------------------ loading
+
+    @property
+    def sources(self) -> List[AgentSource]:
+        """Configured sources in precedence order (file sources first, then the stored source)."""
+        return [*self._sources, *([self._db_source] if self._db_source is not None else [])]
+
     def reload(self) -> None:
-        """Discovers agents using existing load_agent() infrastructure."""
-        self._agents.clear()
-        self._effective_tools.clear()
-        self._loaded_skills.clear()
+        """Rebuilds the catalog from every source and bumps :attr:`version`.
 
-        if not self._agents_dir.is_dir():
-            logger.warning("Agents directory does not exist: %s", self._agents_dir)
-            return
+        Raises DuplicateAgentError when two agents of the same source kind share an id.
+        """
+        records: Dict[str, AgentRecord] = {}
+        conflicts: List[AgentConflict] = []
+        rejected: List[RejectedAgent] = []
 
-        candidate_dirs: List[Path] = []
-        if self._agents_dir.name == SYSTEM_AGENTS_DIR:
-            for entry in sorted(self._agents_dir.iterdir()):
-                if entry.is_dir() and not entry.name.startswith((".", "_")):
-                    candidate_dirs.append(entry)
-        else:
-            for entry in sorted(self._agents_dir.iterdir()):
-                if not entry.is_dir():
+        for source in self.sources:
+            result = source.load()
+            rejected.extend(result.rejected)
+            seen_here: Dict[str, AgentRecord] = {}
+            for rec in result.records:
+                aid = rec.manifest.id
+                if aid in seen_here:
+                    raise DuplicateAgentError(aid, [seen_here[aid].origin, rec.origin])
+                seen_here[aid] = rec
+                existing = records.get(aid)
+                if existing is None:
+                    records[aid] = rec
                     continue
-                if entry.name == SYSTEM_AGENTS_DIR:
-                    for subentry in sorted(entry.iterdir()):
-                        if subentry.is_dir() and not subentry.name.startswith((".", "_")):
-                            candidate_dirs.append(subentry)
-                elif not entry.name.startswith((".", "_")):
-                    candidate_dirs.append(entry)
+                if existing.source == rec.source:
+                    raise DuplicateAgentError(aid, [existing.origin, rec.origin])
+                conflict = AgentConflict(aid, existing.source, existing.origin, rec.source, rec.origin)
+                conflicts.append(conflict)
+                logger.warning(
+                    "Agent id %r from %s ignored; %s already defines it (%s wins)",
+                    aid, rec.origin, existing.origin, existing.source,
+                )
 
-        for entry in candidate_dirs:
-            try:
-                manifest, effective_tools, loaded_skills = load_agent(entry, self._skills_dir)
-                if entry.parent.name == SYSTEM_AGENTS_DIR:
-                    manifest.hidden = True
-                self._agents[manifest.id] = manifest
-                self._effective_tools[manifest.id] = effective_tools
-                self._loaded_skills[manifest.id] = loaded_skills
-            except Exception as err:
-                logger.warning("Failed to load agent %s: %s", entry.name, err)
+        self._records = records
+        self._agents = {aid: r.manifest for aid, r in records.items()}
+        self._effective_tools = {aid: list(r.effective_tools) for aid, r in records.items()}
+        self._loaded_skills = {aid: list(r.skills) for aid, r in records.items()}
+        self.conflicts = conflicts
+        self.rejected = rejected
+        self.version += 1
+
+    def set_db_rows(self, rows: Sequence[Any]) -> None:
+        """Replaces the stored-agent snapshot and reloads the catalog."""
+        if self._db_source is None:
+            self._db_source = DbAgentSource(skills_dir=self._skills_dir)
+        self._db_source.set_rows(rows)
+        self.reload()
+
+    async def refresh_from_db(self, session: Any) -> None:
+        """Fetches stored agents with ``session`` and reloads the catalog."""
+        types = self._db_source.types if self._db_source is not None else None
+        rows = await (fetch_db_agent_rows(session, types) if types is not None else fetch_db_agent_rows(session))
+        self.set_db_rows(rows)
+
+    # ---------------------------------------------------------------- lookups
 
     def get(self, agent_id: str) -> Optional[AgentManifest]:
-        """Returns AgentManifest for agent_id if found, otherwise None."""
-        if not agent_id or agent_id.startswith((".", "_")):
+        """Returns the catalog entry for ``agent_id`` or None. Never loads or substitutes."""
+        if not isinstance(agent_id, str) or not agent_id:
             return None
+        return self._agents.get(agent_id)
 
-        if agent_id in self._agents:
-            return self._agents[agent_id]
-
-        candidates = [
-            self._agents_dir / agent_id,
-            self._agents_dir / SYSTEM_AGENTS_DIR / agent_id,
-        ]
-        current_settings_agents = settings.get_agents_dir().resolve()
-        if current_settings_agents != self._agents_dir:
-            candidates.append(current_settings_agents / agent_id)
-            candidates.append(current_settings_agents / SYSTEM_AGENTS_DIR / agent_id)
-
-        for candidate in candidates:
-            if candidate.is_dir():
-                try:
-                    manifest, effective_tools, loaded_skills = load_agent(candidate, self._skills_dir)
-                    if candidate.parent.name == SYSTEM_AGENTS_DIR:
-                        manifest.hidden = True
-                    self._agents[agent_id] = manifest
-                    self._effective_tools[agent_id] = effective_tools
-                    self._loaded_skills[agent_id] = loaded_skills
-                    return manifest
-                except Exception as err:
-                    logger.debug("Failed on-demand load for agent '%s' from %s: %s", agent_id, candidate, err)
-        return None
-
-    def __getitem__(self, agent_id: str) -> AgentManifest:
-        """Returns AgentManifest for agent_id or raises KeyError."""
+    def resolve(self, agent_id: str) -> AgentManifest:
+        """Returns the catalog entry for ``agent_id`` or raises AgentNotFoundError."""
         manifest = self.get(agent_id)
         if manifest is None:
-            raise KeyError(f"Agent '{agent_id}' not found in registry.")
+            raise AgentNotFoundError(agent_id, self._agents.keys())
         return manifest
 
-    def __contains__(self, agent_id: str) -> bool:
-        """Returns True if agent_id is present in registry."""
-        return self.get(agent_id) is not None
+    def __getitem__(self, agent_id: str) -> AgentManifest:
+        return self.resolve(agent_id)
+
+    def __contains__(self, agent_id: object) -> bool:
+        return isinstance(agent_id, str) and agent_id in self._agents
 
     def __len__(self) -> int:
-        """Returns count of registered agents."""
         return len(self._agents)
 
     def has_agent(self, agent_id: str) -> bool:
-        """Returns True if agent_id is present in registry."""
-        return self.get(agent_id) is not None
+        return agent_id in self
+
+    def source_of(self, agent_id: str) -> str:
+        """Returns the source kind ('file' or 'db') of a registered agent."""
+        self.resolve(agent_id)
+        return self._records[agent_id].source
 
     def list_agents(self) -> List[AgentManifest]:
-        """Returns list of all registered AgentManifests sorted by ID."""
-        return [self._agents[aid] for aid in sorted(self._agents.keys())]
+        """Returns all registered AgentManifests sorted by id."""
+        return [self._agents[aid] for aid in sorted(self._agents)]
 
     def list_agent_ids(self) -> List[str]:
-        """Returns list of all registered agent IDs sorted."""
-        return sorted(self._agents.keys())
+        return sorted(self._agents)
 
     def get_effective_tools(self, agent_id: str) -> List[str]:
-        """Returns effective tool allowlist for agent_id."""
-        if agent_id not in self._effective_tools:
-            self.get(agent_id)
+        """Returns the effective tool allowlist for a registered agent ([] if unknown)."""
         return list(self._effective_tools.get(agent_id, []))
 
     def get_loaded_skills(self, agent_id: str) -> List[SkillManifest]:
-        """Returns loaded skills for agent_id."""
-        if agent_id not in self._loaded_skills:
-            self.get(agent_id)
+        """Returns loaded skills for a registered agent ([] if unknown)."""
         return list(self._loaded_skills.get(agent_id, []))
 
     def get_skill(self, skill_id: str) -> Optional[SkillManifest]:
-        """Returns loaded SkillManifest by skill_id across agents or loads directly from skills_dir."""
+        """Returns a loaded SkillManifest by id, or loads it from skills_dir."""
         for skills in self._loaded_skills.values():
             for sk in skills:
                 if sk.id == skill_id:
                     return sk
-        if self._skills_dir and (self._skills_dir / skill_id).is_dir():
+        if self._skills_dir and SLUG_REGEX.match(skill_id or "") and (self._skills_dir / skill_id).is_dir():
             from yarvelle_core.loaders.skill_loader import load_skill
+
             try:
-                sk, _ = load_skill(self._skills_dir / skill_id)
-                return sk
+                return load_skill(self._skills_dir / skill_id)
             except Exception:
-                pass
+                return None
         return None
 
     @property
     def effective_tools_map(self) -> Dict[str, List[str]]:
-        """Returns a copy of the mapping of agent_id to effective tool names."""
         return dict(self._effective_tools)
 
     def get_delegatable_agents(self, exclude: str = "") -> List[AgentManifest]:
-        """Returns non-orchestrator agents available for delegation.
-
-        Filters out agents where can_delegate is True (such as orchestrator)
-        and optionally filters out an agent by explicit ID.
-        """
+        """Returns agents that can be handed work (not hidden, not delegators, not ``exclude``)."""
         return [
-            a for a in sorted(self._agents.values(), key=lambda a: a.id)
-            if a.id != exclude and not a.can_delegate
+            a for a in self.list_agents()
+            if a.id != exclude and not a.can_delegate and not a.hidden
         ]
 
-    def format_agent_catalog(self, exclude: str = AGENT_ORCHESTRATOR) -> str:
-        """Formats agent catalog for the orchestrator's dynamic system prompt.
+    def search(self, query: str = "", limit: Optional[int] = None, exclude: str = AGENT_ORCHESTRATOR) -> List[AgentManifest]:
+        """Keyword search over delegatable agents (id, title, description, tags, category, skills).
 
-        Generates formatted markdown from live agent.yaml files.
+        An empty query returns every delegatable agent. Results are ordered by the
+        number of matching query terms, then by id.
         """
         agents = self.get_delegatable_agents(exclude)
+        terms = set(_TOKEN_RE.findall((query or "").lower()))
+        if terms:
+            scored = []
+            for a in agents:
+                hay = " ".join(
+                    [a.id, a.title, a.description or _extract_first_line(a.persona), a.category, *a.tags, *a.skills]
+                ).lower()
+                words = set(_TOKEN_RE.findall(hay))
+                score = len(terms & words)
+                if score:
+                    scored.append((-score, a.id, a))
+            agents = [a for _, _, a in sorted(scored, key=lambda t: (t[0], t[1]))]
+        return agents[:limit] if limit else agents
+
+    def format_agent_catalog(
+        self,
+        exclude: str = AGENT_ORCHESTRATOR,
+        agents: Optional[Sequence[AgentManifest]] = None,
+    ) -> str:
+        """Formats agents as markdown lines for a model prompt or the list_agents tool."""
+        chosen = list(agents) if agents is not None else self.get_delegatable_agents(exclude)
         lines: List[str] = []
-        for a in agents:
+        for a in chosen:
             desc = a.description or _extract_first_line(a.persona)
             tools_str = ", ".join(self._effective_tools.get(a.id, []))
-            lines.append(
-                f"- **{a.id}** ({a.title}): {desc}\n"
-                f"  Tools: [{tools_str}]"
-            )
+            lines.append(f"- **{a.id}** ({a.title}): {desc}\n  Tools: [{tools_str}]")
         return "\n".join(lines)
 
-    def get_subagent(self, agent_id: str, resolve_tools: bool = False) -> Optional[Dict[str, Any]]:
-        """Returns native Deep Agents SubAgent dict for the specified agent."""
-        if not agent_id or agent_id.startswith((".", "_")):
-            return None
-        candidate = self._agents_dir / agent_id
-        if not candidate.is_dir():
-            candidate = self._agents_dir / SYSTEM_AGENTS_DIR / agent_id
-        if candidate.is_dir():
-            from yarvelle_core.loaders.agent_loader import load_subagent_from_yaml
+    # ------------------------------------------------------------- subagents
 
-            return load_subagent_from_yaml(candidate, resolve_tools=resolve_tools)
-        return None
+    def get_subagent(self, agent_id: str, resolve_tools: bool = False) -> Dict[str, Any]:
+        """Builds a Deep Agents ``SubAgent`` spec for a registered agent.
+
+        Keys: ``name`` (agent id), ``description``, ``system_prompt``, ``tools``,
+        ``middleware`` (required hooks first, then any factory extras) and
+        ``model`` when the agent declares one (otherwise the main agent's model
+        is inherited). ``tools`` are the effective tool names, or resolved tools
+        when ``resolve_tools`` is set or a ``tool_resolver`` was configured.
+
+        Raises AgentNotFoundError for an unknown id and SubagentHookError if a
+        required hook is missing.
+        """
+        manifest = self.resolve(agent_id)
+        tool_names = self.get_effective_tools(agent_id)
+        if self._tool_resolver is not None:
+            tools: List[Any] = list(self._tool_resolver(manifest, tool_names))
+        elif resolve_tools:
+            tools = _tool_definitions(manifest, tool_names)
+        else:
+            tools = list(tool_names)
+
+        middleware: List[Any] = required_subagent_middleware(manifest.id)
+        if self._middleware_factory is not None:
+            middleware.extend(self._middleware_factory(manifest))
+
+        spec: Dict[str, Any] = {
+            "name": manifest.id,
+            "description": manifest.description or _extract_first_line(manifest.persona) or manifest.title,
+            "system_prompt": _system_prompt(manifest.persona),
+            "tools": tools,
+            "middleware": middleware,
+        }
+        model = _model_string(manifest.model)
+        if model:
+            spec["model"] = model
+        return ensure_subagent_hooks(spec)
 
     def list_subagents(self, resolve_tools: bool = False) -> List[Dict[str, Any]]:
-        """Returns list of native Deep Agents SubAgent dicts for all non-system agents."""
-        subagents: List[Dict[str, Any]] = []
-        for aid in self.list_agent_ids():
-            manifest = self._agents.get(aid)
-            if manifest and getattr(manifest, "hidden", False):
-                continue
-            candidate = self._agents_dir / aid
-            if not candidate.is_dir():
-                continue
-            sub = self.get_subagent(aid, resolve_tools=resolve_tools)
-            if sub is not None:
-                subagents.append(sub)
-        return subagents
-
+        """Returns subagent specs for every delegatable (visible, non-delegating) agent."""
+        return [
+            self.get_subagent(a.id, resolve_tools=resolve_tools)
+            for a in self.get_delegatable_agents(exclude="")
+        ]
 
 
 _registry_instance: Optional[AgentRegistry] = None
@@ -267,7 +383,7 @@ def get_agent_registry(
     skills_dir: Optional[Union[Path, str]] = None,
     force_reload: bool = False,
 ) -> AgentRegistry:
-    """Returns singleton or newly initialized AgentRegistry."""
+    """Returns the process-wide AgentRegistry, rebuilding it when the agents dir changes."""
     global _registry_instance
     target_agents_dir = Path(agents_dir).resolve() if agents_dir else settings.get_agents_dir().resolve()
     target_skills_dir = Path(skills_dir).resolve() if skills_dir else settings.get_skills_dir().resolve()
@@ -275,10 +391,17 @@ def get_agent_registry(
         _registry_instance is None
         or force_reload
         or agents_dir is not None
-        or (hasattr(_registry_instance, "_agents_dir") and _registry_instance._agents_dir != target_agents_dir)
+        or _registry_instance._agents_dir != target_agents_dir
     ):
         _registry_instance = AgentRegistry(target_agents_dir, target_skills_dir)
     return _registry_instance
 
 
-__all__ = ["AgentRegistry", "_extract_first_line", "get_agent_registry"]
+__all__ = [
+    "AgentConflict",
+    "AgentNotFoundError",
+    "AgentRegistry",
+    "DuplicateAgentError",
+    "_extract_first_line",
+    "get_agent_registry",
+]

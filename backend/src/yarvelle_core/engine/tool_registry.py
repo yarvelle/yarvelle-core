@@ -383,12 +383,19 @@ def _make_builtin_specs() -> List[ToolSpec]:
     async def _exec_list_agents(args: Optional[Dict[str, Any]] = None, ctx: Any = None) -> Any:
         from yarvelle_core.tools.delegation_tools import ListAgentsTool
         tool = ListAgentsTool()
-        return await tool._arun()
+        args = args or {}
+        return await tool._arun(query=str(args.get("query") or ""), limit=args.get("limit"))
 
     spec_list_agents = ToolSpec(
         name="list_agents",
-        description="List all available specialist agents and their capabilities from the catalog.",
-        parameters={"type": "object", "properties": {}},
+        description="Search the available specialist agents and their capabilities in the catalog.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Optional keywords; empty lists all agents."},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+            },
+        },
         risk_tier="read",
         trust="trusted",
         data_flows=DataFlows(allowed_hosts=(), data_sensitivity="public"),
