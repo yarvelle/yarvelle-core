@@ -35,7 +35,6 @@ from yarvelle_core.agents.subagent_hooks import (
     ensure_subagent_hooks,
     missing_subagent_hooks,
 )
-from yarvelle_core.constants.agents import DEFAULT_ROUTING_FALLBACK_AGENT
 from yarvelle_core.tools.delegation_tools import ListAgentsTool
 
 
@@ -87,7 +86,7 @@ def _db_row(agent_id: str, **overrides: Any) -> SimpleNamespace:
         category="general",
         risk_class="admin",
         tags_json=json.dumps(["custom"]),
-        care_stages_json="[]",
+        extensions_json="{}",
         target_audience_json="[]",
         forbidden_json="[]",
         icon="Bot",
@@ -199,7 +198,7 @@ def test_duplicate_detection_is_deterministic(workspace):
 # ------------------------------------------------------------- unknown ids
 
 
-@pytest.mark.parametrize("bad_id", ["no-such-agent", "", "../etc", "_template", DEFAULT_ROUTING_FALLBACK_AGENT])
+@pytest.mark.parametrize("bad_id", ["no-such-agent", "", "../etc", "_template", "unregistered-agent"])
 def test_unknown_ids_raise_without_fallback(workspace, bad_id):
     reg = AgentRegistry(workspace["agents"], workspace["skills"])
     assert reg.get(bad_id) is None

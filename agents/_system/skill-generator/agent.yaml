@@ -9,8 +9,8 @@ max_iterations: 1
 hidden: true
 description: >-
   Dynamic on-demand skill generation agent. Identifies missing domain
-  knowledge, guidelines, and reference documentation required for clinical
-  navigation or administrative tasks. Synthesizes structured skill manifests
+  knowledge, guidelines, and reference documentation required for a
+  specialist task. Synthesizes structured skill manifests
   and references to empower downstream specialist agents.
 skills: []
 tools: []

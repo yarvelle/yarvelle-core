@@ -18,10 +18,8 @@ Enforces authenticated agent authorization and sandbox path boundary isolation.
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 import re
-import sys
 from typing import Any, Dict, List, Optional, Set
 
 from yarvelle_core.constants.defaults import ALLOWED_SKILL_DOC_EXTENSIONS
@@ -111,7 +109,9 @@ def synthesize_missing_skill_doc(
             f"Prepare a concise 2-minute summary of your goals to ensure all priorities are addressed.\n"
         )
 
-    app_brand = "Carefold" if "carefold" in sys.modules or os.environ.get("CAREFOLD_HOME") else "Yarvelle Core"
+    from yarvelle_core.config import settings
+
+    app_brand = settings.product_name
     return (
         f"# {clean_stem}\n\n"
         f"**Skill Domain**: {skill_title}  \n"
@@ -198,7 +198,7 @@ async def execute_skill_docs(params: Dict[str, Any], context: Any) -> ToolResult
                         matched_declared = s
                         break
 
-                # Check against agent ID (e.g. agent "cardiology-guide" with skill "cardiology-prep" called with "cardiology")
+                # Check against agent ID (e.g. agent "travel-guide" with skill "travel-prep" called with "travel")
                 if not matched_declared and agent.skills:
                     agent_id_str = getattr(agent, "id", "").lower().strip()
                     agent_stem = agent_id_str.split("-")[0] if agent_id_str else ""

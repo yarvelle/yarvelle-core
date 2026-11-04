@@ -154,12 +154,11 @@
       "title": "Category",
       "type": "string"
     },
-    "care_stages": {
-      "items": {
-        "type": "string"
-      },
-      "title": "Care Stages",
-      "type": "array"
+    "extensions": {
+      "additionalProperties": true,
+      "description": "Pack-defined catalog fields (for example UI facets) that core stores but does not interpret.",
+      "title": "Extensions",
+      "type": "object"
     },
     "target_audience": {
       "items": {

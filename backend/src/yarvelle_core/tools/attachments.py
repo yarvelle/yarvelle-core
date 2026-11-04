@@ -9,7 +9,7 @@
 #
 # Required Notice: Copyright 2026 Spectrayan (https://spectrayan.com)
 
-"""Compatibility shim for carefold.tools.attach_read.
+"""Compatibility shim for yarvelle_core.tools.attach_read.
 
 Re-exports execute_attach_read and attach_read_tool.
 """

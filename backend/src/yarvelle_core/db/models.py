@@ -345,7 +345,7 @@ class Agent(Base):
     id: Mapped[str] = mapped_column(
         String(64),
         primary_key=True,
-        doc="Unique agent identifier (e.g. cardiology-guide, custom-nutrition)",
+        doc="Unique agent identifier (e.g. budget-planner, trip-organizer)",
     )
     type: Mapped[str] = mapped_column(
         String(32),
@@ -412,7 +412,7 @@ class Agent(Base):
         String(64),
         nullable=False,
         default="general",
-        doc="Specialist category (e.g. cardiology, gastroenterology, general)",
+        doc="Specialist category (e.g. finance.budgeting, travel, general)",
     )
     risk_class: Mapped[str] = mapped_column(
         String(32),
@@ -426,17 +426,17 @@ class Agent(Base):
         default="[]",
         doc="Serialized JSON array of taxonomy tags",
     )
-    care_stages_json: Mapped[str] = mapped_column(
+    extensions_json: Mapped[str] = mapped_column(
         Text,
         nullable=False,
-        default="[]",
-        doc="Serialized JSON array of care stages (e.g. pre_visit, post_visit)",
+        default="{}",
+        doc="Serialized JSON object of pack-defined catalog fields that core does not interpret",
     )
     target_audience_json: Mapped[str] = mapped_column(
         Text,
         nullable=False,
         default="[]",
-        doc="Serialized JSON array of target audience groups (e.g. user, caregiver)",
+        doc="Serialized JSON array of target audience groups (e.g. user, family member)",
     )
     forbidden_json: Mapped[str] = mapped_column(
         Text,
@@ -520,11 +520,12 @@ class Agent(Base):
     def set_tags(self, tags: List[str]) -> None:
         self.tags_json = json.dumps(tags)
 
-    def get_care_stages(self) -> List[str]:
-        return json.loads(self.care_stages_json) if self.care_stages_json else []
+    def get_extensions(self) -> Dict[str, Any]:
+        data = json.loads(self.extensions_json) if self.extensions_json else {}
+        return data if isinstance(data, dict) else {}
 
-    def set_care_stages(self, stages: List[str]) -> None:
-        self.care_stages_json = json.dumps(stages)
+    def set_extensions(self, extensions: Dict[str, Any]) -> None:
+        self.extensions_json = json.dumps(extensions or {})
 
     def get_target_audience(self) -> List[str]:
         return json.loads(self.target_audience_json) if self.target_audience_json else []
@@ -550,7 +551,7 @@ class Skill(Base):
     id: Mapped[str] = mapped_column(
         String(64),
         primary_key=True,
-        doc="Unique skill identifier (e.g. cardiology-prep)",
+        doc="Unique skill identifier (e.g. moving-checklist)",
     )
     type: Mapped[str] = mapped_column(
         String(32),
@@ -592,7 +593,7 @@ class Skill(Base):
         String(64),
         nullable=False,
         default="general",
-        doc="Skill category (e.g. cardiology, pulmonology, general)",
+        doc="Skill category (e.g. household, travel, general)",
     )
     risk_class: Mapped[str] = mapped_column(
         String(32),
@@ -709,7 +710,7 @@ class KnowledgeBase(Base):
         String(64),
         nullable=False,
         index=True,
-        doc="Identifier of the target agent or skill (e.g. cardiology-prep)",
+        doc="Identifier of the target agent or skill (e.g. moving-checklist)",
     )
     name: Mapped[str] = mapped_column(
         String(255),
@@ -1748,7 +1749,7 @@ class ChatThread(Base, ScopedMixin):
         String(64),
         nullable=False,
         index=True,
-        doc="Specialist agent identifier (e.g. visit-steward, cardiology-guide)",
+        doc="Specialist agent identifier (e.g. budget-planner, trip-organizer)",
     )
     title: Mapped[str] = mapped_column(
         String(255),

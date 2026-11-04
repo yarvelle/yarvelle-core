@@ -52,7 +52,7 @@ class SuggestionNode(BaseNode):
                 "next_step": "done",
             }
 
-        agent_id = str(state.get("current_agent") or state.get("agent_id") or "visit-steward")
+        agent_id = str(state.get("current_agent") or state.get("agent_id") or "")
         messages: List[Any] = state.get("messages", [])
 
         user_queries: List[str] = []
@@ -89,7 +89,7 @@ class SuggestionNode(BaseNode):
                 clean_assistant_resp = (completion_text or "")[:400]
                 clean_user_prompt = (prompt_text or "")[:200]
                 rendered_prompt = prompt_tmpl.format(
-                    agent_title=agent_id.replace("-", " ").title(),
+                    agent_title=agent_id.replace("-", " ").title() or "Assistant",
                     user_prompt=clean_user_prompt or "(none)",
                     assistant_response=clean_assistant_resp or "(none)",
                     tools_used=", ".join(tools_used) if tools_used else "None",

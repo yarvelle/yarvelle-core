@@ -1,7 +1,7 @@
 # ============================================================================
-# Carefold Prompts Catalog & Manifest
+# Yarvelle Core Prompts Catalog & Manifest
 # ============================================================================
-# Core workflow prompts are modularized into dedicated .md files under carefold/resources/prompts/
+# Core workflow prompts are modularized into dedicated .md files under yarvelle_core/resources/prompts/
 # Agent personas are authoritatively defined in agents/<id>/agent.yaml
 
 safety_preamble: "prompts/safety/safety_preamble.md"
@@ -17,17 +17,12 @@ orchestrator:
 
 # Canonical agent manifests in agents/*/agent.yaml
 agents:
-  visit_steward: "agents/visit-steward/agent.yaml"
-  benefits_guide: "agents/benefits-guide/agent.yaml"
-  habit_companion: "agents/habit-companion/agent.yaml"
   orchestrator: "agents/_system/orchestrator/agent.yaml"
   document_extractor: "agents/_system/document-extractor/agent.yaml"
   suggestion_generator: "agents/_system/suggestion-generator/agent.yaml"
   skill_generator: "agents/_system/skill-generator/agent.yaml"
 
 extraction:
-  insurance_benefits: "prompts/extraction/insurance_benefits.md"
-  clinical_visit: "prompts/extraction/clinical_visit.md"
   generic_document: "prompts/extraction/generic_document.md"
   grounding_validation: "prompts/extraction/grounding_validation.md"
 

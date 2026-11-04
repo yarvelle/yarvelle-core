@@ -266,8 +266,8 @@ def _run_schema_migrations(connection) -> None:
     # 2. Agent column migrations (existing)
     if "agent" in tables:
         columns = [c["name"] for c in inspector.get_columns("agent")]
-        if "care_stages_json" not in columns:
-            connection.exec_driver_sql("ALTER TABLE agent ADD COLUMN care_stages_json TEXT NOT NULL DEFAULT '[]'")
+        if "extensions_json" not in columns:
+            connection.exec_driver_sql("ALTER TABLE agent ADD COLUMN extensions_json TEXT NOT NULL DEFAULT '{}'")
         if "target_audience_json" not in columns:
             connection.exec_driver_sql("ALTER TABLE agent ADD COLUMN target_audience_json TEXT NOT NULL DEFAULT '[]'")
         if "forbidden_json" not in columns:
@@ -456,7 +456,7 @@ def _run_schema_migrations(connection) -> None:
 
 
 def get_alembic_config(connection: Optional[Connection] = None) -> Config:
-    """Constructs and returns Alembic Config pointing to carefold migrations."""
+    """Constructs and returns Alembic Config pointing to the core migrations."""
     backend_dir = Path(__file__).resolve().parents[3]
     candidate_ini = backend_dir / "alembic.ini"
     if candidate_ini.is_file():

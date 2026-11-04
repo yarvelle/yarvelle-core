@@ -92,7 +92,7 @@ from yarvelle_core.model.factory import create_chat_model
 from yarvelle_core.engine.safety_policy import SafetyPolicy, get_default_safety_policy
 from yarvelle_core.schemas.audit import AuditEvent
 from yarvelle_core.schemas.chat import ChatMessage, ChatRequestBody
-from yarvelle_core.schemas.manifest import AgentManifest, AgentPersonaObject, RiskClass, SkillManifest, SLUG_REGEX
+from yarvelle_core.schemas.manifest import RiskClass, SkillManifest, SLUG_REGEX
 from yarvelle_core.logging import get_logger
 from yarvelle_core.workflows.nodes.base import sanitize_log_message
 from yarvelle_core.workflows.state import AgentState
@@ -141,7 +141,7 @@ class _StreamChatModelAdapter(BaseChatModel):
 
     @property
     def _llm_type(self) -> str:
-        return "carefold-stream-chat-adapter"
+        return "yarvelle-stream-chat-adapter"
 
     def _generate(
         self,
@@ -323,10 +323,17 @@ class AgentExecutionService:
         workspace_root: Optional[Union[str, Path]] = None,
         store_bodies: Optional[bool] = None,
         safety_policy: Optional[SafetyPolicy] = None,
+        default_agent_id: Optional[str] = None,
         **kwargs: Any,
     ) -> None:
-        """Initialize the execution service with model, graph, checkpointer, and memory settings."""
+        """Initialize the execution service with model, graph, checkpointer, and memory settings.
+
+        ``default_agent_id`` is the agent used when a turn names none. It comes
+        from the pack's ``orchestration.default_agent``; core has no default of
+        its own, so a turn without an agent id fails when it is unset.
+        """
         self.model = model
+        self.default_agent_id = (default_agent_id or "").strip() or None
         self.graph = graph
         self.graph_builder = graph_builder
         self.checkpointer = checkpointer
@@ -674,16 +681,23 @@ class AgentExecutionService:
         suggestions, and terminal completion records.
         """
         start_time = time.time()
-        raw_agent_id = str(agent_id or "visit-steward").strip()
-        effective_agent_id = raw_agent_id if SLUG_REGEX.match(raw_agent_id) and not raw_agent_id.startswith(".") else "visit-steward"
+        effective_agent_id = str(agent_id or self.default_agent_id or "").strip()
+        if not effective_agent_id:
+            yield self.format_error_event(
+                "No agent id was given and no default agent is configured "
+                "(set orchestration.default_agent in the pack)."
+            )
+            return
+        if not SLUG_REGEX.match(effective_agent_id) or effective_agent_id.startswith("."):
+            yield self.format_error_event(f"Invalid agent id: '{effective_agent_id}'")
+            return
         ws_root = self.workspace_root.resolve()
         agents_dir = (ws_root / AGENTS_DIR).resolve()
         skills_dir = (ws_root / SKILLS_DIR).resolve()
-        agent_dir = (
-            find_agent_dir(agents_dir, effective_agent_id)
-            or find_agent_dir(agents_dir, "visit-steward")
-            or (agents_dir / "visit-steward").resolve()
-        )
+        agent_dir = find_agent_dir(agents_dir, effective_agent_id)
+        if agent_dir is None:
+            yield self.format_error_event(f"Unknown or unregistered agent ID: '{effective_agent_id}'")
+            return
 
         effective_store_bodies = store_bodies if store_bodies is not None else self.store_bodies
         resolved_log_path = (
@@ -696,16 +710,9 @@ class AgentExecutionService:
         try:
             agent, effective_tools, skills = load_agent(agent_dir, skills_dir)
         except Exception as err:
-            logger.warning("Failed to load agent '%s': %s. Using default agent manifest.", effective_agent_id, err)
-            agent = AgentManifest(
-                id=effective_agent_id,
-                title=effective_agent_id,
-                risk_class=RiskClass.WELLNESS,
-                model="carefold-default",
-                persona=AgentPersonaObject(role="Care navigation assistant"),
-            )
-            effective_tools = []
-            skills = []
+            logger.error("Failed to load agent '%s': %s", effective_agent_id, err)
+            yield self.format_error_event(f"Agent '{effective_agent_id}' failed to load: {err}")
+            return
 
         if agent.risk_class == RiskClass.CLINICAL_ASSIST and not allow_clinical:
             err_msg = (
@@ -1236,12 +1243,16 @@ class AgentExecutionService:
             api_key = None
             base_url = None
         else:
-            agent_id = request.get("agent_id") or request.get("agentId") or "visit-steward"
+            agent_id = request.get("agent_id") or request.get("agentId") or self.default_agent_id
             prompt = request.get("prompt", "")
             messages = request.get("messages", [])
             attachments = request.get("attachments", [])
             allow_clinical = bool(request.get("allow_clinical", False))
-            thread_id = request.get("thread_id") or request.get("threadId") or f"thread_{agent_id}_{uuid.uuid4().hex[:12]}"
+            thread_id = (
+                request.get("thread_id")
+                or request.get("threadId")
+                or f"thread_{agent_id or 'turn'}_{uuid.uuid4().hex[:12]}"
+            )
             provider = request.get("provider", "ollama")
             model_name = request.get("model")
             api_key = None

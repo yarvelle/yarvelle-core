@@ -381,7 +381,7 @@ async def test_deliberation_turn_streaming_emits_all_custom_events_end_to_end():
     builder.add_edge("deliberate", END)
     compiled_graph = builder.compile()
 
-    service = AgentExecutionService(model=mock_model, graph=compiled_graph)
+    service = AgentExecutionService(model=mock_model, graph=compiled_graph, default_agent_id="orchestrator")
 
     plan = ExecutionPlan(
         mode=ExecutionMode.DELIBERATE,
@@ -546,7 +546,7 @@ async def test_deliberation_multiround_revision_streaming():
     builder.add_edge("deliberate", END)
     compiled_graph = builder.compile()
 
-    service = AgentExecutionService(model=mock_model, graph=compiled_graph)
+    service = AgentExecutionService(model=mock_model, graph=compiled_graph, default_agent_id="orchestrator")
 
     plan = ExecutionPlan(
         mode=ExecutionMode.DELIBERATE,
@@ -604,7 +604,7 @@ async def test_deliberation_fallback_degradation_emits_deliberation_end():
     builder.add_edge("deliberate", END)
     compiled_graph = builder.compile()
 
-    service = AgentExecutionService(model=mock_model, graph=compiled_graph)
+    service = AgentExecutionService(model=mock_model, graph=compiled_graph, default_agent_id="orchestrator")
 
     plan = ExecutionPlan(
         mode=ExecutionMode.DELIBERATE,
@@ -685,7 +685,7 @@ async def test_deliberation_streaming_cross_domain_redaction_end_to_end():
     builder.add_edge("deliberate", END)
     compiled_graph = builder.compile()
 
-    service = AgentExecutionService(model=mock_model, graph=compiled_graph)
+    service = AgentExecutionService(model=mock_model, graph=compiled_graph, default_agent_id="orchestrator")
 
     # Client holds only domain_alpha authorization
     yielded_events: List[Dict[str, Any]] = []
@@ -763,7 +763,7 @@ async def test_deliberation_resume_turn_forwards_events():
 
     cp = MemorySaver()
     compiled_graph = builder.compile(checkpointer=cp)
-    service = AgentExecutionService(model=mock_model, graph=compiled_graph, checkpointer=cp)
+    service = AgentExecutionService(model=mock_model, graph=compiled_graph, default_agent_id="orchestrator", checkpointer=cp)
 
     class FakeStore:
         def get(self, id):
@@ -953,7 +953,7 @@ async def test_deliberation_resume_turn_cross_domain_execution_context_redaction
 
     cp = MemorySaver()
     compiled_graph = builder.compile(checkpointer=cp)
-    service = AgentExecutionService(model=mock_model, graph=compiled_graph, checkpointer=cp)
+    service = AgentExecutionService(model=mock_model, graph=compiled_graph, default_agent_id="orchestrator", checkpointer=cp)
 
     class FakeStore:
         def get(self, id):

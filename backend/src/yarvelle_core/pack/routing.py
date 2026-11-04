@@ -18,23 +18,57 @@ from yarvelle_core.pack.spec import PackSpec
 from yarvelle_core.schemas.routing import RoutingHints
 
 
+def _pack_default_agent(pack: PackSpec) -> Optional[str]:
+    """Returns the pack's configured ``orchestration.default_agent``, if any."""
+    orchestration = getattr(pack, "orchestration", None)
+    agent_id = getattr(orchestration, "default_agent", None) if orchestration is not None else None
+    agent_id = (agent_id or "").strip()
+    return agent_id or None
+
+
 def collect_routing_hints(packs: Sequence[PackSpec]) -> List[RoutingHints]:
-    """Extracts and normalizes RoutingHints from a collection of active packs."""
+    """Extracts and normalizes RoutingHints from a collection of active packs.
+
+    A pack contributes its explicit ``routing_hints`` when present. Otherwise
+    hints are built from pack metadata only when the pack names an
+    ``orchestration.default_agent``; core never invents an agent id, so a pack
+    with neither is left out of domain routing.
+    """
     hints: List[RoutingHints] = []
     for pack in packs:
         if pack.routing_hints is not None:
             hints.append(pack.routing_hints)
-        else:
-            # Generate fallback hints from pack metadata
-            hints.append(
-                RoutingHints(
-                    domain=pack.domain,
-                    description=pack.description or f"Requests pertaining to {pack.name} ({pack.domain}).",
-                    default_agent=f"{pack.domain}-guide",
-                    domains_info={"categories": f"{pack.domain}.general"},
-                )
+            continue
+        default_agent = _pack_default_agent(pack)
+        if default_agent is None:
+            continue
+        hints.append(
+            RoutingHints(
+                domain=pack.domain,
+                description=pack.description or f"Requests pertaining to {pack.name} ({pack.domain}).",
+                default_agent=default_agent,
+                domains_info={"categories": f"{pack.domain}.general"},
             )
+        )
     return hints
+
+
+def resolve_default_agent(packs: Sequence[PackSpec]) -> Optional[str]:
+    """Returns the single default agent configured across packs, or ``None``.
+
+    Raises:
+        ValueError: if two packs configure different default agents.
+    """
+    found: Dict[str, str] = {}
+    for pack in packs:
+        agent_id = _pack_default_agent(pack)
+        if agent_id is not None:
+            found[pack.id] = agent_id
+    distinct = sorted(set(found.values()))
+    if len(distinct) > 1:
+        detail = ", ".join(f"{pid}={aid}" for pid, aid in sorted(found.items()))
+        raise ValueError(f"Packs configure conflicting orchestration.default_agent values: {detail}")
+    return distinct[0] if distinct else None
 
 
 def compose_orchestrator_routing_prompt(

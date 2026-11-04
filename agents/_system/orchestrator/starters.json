@@ -1,6 +1,6 @@
 [
-  "I have questions about my health insurance deductible and specialist copays.",
-  "Can you help me prepare a list of questions for my upcoming doctor appointment?",
-  "I want to build a sustainable daily hydration and mindfulness routine.",
-  "I uploaded a summary of benefits document. Can you extract its details?"
+  "Which specialist can help me with this request?",
+  "Help me plan the steps for a task that needs more than one agent.",
+  "What agents are available right now?",
+  "I uploaded a document. Can you extract its details?"
 ]

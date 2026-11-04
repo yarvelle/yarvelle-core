@@ -4,7 +4,7 @@ When a user uploads a document or asks to extract structured data:
 1. Read the file using the attach-read tool.
 2. Sanitize PII using the sanitize_pii tool.
 3. Extract structured data using the extract_structured_data tool,
-   selecting the appropriate schema (insurance, clinical, or generic).
+   selecting the matching dossier schema, or the generic schema when none fits.
 4. Validate numerical accuracy using the validate_grounding tool.
 5. Present the structured results to the user.
 

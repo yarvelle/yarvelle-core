@@ -139,7 +139,7 @@ async def test_high_volume_deliberation_events_streaming():
     builder.add_edge("volume", END)
     compiled_graph = builder.compile()
 
-    service = AgentExecutionService(model=mock_model, graph=compiled_graph)
+    service = AgentExecutionService(model=mock_model, graph=compiled_graph, default_agent_id="orchestrator")
 
     received_delib_events: List[Dict[str, Any]] = []
     wire_lines: List[str] = []
@@ -209,7 +209,7 @@ async def test_burst_interleaved_events_with_tokens_and_tools():
     builder.add_edge("interleave", END)
     compiled_graph = builder.compile()
 
-    service = AgentExecutionService(model=mock_model, graph=compiled_graph)
+    service = AgentExecutionService(model=mock_model, graph=compiled_graph, default_agent_id="orchestrator")
 
     event_sequence: List[str] = []
     async for event in service.execute_turn(
@@ -310,7 +310,7 @@ async def test_deliberation_resume_checkpointed_state_preservation():
 
     cp = MemorySaver()
     compiled_graph = builder.compile(checkpointer=cp)
-    service = AgentExecutionService(model=mock_model, graph=compiled_graph, checkpointer=cp)
+    service = AgentExecutionService(model=mock_model, graph=compiled_graph, default_agent_id="orchestrator", checkpointer=cp)
 
     class MockAppStore:
         def get(self, app_id: str) -> Any:
@@ -375,7 +375,7 @@ async def test_deliberation_resume_cross_domain_redaction():
 
     cp = MemorySaver()
     compiled_graph = builder.compile(checkpointer=cp)
-    service = AgentExecutionService(model=mock_model, graph=compiled_graph, checkpointer=cp)
+    service = AgentExecutionService(model=mock_model, graph=compiled_graph, default_agent_id="orchestrator", checkpointer=cp)
 
     class MockAppStore:
         def get(self, app_id: str) -> Any:
@@ -437,7 +437,7 @@ async def test_deliberation_resume_with_execution_context_param():
 
     cp = MemorySaver()
     compiled_graph = builder.compile(checkpointer=cp)
-    service = AgentExecutionService(model=mock_model, graph=compiled_graph, checkpointer=cp)
+    service = AgentExecutionService(model=mock_model, graph=compiled_graph, default_agent_id="orchestrator", checkpointer=cp)
 
     class MockAppStore:
         def get(self, app_id: str) -> Any:

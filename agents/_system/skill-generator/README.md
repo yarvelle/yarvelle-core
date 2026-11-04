@@ -1,6 +1,6 @@
 # Skill Generator Agent
 
-The **Skill Generator** is a specialized meta-agent (`hidden: true`) within Carefold.
+The **Skill Generator** is a built-in meta-agent (`hidden: true`).
 
 ## Purpose
 When the **Orchestrator** analyzes a user inquiry and determines that:

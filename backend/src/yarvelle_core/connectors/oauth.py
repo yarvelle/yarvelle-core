@@ -16,7 +16,7 @@ Implements:
 - Mode L fixed loopback redirect URI (`http://127.0.0.1:8000/api/v1/oauth/callback`) vs
   Mode S HTTPS redirect URI resolution (`Titan S10`).
 - HMAC-SHA256 signed state tokens binding `(user_id, profile_id, connection_id, code_verifier, nonce, exp)`.
-- Envelope-encrypted credential persistence in `carefold.vault` with AAD binding.
+- Envelope-encrypted credential persistence in `yarvelle_core.vault` with AAD binding.
 - `Titan S6` optimistic concurrency versioned token refresh (`WHERE token_version = :v`),
   handling rotating refresh tokens and concurrent worker races safely.
 """

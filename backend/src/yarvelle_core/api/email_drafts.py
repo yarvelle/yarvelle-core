@@ -247,7 +247,7 @@ async def get_profile_email_draft_eml(
     await db.commit()
     await db.refresh(draft)
 
-    filename = f"carefold-draft-{draft.id[:8]}.eml"
+    filename = f"draft-{draft.id[:8]}.eml"
     if raw:
         return Response(
             content=eml_content,

@@ -2,11 +2,9 @@
 routing_rules: []
 domain_keywords: {}
 
+# Packs register their own dossier types (register_dossier_type) and pass
+# dossier_type explicitly; core only knows the generic type.
 dossier_types:
-  insurance:
-    - '\b(insurance|benefit|deductible|copay|co-pay|coverage)\b'
-  clinical:
-    - '\b(visit|physician|doctor|appointment|checklist|symptoms?)\b'
   generic:
     - '\b(summary|overview|document|notes?)\b'
 

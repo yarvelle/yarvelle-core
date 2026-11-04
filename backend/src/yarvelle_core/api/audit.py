@@ -24,6 +24,7 @@ from yarvelle_core.api.profiles import get_user_profile_access
 from yarvelle_core.audit.logger import get_recent_audit_events
 from yarvelle_core.auth.ports import UserProfile
 from yarvelle_core.constants.api import ROUTE_AUDIT
+from yarvelle_core.constants.agents import UNKNOWN_AGENT_ID
 from yarvelle_core.constants.defaults import (
     DEFAULT_AUDIT_LIMIT,
     MAX_AUDIT_LIMIT,
@@ -45,7 +46,7 @@ def _record_to_schema(record: AuditEventRecord, full: bool = False) -> AuditEven
         except Exception:
             meta = {}
 
-    agent_id = meta.get("agent_id") or record.principal or "carefold-agent"
+    agent_id = meta.get("agent_id") or record.principal or UNKNOWN_AGENT_ID
     allowed = meta.get("allowed")
     if allowed is None and record.decision:
         allowed = (record.decision == "allow")

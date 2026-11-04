@@ -71,10 +71,10 @@ AGENT_MANIFEST_FILE: str = "agent.yaml"
 SKILL_MANIFEST_FILENAME: str = "SKILL.md"
 SKILL_MANIFEST_FILE: str = "SKILL.md"
 
-CAREFOLD_YAML_FILENAME: str = "yarvelle_core.yaml"
-CAREFOLD_YAML_FILE: str = "yarvelle_core.yaml"
-CAREFOLD_YAML_MIGRATED_FILENAME: str = "yarvelle_core.yaml.migrated"
-CAREFOLD_YAML_MIGRATED_FILE: str = "yarvelle_core.yaml.migrated"
+YARVELLE_YAML_FILENAME: str = "yarvelle_core.yaml"
+YARVELLE_YAML_FILE: str = "yarvelle_core.yaml"
+YARVELLE_YAML_MIGRATED_FILENAME: str = "yarvelle_core.yaml.migrated"
+YARVELLE_YAML_MIGRATED_FILE: str = "yarvelle_core.yaml.migrated"
 
 STARTERS_FILENAME: str = "starters.json"
 STARTERS_FILE: str = "starters.json"
@@ -84,7 +84,7 @@ README_FILE: str = "README.md"
 
 
 # ============================================================================
-# 4. YAML Resource Filenames (under carefold/resources/)
+# 4. YAML Resource Filenames (under yarvelle_core/resources/)
 # ============================================================================
 
 DISCLAIMERS_YAML_FILE: str = "disclaimers.yaml"

@@ -10,7 +10,7 @@ hidden: true
 description: >-
   Intelligent follow-up question chip generator. Analyzes user intent,
   conversation history, and assistant responses to propose 2-3 concise,
-  non-clinical next question suggestions guiding care navigation.
+  next question suggestions that keep the conversation moving.
 skills: []
 tools: []
 forbidden:

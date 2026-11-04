@@ -12,7 +12,7 @@
 """Zero-body audit event logging node (F-31).
 
 Logs audit records to the append-only JSONL log with ISO8601 timestamps.
-Applies Zero-Body privacy redaction via `carefold.audit.redaction.redact_audit_event`
+Applies Zero-Body privacy redaction via `yarvelle_core.audit.redaction.redact_audit_event`
 to strip user prompts and completion text by default.
 """
 
@@ -28,6 +28,7 @@ from yarvelle_core.audit.logger import _file_lock
 from yarvelle_core.audit.redaction import redact_audit_event
 from yarvelle_core.config import settings
 from yarvelle_core.constants.paths import DEFAULT_AUDIT_LOG_FILE, LOGS_DIR
+from yarvelle_core.constants.agents import UNKNOWN_AGENT_ID
 from yarvelle_core.workflows.nodes.base import BaseNode
 
 logger = logging.getLogger(__name__)
@@ -42,7 +43,7 @@ class AuditNode(BaseNode):
     async def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """Flushes an audit event to the append-only JSONL log with an ISO8601 timestamp."""
         iso_timestamp = datetime.now(timezone.utc).isoformat()
-        agent_id = str(state.get("current_agent") or state.get("agent_id") or "carefold-agent")
+        agent_id = str(state.get("current_agent") or state.get("agent_id") or UNKNOWN_AGENT_ID)
         thread_id = state.get("thread_id")
 
         event_type = "refuse" if (state.get("is_refusal") or state.get("refused")) else ("error" if state.get("error") else "run")

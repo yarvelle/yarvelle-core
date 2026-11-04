@@ -205,8 +205,11 @@ def load_agent(
     if "license" not in parsed_yaml and "license" in meta_dict:
         parsed_yaml["license"] = meta_dict["license"]
 
-    if "care_stages" not in parsed_yaml and "care_stages" in meta_dict:
-        parsed_yaml["care_stages"] = meta_dict["care_stages"]
+    # Pack-defined catalog fields live under ``extensions``; agent.yaml wins per key.
+    meta_ext = meta_dict.get("extensions")
+    if isinstance(meta_ext, dict) and meta_ext:
+        yaml_ext = parsed_yaml.get("extensions")
+        parsed_yaml["extensions"] = {**meta_ext, **(yaml_ext if isinstance(yaml_ext, dict) else {})}
 
     if "target_audience" not in parsed_yaml and "target_audience" in meta_dict:
         parsed_yaml["target_audience"] = meta_dict["target_audience"]
@@ -439,7 +442,7 @@ def load_all_agents(
                     risk_class=agent.risk_class.value,
                     domain=agent.domain,
                     category=agent.category,
-                    care_stages=agent.care_stages,
+                    extensions=dict(agent.extensions),
                     target_audience=agent.target_audience,
                     tags=agent.tags,
                     icon=agent.icon,
@@ -470,7 +473,7 @@ def load_all_agents(
                     risk_class="wellness",
                     domain=AgentDomain.WELLNESS,
                     category="",
-                    care_stages=[],
+                    extensions={},
                     target_audience=[],
                     tags=[],
                     icon="Shield",

@@ -1,4 +1,4 @@
-# Carefold — Healthcare AI Agent Marketplace & Runtime
+# Yarvelle Core — Domain-Neutral AI Agent Runtime & Execution Engine
 # Copyright 2026 Spectrayan
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -17,15 +17,10 @@ id: _template
 title: Template Agent
 version: 0.1.0
 license: Apache-2.0
-care_stages:
-  - pre_visit
-  - during_visit
-  - post_visit
-  - daily_living
-  - follow_up
 target_audience:
-  - patient_adult
-  - caregiver
+  - user
+# Pack-defined catalog fields that core stores but does not interpret.
+extensions: {}
 tags:
   - template
   - starter
@@ -33,6 +28,6 @@ tags:
 icon: Shield
 maturity: stable
 hidden: true
-domain: wellness
-category: wellness.template
+domain: general
+category: general.template
 risk_class: education

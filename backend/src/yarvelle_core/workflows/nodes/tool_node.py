@@ -39,13 +39,14 @@ from yarvelle_core.engine.untrusted_content import wrap_tool_output
 from yarvelle_core.audit.redaction import redact_tool_args
 from yarvelle_core.config import settings
 from yarvelle_core.constants.api import SSE_EVENT_APPROVAL_REQUIRED
+from yarvelle_core.constants.agents import UNKNOWN_AGENT_ID
 from yarvelle_core.db.session import get_session_factory
 from yarvelle_core.db.models import Approval
 from yarvelle_core.logging import get_logger
 from yarvelle_core.tools.registry import CLOSED_TOOL_DEFINITIONS, TOOL_EXECUTORS
 from yarvelle_core.workflows.nodes.base import BaseNode
 
-logger = get_logger("carefold.workflows.nodes.tool_node")
+logger = get_logger("yarvelle_core.workflows.nodes.tool_node")
 
 
 class ToolNode(BaseNode):
@@ -115,12 +116,14 @@ class ToolNode(BaseNode):
 
         ws_root = Path(state.get("workspace_root") or settings.workspace_root)
         skills_dir = Path(state.get("skills_dir") or (ws_root / "skills"))
-        agent_id = str(state.get("current_agent") or state.get("agent_id") or "carefold-agent")
+        agent_id = str(state.get("current_agent") or state.get("agent_id") or UNKNOWN_AGENT_ID)
 
         agent_obj = None
         skills_list = []
         try:
-            agent_dir = find_agent_dir(ws_root / "agents", str(agent_id)) or (ws_root / "agents" / "visit-steward").resolve()
+            agent_dir = find_agent_dir(ws_root / "agents", str(agent_id))
+            if agent_dir is None:
+                raise LookupError(f"agent '{agent_id}' has no folder under {ws_root / 'agents'}")
             agent_obj, _, skills_list = load_agent(agent_dir, skills_dir)
         except Exception:
             agent_obj = type("Agent", (), {"id": agent_id, "skills": []})()

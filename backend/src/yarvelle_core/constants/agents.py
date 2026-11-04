@@ -9,7 +9,7 @@
 #
 # Required Notice: Copyright 2026 Spectrayan (https://spectrayan.com)
 
-"""Carefold agent identifiers, defaults, and delegation constants (Milestone 6).
+"""Core agent identifiers, defaults, and delegation constants.
 
 Centralizes all agent IDs, tool identifiers, risk classes, and orchestration
 execution defaults, eliminating hardcoded string literals across runtime nodes.
@@ -26,24 +26,24 @@ from typing import FrozenSet
 AGENT_ORCHESTRATOR: str = "orchestrator"
 AGENT_DOCUMENT_EXTRACTOR: str = "document-extractor"
 AGENT_DB_OPERATOR: str = "db-operator"
-AGENT_VISIT_STEWARD: str = "visit-steward"
-AGENT_BENEFITS_GUIDE: str = "benefits-guide"
-AGENT_HABIT_COMPANION: str = "habit-companion"
+AGENT_SKILL_GENERATOR: str = "skill-generator"
 AGENT_SUGGESTION_GENERATOR: str = "suggestion-generator"
 AGENT_TEMPLATE: str = "_template"
 
+# System agents shipped with core (agents/_system). Domain agents come from
+# packs; core never names them and never falls back to one.
 BUNDLED_AGENT_IDS: FrozenSet[str] = frozenset({
     AGENT_ORCHESTRATOR,
-    AGENT_VISIT_STEWARD,
-    AGENT_BENEFITS_GUIDE,
-    AGENT_HABIT_COMPANION,
     AGENT_DOCUMENT_EXTRACTOR,
+    AGENT_DB_OPERATOR,
+    AGENT_SKILL_GENERATOR,
     AGENT_SUGGESTION_GENERATOR,
 })
 ALL_BUNDLED_AGENT_IDS: FrozenSet[str] = BUNDLED_AGENT_IDS
 
-
-DEFAULT_ROUTING_FALLBACK_AGENT: str = AGENT_VISIT_STEWARD
+# Attribution label for audit records and notes written without an agent in
+# context. It is never used to pick an agent to run.
+UNKNOWN_AGENT_ID: str = "unknown"
 
 
 # ============================================================================
@@ -125,18 +125,17 @@ DEFAULT_ORCHESTRATOR_MAX_ITERATIONS: int = 5
 ORCHESTRATOR_MAX_ITERATIONS: int = 5
 
 __all__ = [
-    "AGENT_BENEFITS_GUIDE",
+    "AGENT_DB_OPERATOR",
     "AGENT_DOCUMENT_EXTRACTOR",
-    "AGENT_HABIT_COMPANION",
     "AGENT_ORCHESTRATOR",
+    "AGENT_SKILL_GENERATOR",
+    "AGENT_SUGGESTION_GENERATOR",
     "AGENT_TEMPLATE",
-    "AGENT_VISIT_STEWARD",
     "ALL_BUNDLED_AGENT_IDS",
     "BUNDLED_AGENT_IDS",
     "DEFAULT_CAN_DELEGATE",
     "DEFAULT_MAX_ITERATIONS",
     "DEFAULT_ORCHESTRATOR_MAX_ITERATIONS",
-    "DEFAULT_ROUTING_FALLBACK_AGENT",
     "DELEGATION_TOOLS",
     "EXPANDED_PHASE_0_REGISTRY",
     "EXTRACTION_TOOLS",
@@ -155,4 +154,5 @@ __all__ = [
     "TOOL_SKILL_DOCS",
     "TOOL_VALIDATE_GROUNDING",
     "TOOL_WORKSPACE_NOTE",
+    "UNKNOWN_AGENT_ID",
 ]

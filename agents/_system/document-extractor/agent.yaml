@@ -9,8 +9,8 @@ max_iterations: 3
 hidden: true
 description: >-
   Document analysis and structured data extraction agent. Reads uploaded
-  PDFs, text files, and tables. Extracts structured dossiers for insurance
-  benefits, clinical visit notes, and generic documents. Sanitizes PII
+  PDFs, text files, and tables. Extracts structured dossiers from typed
+  and generic documents. Sanitizes PII
   before processing. Validates extracted data against source text.
 skills: []
 tools:

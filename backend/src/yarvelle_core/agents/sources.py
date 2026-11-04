@@ -138,6 +138,18 @@ def _json_list(value: Any) -> List[Any]:
     return parsed if isinstance(parsed, list) else []
 
 
+def _json_dict(value: Any) -> Dict[str, Any]:
+    if value is None or value == "":
+        return {}
+    if isinstance(value, dict):
+        return dict(value)
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
 def _persona_value(value: Any) -> Any:
     if isinstance(value, str) and value.lstrip().startswith("{"):
         try:
@@ -176,12 +188,13 @@ def agent_row_to_record(row: Any) -> Dict[str, Any]:
         ("skills", "skills_json"),
         ("tools", "tools_json"),
         ("tags", "tags_json"),
-        ("care_stages", "care_stages_json"),
         ("target_audience", "target_audience_json"),
         ("forbidden", "forbidden_json"),
     ):
         raw = get(field_name)
         record[field_name] = _json_list(raw if raw is not None else get(column))
+    raw_extensions = get("extensions")
+    record["extensions"] = _json_dict(raw_extensions if raw_extensions is not None else get("extensions_json"))
     return record
 
 

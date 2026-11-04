@@ -17,12 +17,10 @@ boundary thresholds, and filesystem paths.
 
 from yarvelle_core.constants import agents, api, defaults, extraction, models, paths
 from yarvelle_core.constants.agents import (
-    AGENT_BENEFITS_GUIDE,
     AGENT_DOCUMENT_EXTRACTOR,
-    AGENT_HABIT_COMPANION,
     AGENT_ORCHESTRATOR,
     AGENT_TEMPLATE,
-    AGENT_VISIT_STEWARD,
+    UNKNOWN_AGENT_ID,
     DELEGATION_TOOLS,
     EXTRACTION_TOOLS,
 )
@@ -154,10 +152,8 @@ __all__ = [
     # Agents
     "AGENT_ORCHESTRATOR",
     "AGENT_DOCUMENT_EXTRACTOR",
-    "AGENT_VISIT_STEWARD",
-    "AGENT_BENEFITS_GUIDE",
-    "AGENT_HABIT_COMPANION",
     "AGENT_TEMPLATE",
+    "UNKNOWN_AGENT_ID",
     "DELEGATION_TOOLS",
     "EXTRACTION_TOOLS",
     # Re-exported key constants for direct access from yarvelle_core.constants
