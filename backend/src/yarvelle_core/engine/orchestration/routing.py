@@ -19,6 +19,7 @@ and routes of the same kind are tried in declaration order.
 
 from __future__ import annotations
 
+import mimetypes
 from fnmatch import fnmatchcase
 from typing import Any, Iterable, List, Mapping, Optional, Sequence
 
@@ -45,7 +46,9 @@ def attachment_media_types(state: Mapping[str, Any]) -> List[str]:
     out: List[str] = []
     for item in state.get("attachments") or ():
         value: Any = None
-        if isinstance(item, Mapping):
+        if isinstance(item, str):
+            value = mimetypes.guess_type(item)[0]
+        elif isinstance(item, Mapping):
             value = next((item.get(k) for k in _MEDIA_TYPE_KEYS if item.get(k)), None)
         else:
             value = next((getattr(item, k, None) for k in _MEDIA_TYPE_KEYS if getattr(item, k, None)), None)

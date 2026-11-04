@@ -165,6 +165,11 @@ class AgentState(TypedDict, total=False):
     provisioned_references: Dict[str, Any]
     specialist_outputs: Dict[str, Any]
 
+    # Hybrid routing (fixed routes, then the main agent)
+    guardrail_flags: List[str]
+    route_decision: Optional[Dict[str, Any]]
+    orchestration_notices: List[Dict[str, Any]]
+
     # Phase 1 Cognitive Memory Recall fields (Phase3, R3)
     recalled_memories: List[Dict[str, Any]]
     memory_context: Optional[str]
