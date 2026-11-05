@@ -134,6 +134,7 @@ def check_invariants(trace: TurnTrace, pack: PackView) -> List[CheckResult]:
 
 _ROUTE_EVENT_FOR = {
     "user_selected": "route.user_selected",
+    "model_classified": "route.classified",
     "fixed_route": "route.fixed",
     "default_agent": "route.default",
     "main_agent": "route.main_agent",
@@ -150,6 +151,18 @@ def check_route_audited(trace: TurnTrace) -> CheckResult:
     if trace.route_events[-1] != want:
         return _fail("route_audited", f"expected {want} last, got {trace.route_events}")
     return _ok("route_audited", ", ".join(trace.route_events))
+
+
+def check_hidden_pick_refused(trace: TurnTrace, turn: Turn, pack: PackView) -> List[CheckResult]:
+    """A pick of a hidden agent is refused, audited, and the turn routed instead."""
+    pick = turn.explicit_agent
+    if not pick or pick not in pack.hidden:
+        return []
+    if trace.route == "user_selected" or pick in trace.agents:
+        return [_fail("hidden_pick_refused", f"hidden agent {pick!r} took the turn (route {trace.route})")]
+    if "route.rejected" not in trace.route_events:
+        return [_fail("hidden_pick_refused", f"no route.rejected record; got {trace.route_events}")]
+    return [_ok("hidden_pick_refused", f"routed {trace.route}")]
 
 
 def check_turn_tasks_recorded(trace: TurnTrace) -> CheckResult:
@@ -365,6 +378,7 @@ def check_turn(
     """Runs every invariant and every expectation set on ``turn``."""
     expect = turn.expect
     results = check_invariants(trace, pack)
+    results += check_hidden_pick_refused(trace, turn, pack)
     results += check_guardrail_flag(trace, turn)
     results.append(check_route(trace, expect))
     results += check_agents(trace, expect)
@@ -392,6 +406,7 @@ __all__ = [
     "check_continuity",
     "check_deliberation",
     "check_guardrail_flag",
+    "check_hidden_pick_refused",
     "check_invariants",
     "check_model_calls_before_route",
     "check_notices",

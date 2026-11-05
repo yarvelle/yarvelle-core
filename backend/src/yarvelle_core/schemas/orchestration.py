@@ -196,9 +196,14 @@ class RouteSource(str, Enum):
     FIXED_ROUTE = "fixed_route"
     USER_SELECTED = "user_selected"
     DEFAULT_AGENT = "default_agent"
+    MODEL_CLASSIFIED = "model_classified"
+    """A routing model picked one agent (graphs without the main agent)."""
 
 
 FallbackReason = Literal["model_unavailable", "main_agent_failed"]
+
+RejectedPickReason = Literal["hidden", "unknown"]
+"""Why a caller's agent pick was refused: the agent is hidden, or not registered."""
 
 
 class RouteDecision(_Strict):
@@ -327,6 +332,7 @@ __all__ = [
     "DEFAULT_MAX_AGENTS",
     "DEFAULT_TURN_TIMEOUT_S",
     "FallbackReason",
+    "RejectedPickReason",
     "FixedRoute",
     "GuardrailFlagTrigger",
     "HasAttachmentsTrigger",

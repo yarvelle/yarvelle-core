@@ -24,6 +24,8 @@ OrchestrationAuditEventType = Literal[
     "route.fixed",
     "route.default",
     "route.main_agent",
+    "route.classified",
+    "route.rejected",
     "task.started",
     "task.completed",
     "task.failed",
@@ -33,7 +35,10 @@ OrchestrationAuditEventType = Literal[
 """Multi-agent orchestration events.
 
 ``route.*`` events carry a ``RouteDecision`` under ``details["route"]``
-(``RouteDecision.to_audit_payload()``). ``task.*`` events describe one subagent
+(``RouteDecision.to_audit_payload()``), except ``route.rejected``: a caller
+picked an agent that may not be picked directly (hidden or unknown), and
+``details["rejected_pick"]`` names it and why. The turn's own ``route.*``
+record follows. ``task.*`` events describe one subagent
 hand-off (one ``task`` tool call) and set ``task_id`` and ``agent_id``.
 """
 
@@ -49,6 +54,8 @@ AuditEventType = Literal[
     "route.fixed",
     "route.default",
     "route.main_agent",
+    "route.classified",
+    "route.rejected",
     "task.started",
     "task.completed",
     "task.failed",

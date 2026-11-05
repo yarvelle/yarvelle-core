@@ -53,8 +53,9 @@ checks:
   call cap, hidden agents never ran, provenance carries the agent titles,
   no subagent tokens reached the stream, the reply names no agent ids, the
   route has a matching `route.*` audit record, every hand-off has one stored
-  record with the same final state, and (on the fake backend) the script
-  matched the calls made;
+  record with the same final state, a pick of a hidden agent was refused
+  (with a `route.rejected` record) and the turn routed instead, and (on the
+  fake backend) the script matched the calls made;
 - when the scenario sets them: the route, required and forbidden agents,
   the guardrail flag raised from the text (`input.guardrail_flag`), the
   route, required and forbidden agents, task-call bounds, continuity with an
@@ -62,8 +63,18 @@ checks:
   reply text and budgets.
 
 The fake backend replays the `fake:` script of each turn: main-agent steps
-(`task`, `answer` or `error`) and per-agent replies (text, `{error: ...}` or
-`{tool: name}`).
+(`task`, `answer`, `error` or `route`) and per-agent replies (text,
+`{error: ...}` or `{tool: name}`).
+
+A scenario's `routing` picks the graph it runs on:
+
+- `hybrid` (the default): the pack's fixed routes, then the main agent, then
+  the default agent;
+- `classifier`: the pack's fixed routes, then a routing model that picks one
+  agent (script it with a `route: <agent-id>` step); the route is
+  `model_classified`;
+- `builtin`: no pack routes. Attachments take core's built-in document route
+  (`fixed_route:builtin-documents`); other turns go to the routing model.
 
 ## Gates
 

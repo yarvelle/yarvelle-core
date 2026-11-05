@@ -111,7 +111,10 @@ def test_lint_clean_scenario(pack):
     [
         ({"user": "x", "expect": {"agents_all_of": ["nobody"]}}, "not in pack"),
         ({"user": "x", "expect": {"agents_exactly": ["ghost"]}}, "hidden"),
-        ({"user": "x", "explicit_agent": "ghost"}, "hidden"),
+        ({"user": "x", "explicit_agent": "ghost", "expect": {"route": "user_selected"}}, "hidden"),
+        ({"user": "x", "expect": {"route": "model_classified"}}, "routing 'classifier'"),
+        ({"user": "x", "fake": {"main": [{"route": "alpha"}]}}, "routing 'classifier'"),
+        ({"user": "x", "fake": {"main": [{"route": "nobody"}]}}, "fake main route"),
         ({"user": "x", "expect": {"route": "fixed_route:nope"}}, "fixed route"),
         ({"user": "x", "expect": {"route": "default_agent:whatever"}}, "default_agent reason"),
         ({"user": "x", "expect": {"route": "user_selected"}}, "needs explicit_agent"),
@@ -140,7 +143,7 @@ def test_shipped_scenarios_lint_against_shipped_pack(monkeypatch: pytest.MonkeyP
         monkeypatch.delenv(name, raising=False)
     pack = load_eval_pack(EVAL_DIR / "pack")
     loaded = load_scenario_files([EVAL_DIR / "scenarios"])
-    assert 12 <= len(loaded) <= 15
+    assert 12 <= len(loaded) <= 24
     for path, sc in loaded:
         assert lint_against_pack(sc, pack) == [], path
     assert pack.hidden_ids == ["internal-auditor"]
@@ -169,3 +172,40 @@ def test_lint_flag_must_be_raised_by_the_user_text(pack):
     assert silent and "does not raise" in silent[0]
     unknown = lint_against_pack(_scenario([{"user": "asap", "input": {"guardrail_flag": "night"}}]), pack)
     assert unknown and "not listed" in unknown[0]
+
+
+def test_lint_allows_a_hidden_pick_that_is_routed(pack):
+    sc = _scenario([{"user": "x", "explicit_agent": "ghost", "expect": {"route": "main_agent"}}])
+    assert lint_against_pack(sc, pack) == []
+
+
+def _routed(routing, turns):
+    return parse_scenario(
+        {"schema": 1, "id": "s", "title": "t", "pack": "p", "backends": ["fake"], "routing": routing, "turns": turns}
+    )
+
+
+def test_lint_routing_modes(pack):
+    classified = {"user": "x", "expect": {"route": "model_classified"}, "fake": {"main": [{"route": "alpha"}]}}
+    assert lint_against_pack(_routed("classifier", [classified]), pack) == []
+    main = {"user": "x", "expect": {"route": "main_agent"}}
+    assert "routing 'hybrid'" in lint_against_pack(_routed("classifier", [main]), pack)[0]
+    builtin = {"user": "x", "expect": {"route": "fixed_route:builtin-documents"}}
+    assert lint_against_pack(_routed("builtin", [builtin]), pack) == []
+    assert "fixed route" in lint_against_pack(_routed("builtin", [{"user": "x", "expect": {"route": "fixed_route:rush"}}]), pack)[0]
+    assert "fixed route" in lint_against_pack(_routed("hybrid", [builtin]), pack)[0]
+
+
+def test_fake_main_step_takes_exactly_one_kind():
+    from yarvelle_core.testing.orch_eval.schema import FakeMainStep
+
+    assert FakeMainStep(route="alpha").route == "alpha"
+    with pytest.raises(ValueError):
+        FakeMainStep(route="alpha", answer="hi")
+    with pytest.raises(ValueError):
+        FakeMainStep()
+
+
+def test_unknown_routing_mode_is_rejected():
+    with pytest.raises(Exception):
+        _routed("guess", [{"user": "x"}])

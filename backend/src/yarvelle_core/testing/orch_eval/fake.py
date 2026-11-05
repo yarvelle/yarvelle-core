@@ -41,6 +41,8 @@ SUGGESTION_ROLE = "__suggestion__"
 MAIN_AGENT_NAME = "main-agent"
 PERSONA_MARKER = "You are the "
 TASK_TOOL = "task"
+ROUTE_DECISION_TOOL = "OrchestratorDecision"
+"""Tool name of the routing model's structured output (its schema's name)."""
 
 Step = Tuple[str, Any]
 
@@ -96,6 +98,8 @@ class ScriptedFakeChatModel(BaseChatModel):
             for step in script.main:
                 if step.task is not None:
                     main.append(("task", list(step.task)))
+                elif step.route is not None:
+                    main.append(("route", step.route))
                 elif step.error is not None:
                     main.append(("error", step.error))
                 else:
@@ -177,6 +181,18 @@ class ScriptedFakeChatModel(BaseChatModel):
                         "args": {"subagent_type": agent_id, "description": f"Handle your part of: {_last_user(messages)}"},
                     }
                     for agent_id in value
+                ],
+            )
+        if kind == "route":
+            # The routing model's structured pick (read through the tool call).
+            return AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": ROUTE_DECISION_TOOL,
+                        "id": self._next_id("route"),
+                        "args": {"agent_id": value, "reasoning": "Scripted routing pick.", "instructions": ""},
+                    }
                 ],
             )
         if kind == "tool":

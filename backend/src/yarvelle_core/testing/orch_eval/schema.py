@@ -34,9 +34,18 @@ OverlapMode = Literal["equal", "subset", "overlap"]
 SCENARIO_ID_PATTERN = r"^[a-z0-9][a-z0-9_-]{0,63}$"
 AGENT_ID_PATTERN = r"^[a-z0-9][a-z0-9_-]{0,63}$"
 ROUTE_PATTERN = (
-    r"^(main_agent|user_selected|fixed_route:[a-z0-9_-]{1,64}"
+    r"^(main_agent|user_selected|model_classified|fixed_route:[a-z0-9_-]{1,64}"
     r"|default_agent:[a-z0-9_-]{1,64})$"
 )
+
+RoutingMode = Literal["hybrid", "classifier", "builtin"]
+"""How the scenario's graph routes unpinned turns.
+
+``hybrid``: pack fixed routes, then the main agent (the default).
+``classifier``: pack fixed routes, then a routing model picks one agent.
+``builtin``: no pack routes; core's built-in document route, then a routing
+model picks one agent. The pack's default agent still applies.
+"""
 
 AgentId = str
 
@@ -166,17 +175,22 @@ class JudgeSpec(_Strict):
 
 
 class FakeMainStep(_Strict):
-    """One scripted main-agent response: delegate, answer, or fail."""
+    """One scripted main-agent response: delegate, answer, or fail.
+
+    ``route`` scripts the routing model's pick of one agent, for scenarios
+    whose graph routes without the main agent.
+    """
 
     task: Optional[list[AgentId]] = None
     answer: Optional[str] = None
     error: Optional[str] = Field(default=None, min_length=1)
+    route: Optional[AgentId] = Field(default=None, pattern=AGENT_ID_PATTERN)
 
     @model_validator(mode="after")
     def _one_of(self) -> "FakeMainStep":
-        given = [v for v in (self.task, self.answer, self.error) if v is not None]
+        given = [v for v in (self.task, self.answer, self.error, self.route) if v is not None]
         if len(given) != 1:
-            raise ValueError("a fake main step needs exactly one of 'task', 'answer' or 'error'")
+            raise ValueError("a fake main step needs exactly one of 'task', 'answer', 'error' or 'route'")
         if self.task is not None:
             if not self.task:
                 raise ValueError("a fake 'task' step needs at least one agent id")
@@ -237,6 +251,7 @@ class Scenario(_Strict):
     backends: list[BackendName] = Field(..., min_length=1)
     samples: dict[BackendName, int] = Field(default_factory=dict)
     limits: Optional[ScenarioLimits] = None
+    routing: RoutingMode = "hybrid"
     turns: list[Turn] = Field(..., min_length=1)
 
     model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)

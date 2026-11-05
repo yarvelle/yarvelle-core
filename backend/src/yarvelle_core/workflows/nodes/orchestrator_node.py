@@ -31,8 +31,17 @@ from pydantic import BaseModel, Field
 
 from yarvelle_core.agents.registry import AgentRegistry, _extract_first_line
 from yarvelle_core.config import settings
-from yarvelle_core.engine.orchestration.routing import has_attachments, select_fixed_route
-from yarvelle_core.engine.orchestration.runtime import MAIN_AGENT_ID, record_route
+from yarvelle_core.engine.orchestration.routing import (
+    BUILTIN_DOCUMENT_ROUTE_ID,
+    has_attachments,
+    select_fixed_route,
+)
+from yarvelle_core.engine.orchestration.runtime import (
+    MAIN_AGENT_ID,
+    pick_rejection,
+    record_rejected_pick,
+    record_route,
+)
 from yarvelle_core.engine.orchestration.task_guard import AuditSink
 from yarvelle_core.constants.agents import AGENT_DOCUMENT_EXTRACTOR, AGENT_ORCHESTRATOR
 from yarvelle_core.constants.paths import AGENTS_DIR, SKILLS_DIR
@@ -336,6 +345,30 @@ class OrchestratorNode(BaseNode):
             str(state["thread_id"]) if state.get("thread_id") else None,
         )
 
+    async def _reject_hidden_pick(self, state: Dict[str, Any]) -> Optional[str]:
+        """Refuses a caller's pick of a hidden agent; returns the refused id.
+
+        Hidden agents only run when routing sends work to them. The pick is
+        dropped, a ``route.rejected`` record is written, and the turn is
+        routed as if nothing had been picked (fixed routes, then the main
+        agent or the routing model, then the default agent).
+        """
+        pick = state.get("explicit_agent")
+        if not pick or str(pick) in ("orchestrator", "supervisor", "unknown"):
+            return None
+        pick = str(pick).strip()
+        if pick_rejection(self.registry, pick) != "hidden":
+            return None
+        logger.warning("Refused a direct pick of hidden agent '%s'; routing the turn instead", pick)
+        await record_rejected_pick(
+            self.audit_sink,
+            pick,
+            "hidden",
+            _turn_id(state),
+            str(state["thread_id"]) if state.get("thread_id") else None,
+        )
+        return pick
+
     def _no_route_error(self, reason: str) -> Dict[str, Any]:
         """Returns an error state when no agent can be chosen and no pack default is set."""
         err_msg = (
@@ -350,8 +383,11 @@ class OrchestratorNode(BaseNode):
         state: Dict[str, Any],
         prompt_text: str,
         raw_messages: List[Any],
-    ) -> OrchestratorDecision:
-        """Executes legacy single-hop dynamic catalog prompt and structured decision."""
+    ) -> Optional[OrchestratorDecision]:
+        """Executes legacy single-hop dynamic catalog prompt and structured decision.
+
+        Returns None when the model gives no usable decision.
+        """
         system_prompt = self._build_system_prompt(state)
         lc_messages: List[BaseMessage] = [SystemMessage(content=system_prompt)]
 
@@ -403,30 +439,12 @@ class OrchestratorNode(BaseNode):
                 except Exception:
                     pass
 
-                if decision is None:
-                    target = (self.default_agent or "")
-                    decision = OrchestratorDecision(
-                        agent_id=target,
-                        reasoning=f"Unparseable routing response; default agent {target or '(none)'}",
-                        instructions="",
-                    )
         except Exception as exc:
             logger.warning("Orchestrator structured model call failed (%s); triggering fallback", exc)
-            target = (self.default_agent or "")
-            decision = OrchestratorDecision(
-                agent_id=target,
-                reasoning=f"Routing model error ({type(exc).__name__}); default agent {target or '(none)'}",
-                instructions="",
-            )
+            decision = None
 
-        if decision is None:
-            target = (self.default_agent or "")
-            decision = OrchestratorDecision(
-                agent_id=target,
-                reasoning="Default decision fallback",
-                instructions="",
-            )
-
+        # No usable answer: the caller hands the turn to the default agent
+        # with a notice and a ``route.default`` record.
         return decision
 
     async def _execute_two_hop(
@@ -434,8 +452,11 @@ class OrchestratorNode(BaseNode):
         state: Dict[str, Any],
         prompt_text: str,
         raw_messages: List[Any],
-    ) -> Tuple[OrchestratorDecision, List[AgentManifest]]:
-        """Executes Tier-1 Domain Classification followed by Tier-2 Specialist Picking via CatalogPort."""
+    ) -> Tuple[Optional[OrchestratorDecision], List[AgentManifest]]:
+        """Executes Tier-1 Domain Classification followed by Tier-2 Specialist Picking via CatalogPort.
+
+        The decision is None when no candidate or no usable pick came back.
+        """
         # 1. Tier-1 Domain Classifier invokes model.with_structured_output(DomainClassification)
         tier1_messages: List[BaseMessage] = [SystemMessage(content=self.tier1_prompt)]
         for m in raw_messages:
@@ -530,17 +551,9 @@ class OrchestratorNode(BaseNode):
                 limit=8,
             )
 
-        # Step 4: If 0 candidates, fall back to pattern fallback
+        # Step 4: no candidates; the caller falls back to the default agent
         if not candidates:
-            target = (self.default_agent or "")
-            return (
-                OrchestratorDecision(
-                    agent_id=target,
-                    reasoning=f"Catalog returned no candidates; default agent {target or '(none)'}",
-                    instructions="",
-                ),
-                [],
-            )
+            return None, []
 
         # 3. Tier-2 Specialist Picker targeting candidate set
         tier2_prompt = self._build_tier2_system_prompt(candidates)
@@ -601,14 +614,6 @@ class OrchestratorNode(BaseNode):
         except Exception as exc:
             logger.warning("Tier-2 specialist picker model call failed (%s); using candidate fallback", exc)
             decision = None
-
-        if decision is None:
-            fallback_id = self.default_agent or ""
-            decision = OrchestratorDecision(
-                agent_id=fallback_id,
-                reasoning=f"Tier-2 picker gave no decision; default agent {fallback_id or '(none)'}",
-                instructions="",
-            )
 
         return decision, candidates
 
@@ -905,7 +910,10 @@ class OrchestratorNode(BaseNode):
             prompt_text = str(state.get("prompt"))
 
         # 1. Explicit routing bypass (e.g., user selected agent in UI or pre-routed system state)
+        rejected = await self._reject_hidden_pick(state)
         explicit = state.get("explicit_agent") or state.get("routed_subgraph") or state.get("current_agent")
+        if rejected is not None and explicit == rejected:
+            explicit = None
         if explicit and explicit not in ("orchestrator", "supervisor", "unknown"):
             raw_explicit = str(explicit).strip()
             if self.registry.get(raw_explicit) is not None:
@@ -971,6 +979,14 @@ class OrchestratorNode(BaseNode):
         candidates: List[AgentManifest] = []
         raw_messages = list(state.get("messages", []))
         decision: Optional[OrchestratorDecision]
+        classified = False
+        if rejected is not None:
+            # A refused pick must not leave the pinned agent in place.
+            state["explicit_agent"] = None
+            state["current_agent"] = None
+            state["routed_subgraph"] = None
+        # A decision left from an earlier pass is never this pass's route.
+        state["route_decision"] = None
 
         if fixed is not None and fixed.agent_id:
             decision = OrchestratorDecision(
@@ -986,6 +1002,11 @@ class OrchestratorNode(BaseNode):
                 reasoning="Turn carries attachments.",
                 instructions="",
             )
+            state["route_decision"] = RouteDecision(
+                source=RouteSource.FIXED_ROUTE,
+                route_id=BUILTIN_DOCUMENT_ROUTE_ID,
+                agent_id=AGENT_DOCUMENT_EXTRACTOR,
+            ).model_dump(mode="json", exclude_none=True)
         elif self.model is None:
             # No model: the pack default takes the turn, with a notice. Never a guess.
             decision = self._fallback_to_default("model_unavailable", state)
@@ -993,7 +1014,7 @@ class OrchestratorNode(BaseNode):
                 return self._no_route_error("no model is configured")
         elif self.main_agent_enabled:
             # The main agent hands work to registered agents through the task tool.
-            return {
+            out: Dict[str, Any] = {
                 "current_agent": MAIN_AGENT_ID,
                 "routed_subgraph": MAIN_AGENT_ID,
                 "agent_id": MAIN_AGENT_ID,
@@ -1001,10 +1022,15 @@ class OrchestratorNode(BaseNode):
                 "orchestrator_instructions": "",
                 "next_step": MAIN_AGENT_ID,
             }
+            if rejected is not None:
+                out["explicit_agent"] = None
+            return out
         elif self.catalog is None:
             decision = await self._execute_single_hop(state, prompt_text, raw_messages)
+            classified = True
         else:
             decision, candidates = await self._execute_two_hop(state, prompt_text, raw_messages)
+            classified = True
 
         if decision is None or not str(decision.agent_id).strip():
             decision = self._fallback_to_default("main_agent_failed", state)
@@ -1056,6 +1082,11 @@ class OrchestratorNode(BaseNode):
         )
 
         effective_agent = plan.target_agents[0] if plan.target_agents else selected_id
+        if classified and not state.get("route_decision") and _AGENT_SLUG.match(effective_agent):
+            # The routing model picked the agent: record it like any other route.
+            state["route_decision"] = RouteDecision(
+                source=RouteSource.MODEL_CLASSIFIED, agent_id=effective_agent
+            ).model_dump(mode="json", exclude_none=True)
 
         result_payload: Dict[str, Any] = {
             "current_agent": effective_agent,
@@ -1068,6 +1099,8 @@ class OrchestratorNode(BaseNode):
             "provisioned_references": state.get("provisioned_references", {}),
             "provisioned_docs": list(state.get("provisioned_references", {}).keys()),
         }
+        if rejected is not None:
+            result_payload["explicit_agent"] = None
         if state.get("orchestration_notices"):
             result_payload["orchestration_notices"] = list(state["orchestration_notices"])
         if state.get("route_decision"):

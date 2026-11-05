@@ -54,6 +54,7 @@ from yarvelle_core.schemas.audit import AuditEvent
 from yarvelle_core.schemas.orchestration import (
     OrchestrationLimits,
     PackOrchestrationSpec,
+    RejectedPickReason,
     RouteDecision,
     RouteSource,
     SSEOrchestrationNoticeEvent,
@@ -219,6 +220,7 @@ _ROUTE_EVENTS = {
     RouteSource.FIXED_ROUTE: "route.fixed",
     RouteSource.DEFAULT_AGENT: "route.default",
     RouteSource.MAIN_AGENT: "route.main_agent",
+    RouteSource.MODEL_CLASSIFIED: "route.classified",
 }
 
 
@@ -243,6 +245,58 @@ async def record_route(
     if sink is None:
         return
     record = route_event(decision, turn_id, thread_id)
+    try:
+        await _emit(sink, record)
+    except Exception as err:
+        raise OrchestrationAuditError(f"could not record {record.event}") from err
+
+
+def pick_rejection(registry: Optional[AgentRegistry], agent_id: Optional[str]) -> Optional[RejectedPickReason]:
+    """Why ``agent_id`` may not be picked directly, or None when it may.
+
+    Hidden agents (system agents and any agent marked ``hidden``) only run when
+    routing sends work to them; a caller can never pick one. With no registry
+    to check against, nothing is refused here.
+    """
+    if not agent_id or registry is None:
+        return None
+    manifest = registry.get(agent_id)
+    if manifest is None:
+        return "unknown"
+    if getattr(manifest, "hidden", False):
+        return "hidden"
+    return None
+
+
+def rejected_pick_event(
+    agent_id: str,
+    reason: RejectedPickReason,
+    turn_id: Optional[str] = None,
+    thread_id: Optional[str] = None,
+) -> AuditEvent:
+    """The ``route.rejected`` audit record for a refused agent pick."""
+    return AuditEvent(
+        event="route.rejected",
+        agent_id=agent_id,
+        allowed=False,
+        reason=f"agent_pick_{reason}",
+        turn_id=turn_id,
+        thread_id=thread_id,
+        details={"rejected_pick": {"agent_id": agent_id, "reason": reason}},
+    )
+
+
+async def record_rejected_pick(
+    sink: Optional[AuditSink],
+    agent_id: str,
+    reason: RejectedPickReason,
+    turn_id: Optional[str] = None,
+    thread_id: Optional[str] = None,
+) -> None:
+    """Sends the ``route.rejected`` record to ``sink``; a failed write stops the turn."""
+    if sink is None:
+        return
+    record = rejected_pick_event(agent_id, reason, turn_id, thread_id)
     try:
         await _emit(sink, record)
     except Exception as err:
@@ -472,6 +526,10 @@ class HybridRouter:
         running anything: the caller hands the turn to that agent.
         """
         turn_id = turn_id or uuid.uuid4().hex
+        if explicit_agent and not self._is_visible(explicit_agent):
+            # The pick is ignored and routing carries on; the refusal is recorded.
+            reason = pick_rejection(self.registry, explicit_agent) or "hidden"
+            await record_rejected_pick(self.audit_sink, explicit_agent, reason, turn_id, thread_id)
         decision = self.decide(state, explicit_agent)
         if decision is None:
             return None
@@ -568,6 +626,9 @@ __all__ = [
     "store_turn_tasks",
     "TurnTaskSink",
     "compose_main_prompt",
+    "pick_rejection",
+    "record_rejected_pick",
+    "rejected_pick_event",
     "record_route",
     "route_event",
     "final_answer",

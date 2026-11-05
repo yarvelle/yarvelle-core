@@ -1,0 +1,44 @@
+# Without pack routes, attachments take core's built-in document route, and
+# other turns are routed by the routing model. A routing failure falls back
+# to the pack's default agent with a notice. Every route is audited.
+schema: 1
+id: builtin-document-route
+title: Built-in document route and routing-model fallback, all audited
+tags: [builtin, attachments, fallback, multi-turn]
+pack: eval-neutral
+backends: [fake]
+routing: builtin
+turns:
+  - user: "What is the total on this receipt?"
+    input: {attachments: ["receipt.pdf"]}
+    expect:
+      route: fixed_route:builtin-documents
+      agents_exactly: [document-extractor]
+      model_calls_before_route: 0
+      answer:
+        must_mention: ["18.20"]
+    fake:
+      agents:
+        document-extractor: ["The receipt total is 18.20."]
+  - user: "Add that to this month's budget."
+    expect:
+      route: model_classified
+      agents_exactly: [budget-planner]
+    fake:
+      main:
+        - route: budget-planner
+      agents:
+        budget-planner: ["Added 18.20 under groceries; 291.80 left."]
+  - user: "Write a short thank-you note to the shop."
+    expect:
+      route: default_agent:main_agent_failed
+      agents_exactly: [writing-coach]
+      notices: [main_agent_failed]
+      answer:
+        must_mention: ["thank you"]
+    fake:
+      main:
+        - error: "routing model down"
+        - error: "routing model still down"
+      agents:
+        writing-coach: ["Thank you for the friendly service today!"]

@@ -1,0 +1,47 @@
+# Without the main agent, a routing model picks one agent per turn. Each
+# route is audited like any other: route.classified for the model's pick,
+# route.fixed for a pack fixed route, and a refused hidden pick still routes.
+schema: 1
+id: classifier-route
+title: A routing model picks one agent, and every route is audited
+tags: [classifier, fixed-route, hidden, multi-turn]
+pack: eval-neutral
+backends: [fake]
+routing: classifier
+turns:
+  - user: "Which evening next week is free for dinner with Sam?"
+    expect:
+      route: model_classified
+      agents_exactly: [calendar-helper]
+      model_calls_before_route: 1
+      answer:
+        must_mention: ["Thursday"]
+    fake:
+      main:
+        - route: calendar-helper
+      agents:
+        calendar-helper: ["Thursday evening next week is free."]
+  - user: "I am stuck at the station and my train is cancelled."
+    input: {guardrail_flag: urgent}
+    expect:
+      route: fixed_route:urgent-escalation
+      agents_exactly: [escalation-desk]
+      model_calls_before_route: 0
+      answer:
+        must_mention: ["ticket desk"]
+    fake:
+      agents:
+        escalation-desk: ["Go to the ticket desk and ask for the next train or a refund."]
+  - user: "How much is left in the groceries budget?"
+    explicit_agent: internal-auditor
+    expect:
+      route: model_classified
+      agents_exactly: [budget-planner]
+      agents_forbidden: [internal-auditor]
+      answer:
+        must_mention: ["120"]
+    fake:
+      main:
+        - route: budget-planner
+      agents:
+        budget-planner: ["You have 120 left for groceries."]

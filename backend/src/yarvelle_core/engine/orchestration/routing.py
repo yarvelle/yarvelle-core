@@ -35,6 +35,10 @@ from yarvelle_core.schemas.orchestration import (
 _ATTACHMENT_KEYS = ("attachments", "document_dossiers", "document_text", "raw_text")
 _MEDIA_TYPE_KEYS = ("mime_type", "content_type", "media_type")
 
+BUILTIN_DOCUMENT_ROUTE_ID = "builtin-documents"
+"""Route id recorded when, without pack routes, attachments go to the built-in
+document agent."""
+
 
 def has_attachments(state: Mapping[str, Any]) -> bool:
     """Returns True when the turn carries any attachment or extracted document."""
@@ -107,6 +111,7 @@ def select_fixed_route(
 
 
 __all__ = [
+    "BUILTIN_DOCUMENT_ROUTE_ID",
     "attachment_media_types",
     "has_attachments",
     "raised_guardrail_flags",
