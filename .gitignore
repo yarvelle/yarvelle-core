@@ -69,3 +69,7 @@ frontend/dist/
 site/
 
 /.agents/
+
+# Local / app-specific orch-eval cassette overrides (not committed)
+**/cassettes.local/
+backend/evals/orchestration/cassettes.local/

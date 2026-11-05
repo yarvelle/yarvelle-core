@@ -114,11 +114,39 @@ def test_suite_drop_threshold_five_points():
     assert any(r.kind == "suite_score" for r in result.regressions)
 
 
-def test_latency_p95_rise_25_percent():
+def test_latency_p95_skipped_for_fake_by_default():
+    """Fake/replay/ollama runs skip the p95 rule unless a flag asks for it."""
     base = _enriched([_scenario("a", True, latency_ms=100)], "base")
     cur = _enriched([_scenario("a", True, latency_ms=130)], "cur")  # +30%
     result = compare_runs(cur, base)
+    assert not any(r.kind == "latency_p95" for r in result.regressions)
+
+
+def test_latency_p95_enforced_when_flagged():
+    base = _enriched([_scenario("a", True, latency_ms=100)], "base")
+    cur = _enriched([_scenario("a", True, latency_ms=130)], "cur")  # +30%
+    result = compare_runs(cur, base, check_latency=True)
     assert any(r.kind == "latency_p95" for r in result.regressions)
+
+
+def test_latency_p95_enforced_for_provider_by_default():
+    base = _enriched([_scenario("a", True, latency_ms=100)], "base")
+    cur = _enriched([_scenario("a", True, latency_ms=130)], "cur")  # +30%
+    # Switch the documented backend to the paid provider.
+    base["backend"] = {"backend": "provider", "subject_model": "gpt-test"}
+    cur["backend"] = {"backend": "provider", "subject_model": "gpt-test"}
+    result = compare_runs(cur, base)
+    assert any(r.kind == "latency_p95" for r in result.regressions)
+
+
+def test_latency_p95_skipped_for_replay_and_ollama():
+    for name in ("replay", "ollama"):
+        base = _enriched([_scenario("a", True, latency_ms=100)], "base")
+        cur = _enriched([_scenario("a", True, latency_ms=200)], "cur")
+        base["backend"] = {"backend": name, "subject_model": "qwen3:8b"}
+        cur["backend"] = {"backend": name, "subject_model": "qwen3:8b"}
+        result = compare_runs(cur, base)
+        assert not any(r.kind == "latency_p95" for r in result.regressions), name
 
 
 def test_cost_rise_20_percent():

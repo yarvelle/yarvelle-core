@@ -23,8 +23,10 @@ Commands:
 * ``run``: run scenarios on a chosen backend, print JSON, and write
   ``results.json`` / ``report.md`` / ``report.html`` under
   ``~/.yarvelle-evals/<run>/`` (override with ``--out-dir``). Free
-  backends: ``fake``, ``ollama``. Paid ``provider`` requires ``--max-usd``
-  greater than 0. Exits 1 when any check fails, 2 on a baseline regression;
+  backends: ``fake``, ``replay``, ``ollama``. Paid ``provider`` requires
+  ``--max-usd`` greater than 0. Use ``--record`` with ollama/provider to
+  write cassettes, or ``--backend replay`` to play them back with no model
+  calls. Exits 1 when any check fails, 2 on a baseline regression;
 * ``baseline save``: remember a run as the baseline for its backend+model;
 * ``compare``: diff a run against a baseline without re-running scenarios.
 """
@@ -46,7 +48,7 @@ from yarvelle_core.testing.orch_eval.guard import (
 )
 
 PROG = "yarvelle-core eval orchestration"
-RUN_BACKENDS = ("fake", "ollama", "provider")
+RUN_BACKENDS = ("fake", "replay", "ollama", "provider")
 RESULT_SCHEMA_VERSION = 1
 
 
@@ -70,7 +72,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--backend",
         default="fake",
         choices=RUN_BACKENDS,
-        help="Model backend: fake (free), ollama (free local), provider (paid, needs --max-usd)",
+        help="Model backend: fake, replay (cassettes), ollama (free local), provider (paid, needs --max-usd)",
     )
     run.add_argument("--scenario", action="append", default=[], help="Run only this scenario id (repeatable)")
     run.add_argument("--samples", type=int, default=None, help="Override samples per scenario for this backend")
@@ -102,6 +104,20 @@ def _build_parser() -> argparse.ArgumentParser:
         help="After a green run, save it as the baseline for this backend+model",
     )
     run.add_argument(
+        "--record",
+        action="store_true",
+        help="Record live model exchanges to cassettes (ollama or provider only)",
+    )
+    run.add_argument(
+        "--cassette",
+        help="Cassette root directory (default: committed cassettes, or YARVELLE_CASSETTES_DIR)",
+    )
+    run.add_argument(
+        "--check-latency",
+        action="store_true",
+        help="Apply the p95 latency +25%% regression rule even on free backends",
+    )
+    run.add_argument(
         "--no-report",
         action="store_true",
         help="Skip writing the report directory (still prints JSON to stdout)",
@@ -117,6 +133,11 @@ def _build_parser() -> argparse.ArgumentParser:
     compare.add_argument("current", help="Current run id, directory, or results.json")
     compare.add_argument("--baseline", required=True, help="Baseline path, run id, or latest:<backend>:<model>")
     compare.add_argument("--out-dir", help="Evals root used to resolve run ids (default: ~/.yarvelle-evals)")
+    compare.add_argument(
+        "--check-latency",
+        action="store_true",
+        help="Apply the p95 latency +25%% regression rule even on free backends",
+    )
     return parser
 
 
@@ -195,12 +216,40 @@ def _run_lint(paths: Sequence[str], pack_dir: Optional[str] = None) -> int:
     return 0
 
 
+def _cassette_root(args: argparse.Namespace) -> Path:
+    from yarvelle_core.testing.orch_eval.cassette import default_cassette_root
+
+    if getattr(args, "cassette", None):
+        return Path(args.cassette).expanduser()
+    return default_cassette_root()
+
+
+def _wrap_recording(inner_factory: Any, args: argparse.Namespace, *, backend_label: str, model_label: str) -> Any:
+    """Optionally wrap a live backend so every model call is written to a cassette."""
+    if not getattr(args, "record", False):
+        return inner_factory
+    from yarvelle_core.testing.orch_eval.cassette import CassetteBackend
+
+    root = _cassette_root(args)
+
+    def factory() -> Any:
+        return CassetteBackend(
+            cassette_root=root,
+            mode="record",
+            inner=inner_factory() if callable(inner_factory) else inner_factory,
+            backend_label=backend_label,
+            model_label=model_label,
+        )
+
+    return factory
+
+
 def _backend_factory(name: str, args: argparse.Namespace) -> Any:
     """Returns a zero-arg factory that builds one backend instance per scenario."""
     if name == "fake":
         from yarvelle_core.testing.orch_eval.fake import FakeBackend
 
-        return FakeBackend
+        return _wrap_recording(FakeBackend, args, backend_label="fake", model_label="scripted")
     if name == "ollama":
         from yarvelle_core.testing.orch_eval.defaults import (
             DEFAULT_OLLAMA_BASE_URL,
@@ -224,7 +273,7 @@ def _backend_factory(name: str, args: argparse.Namespace) -> Any:
                 require_ready=True,
             )
 
-        return factory
+        return _wrap_recording(factory, args, backend_label="ollama", model_label=subject)
     if name == "provider":
         from yarvelle_core.testing.orch_eval.defaults import (
             DEFAULT_PROVIDER,
@@ -249,6 +298,25 @@ def _backend_factory(name: str, args: argparse.Namespace) -> Any:
                 key_file=args.key_file,
                 base_url=args.base_url,
                 seed=seed,
+            )
+
+        return _wrap_recording(factory, args, backend_label="provider", model_label=subject)
+    if name == "replay":
+        from yarvelle_core.testing.orch_eval.cassette import CassetteBackend
+        from yarvelle_core.testing.orch_eval.defaults import DEFAULT_OLLAMA_SUBJECT_MODEL
+
+        root = _cassette_root(args)
+        model = args.model or DEFAULT_OLLAMA_SUBJECT_MODEL
+        # Recordings from Ollama smoke use backend_label=ollama.
+        source_backend = "ollama"
+
+        def factory() -> Any:
+            return CassetteBackend(
+                cassette_root=root,
+                mode="replay",
+                inner=None,
+                backend_label=source_backend,
+                model_label=model,
             )
 
         return factory
@@ -303,6 +371,7 @@ def _estimate(selected: Sequence[Tuple[Path, Any]], backend_name: str, samples: 
 def _run(args: argparse.Namespace) -> int:
     from yarvelle_core.testing.orch_eval.cost import SpendRefusedError
     from yarvelle_core.testing.orch_eval.driver import run_scenarios
+    from yarvelle_core.testing.orch_eval.cassette import CassetteError, CassetteMissError
     from yarvelle_core.testing.orch_eval.ollama_backend import OllamaUnavailableError
 
     loaded, packs, code = _load_and_lint(args.paths, args.pack)
@@ -322,6 +391,12 @@ def _run(args: argparse.Namespace) -> int:
     samples_override = args.samples
     default_samples = selected[0][1].samples_for(args.backend)
     samples = samples_override if samples_override is not None else default_samples
+    if getattr(args, "record", False) and args.backend == "replay":
+        print("Cannot --record while using --backend replay.", file=sys.stderr)
+        return 2
+    if getattr(args, "record", False) and args.backend == "fake":
+        print("Recording the fake backend is not useful; use ollama or provider.", file=sys.stderr)
+        return 2
     if args.estimate:
         return _estimate(selected, args.backend, samples, args)
     try:
@@ -339,6 +414,12 @@ def _run(args: argparse.Namespace) -> int:
     except OllamaUnavailableError as err:
         print(f"skip: {err}", file=sys.stderr)
         return 0
+    except CassetteMissError as err:
+        print(f"cassette miss: {err}", file=sys.stderr)
+        return 1
+    except CassetteError as err:
+        print(f"cassette error: {err}", file=sys.stderr)
+        return 1
     except SpendRefusedError as err:
         print(str(err), file=sys.stderr)
         return 2
@@ -410,7 +491,11 @@ def _run(args: argparse.Namespace) -> int:
         except (OSError, ValueError, json.JSONDecodeError, FileNotFoundError) as err:
             print(f"baseline error: {err}", file=sys.stderr)
             return 1
-        compare = compare_runs(document, baseline_doc)
+        compare = compare_runs(
+            document,
+            baseline_doc,
+            check_latency=True if getattr(args, "check_latency", False) else None,
+        )
         compare_text = render_compare_markdown(compare)
         if not args.no_report:
             (run_dir / "compare.md").write_text(compare_text + "\n", encoding="utf-8")
@@ -470,7 +555,11 @@ def _compare_cmd(args: argparse.Namespace) -> int:
     except (OSError, ValueError, FileNotFoundError) as err:
         print(f"compare error: {err}", file=sys.stderr)
         return 1
-    compare = compare_runs(current, baseline)
+    compare = compare_runs(
+        current,
+        baseline,
+        check_latency=True if getattr(args, "check_latency", False) else None,
+    )
     text = render_compare_markdown(compare)
     print(text)
     print(json.dumps(compare.to_dict(), indent=2))

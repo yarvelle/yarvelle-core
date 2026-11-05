@@ -5,8 +5,8 @@ id: live-smoke-greeting
 title: Greeting stays on the main agent
 tags: [smoke, live]
 pack: eval-neutral
-backends: [ollama, provider]
-samples: {ollama: 1, provider: 1}
+backends: [ollama, provider, replay]
+samples: {ollama: 1, provider: 1, replay: 1}
 turns:
   - user: "Hi there!"
     expect:
