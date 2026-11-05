@@ -1,0 +1,20 @@
+# The audit sink refuses a write; the turn stops with a clear error.
+schema: 1
+id: fault-audit-write-failure
+title: An audit write failure stops the turn
+tags: [fault, audit]
+pack: eval-neutral
+backends: [fake]
+faults:
+  - turn: 1
+    mode: audit_error
+turns:
+  - user: "Plan a short trip."
+    expect:
+      error_matches: "/OrchestrationAuditError|injected audit write failure/"
+    fake:
+      main:
+        - task: [trip-organizer]
+        - answer: "never reached"
+      agents:
+        trip-organizer: ["One night by the lake."]

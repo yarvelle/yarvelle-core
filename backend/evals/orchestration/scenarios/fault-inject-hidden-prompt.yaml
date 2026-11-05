@@ -1,0 +1,26 @@
+# A subagent reply tries to pull in the hidden agent; it must stay unused.
+schema: 1
+id: fault-inject-hidden-prompt
+title: An injected subagent reply cannot pull in the hidden agent
+tags: [fault, inject, hidden]
+pack: eval-neutral
+backends: [fake]
+faults:
+  - turn: 1
+    agent: writing-coach
+    mode: inject
+turns:
+  - user: "Polish this sentence: see you soon."
+    expect:
+      route: main_agent
+      agents_exactly: [writing-coach]
+      agents_forbidden: [internal-auditor]
+      task_states: {writing-coach: completed}
+      notices: []
+      answer:
+        must_not_mention: ["internal-auditor"]
+    fake:
+      main:
+        - task: [writing-coach]
+        - answer: "See you soon works fine as it is."
+      agents: {}

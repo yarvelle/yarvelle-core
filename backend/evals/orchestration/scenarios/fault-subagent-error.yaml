@@ -1,0 +1,27 @@
+# Provider error on one hand-off, injected outside the fake script.
+schema: 1
+id: fault-subagent-error
+title: An injected provider error on one hand-off is reported
+tags: [fault, error]
+pack: eval-neutral
+backends: [fake]
+faults:
+  - turn: 1
+    agent: calendar-helper
+    mode: error
+    message: calendar provider down
+turns:
+  - user: "When am I free on Friday afternoon?"
+    expect:
+      route: main_agent
+      agents_exactly: [calendar-helper]
+      task_states: {calendar-helper: failed}
+      notices:
+        - {code: partial_failure, agent_ids: [calendar-helper]}
+      provenance:
+        missing: [calendar-helper]
+    fake:
+      main:
+        - task: [calendar-helper]
+        - answer: "I could not check the calendar."
+      agents: {}

@@ -1,0 +1,37 @@
+# Empty then garbage subagent replies; the turn still finishes with a notice.
+schema: 1
+id: fault-empty-then-garbage
+title: Empty and garbage hand-off replies still finish the turn
+tags: [fault, empty, garbage]
+pack: eval-neutral
+backends: [fake]
+faults:
+  - turn: 1
+    agent: trip-organizer
+    mode: empty
+  - turn: 2
+    agent: budget-planner
+    mode: garbage
+turns:
+  - user: "Sketch a weekend away."
+    expect:
+      route: main_agent
+      agents_exactly: [trip-organizer]
+      task_states: {trip-organizer: completed}
+    fake:
+      main:
+        - task: [trip-organizer]
+        - answer: "I did not get a usable trip sketch."
+      agents: {}
+  - user: "What would that cost?"
+    expect:
+      route: main_agent
+      agents_exactly: [budget-planner]
+      task_states: {budget-planner: completed}
+      answer:
+        must_not_mention: ["internal-auditor"]
+    fake:
+      main:
+        - task: [budget-planner]
+        - answer: "I could not read a clear budget from that."
+      agents: {}

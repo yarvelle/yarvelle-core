@@ -1,0 +1,29 @@
+# Main agent hands off, then fails on the synthesis call; default agent answers.
+# The specialist is called once as a hand-off and once as the default agent.
+schema: 1
+id: fault-main-mid-turn-error
+title: Main agent fails after a hand-off; default agent finishes
+tags: [fault, fallback]
+pack: eval-neutral
+backends: [fake]
+faults:
+  - turn: 1
+    agent: main
+    mode: error
+    after_calls: 2
+    message: main provider dropped mid-turn
+turns:
+  - user: "Draft a short welcome note for the club."
+    expect:
+      route: default_agent:main_agent_failed
+      agents_exactly: [writing-coach]
+      notices: [main_agent_failed]
+      answer:
+        must_mention: ["welcome"]
+    fake:
+      main:
+        - task: [writing-coach]
+      agents:
+        writing-coach:
+          - "Welcome draft from the hand-off."
+          - "Welcome to the club! We meet on Thursdays."

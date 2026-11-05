@@ -1,0 +1,35 @@
+# Same as restart-mid-thread, but the checkpointer seals every blob.
+schema: 1
+id: restart-with-encryption
+title: Resume a thread through an encrypted checkpointer
+tags: [restart, encryption]
+pack: eval-neutral
+backends: [fake]
+encrypt_checkpoints: true
+turns:
+  - user: "When am I free next Tuesday?"
+    expect:
+      route: main_agent
+      agents_exactly: [calendar-helper]
+      answer:
+        must_mention: ["Tuesday"]
+    fake:
+      main:
+        - task: [calendar-helper]
+        - answer: "Next Tuesday you are free from 1 to 4."
+      agents:
+        calendar-helper: ["Tuesday 13:00 to 16:00 is open."]
+  - user: "Put a reminder an hour before."
+    restart_before: true
+    expect:
+      route: main_agent
+      agents_exactly: [calendar-helper]
+      same_agents_as_turn: {turn: 1, mode: equal}
+      answer:
+        must_mention: ["reminder"]
+    fake:
+      main:
+        - task: [calendar-helper]
+        - answer: "Reminder set for noon on Tuesday."
+      agents:
+        calendar-helper: ["Reminder at noon Tuesday."]

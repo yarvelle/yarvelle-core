@@ -1,0 +1,32 @@
+# One hand-off sleeps past the agent timeout; the other still answers.
+schema: 1
+id: fault-subagent-timeout
+title: A slow hand-off times out while the other still answers
+tags: [fault, timeout]
+pack: eval-neutral
+backends: [fake]
+limits: {agent_timeout_s: 0.4, turn_timeout_s: 10}
+faults:
+  - turn: 1
+    agent: budget-planner
+    mode: timeout
+    delay_s: 5
+turns:
+  - user: "Plan a weekend in Lisbon and tell me what it will cost."
+    expect:
+      route: main_agent
+      agents_exactly: [trip-organizer, budget-planner]
+      task_states: {trip-organizer: completed, budget-planner: timed_out}
+      notices:
+        - {code: partial_failure, agent_ids: [budget-planner]}
+      provenance:
+        must_cite: [trip-organizer]
+        missing: [budget-planner]
+      answer:
+        must_mention: ["Alfama"]
+    fake:
+      main:
+        - task: [trip-organizer, budget-planner]
+        - answer: "Stay in Alfama; the budget check timed out."
+      agents:
+        trip-organizer: ["Two nights in Alfama."]
