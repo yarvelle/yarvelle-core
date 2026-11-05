@@ -236,7 +236,10 @@ class ScenarioRunner:
         graph = GraphBuilder(
             model=self.backend.model_for(Role(kind="main")),
             registry=self.pack.registry,
-            orchestration=spec,
+            # "builtin" runs without pack routes; the pack default still applies.
+            orchestration=None if scenario.routing == "builtin" else spec,
+            default_agent=spec.default_agent,
+            include_main_agent=scenario.routing == "hybrid",
             orchestration_audit_sink=audit,
             turn_task_sink=turn_tasks,
             safety_policy=self.pack.safety_policy(),

@@ -60,12 +60,15 @@ async def execute_agent_run(
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
     checkpointer_db_path: Optional[Union[Path, str]] = None,
+    orchestration: Optional[Any] = None,
     **kwargs: Any,
 ) -> AsyncIterator[Dict[str, Any]]:
     """Delegates agent execution runs to AgentExecutionService.
 
     Preserves 100% backward compatibility for all existing callers while
     eliminating monolithic pre/post safety guardrails and manual tool loops.
+    ``orchestration`` (the pack's ``PackOrchestrationSpec``) turns on routing
+    in the service's built-in graph; see ``AgentExecutionService``.
     """
     resolved_thread_id = thread_id or f"thread_{agent_id}_{uuid.uuid4().hex[:12]}"
 
@@ -77,6 +80,7 @@ async def execute_agent_run(
     service = AgentExecutionService(
         model=chat_model if isinstance(chat_model, BaseChatModel) else None,
         workspace_root=workspace_root, db_path=checkpointer_db_path, store_bodies=store_bodies,
+        orchestration=orchestration,
     )
 
     async for event in service.execute_turn(

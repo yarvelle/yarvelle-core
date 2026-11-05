@@ -88,7 +88,8 @@ from yarvelle_core.engine.graph import (
     generate_follow_up_suggestions,
     resolve_checkpointer_path,
 )
-from yarvelle_core.engine.orchestration.runtime import MAIN_AGENT_ID
+from yarvelle_core.constants.agents import AGENT_ORCHESTRATOR
+from yarvelle_core.engine.orchestration.runtime import MAIN_AGENT_ID, rejected_pick_event
 from yarvelle_core.engine.prompt_builder import build_system_prompt
 from yarvelle_core.loaders.agent_loader import find_agent_dir, load_agent
 from yarvelle_core.model.factory import create_chat_model
@@ -343,6 +344,8 @@ class AgentExecutionService:
         store_bodies: Optional[bool] = None,
         safety_policy: Optional[SafetyPolicy] = None,
         default_agent_id: Optional[str] = None,
+        orchestration: Optional[Any] = None,
+        registry: Optional[Any] = None,
         **kwargs: Any,
     ) -> None:
         """Initialize the execution service with model, graph, checkpointer, and memory settings.
@@ -350,9 +353,21 @@ class AgentExecutionService:
         ``default_agent_id`` is the agent used when a turn names none. It comes
         from the pack's ``orchestration.default_agent``; core has no default of
         its own, so a turn without an agent id fails when it is unset.
+
+        ``orchestration`` is the pack's ``PackOrchestrationSpec``. When it is
+        set and no graph is supplied, the built-in graph routes each turn:
+        a picked agent answers directly, and an unpinned turn goes through the
+        pack's fixed routes, then the main agent (hand-offs through the task
+        tool), then the default agent. Without it the built-in graph runs the
+        picked (or default) agent directly, as before. ``registry`` is the
+        agent catalog used for that routing; it defaults to the workspace's
+        agents directory.
         """
         self.model = model
-        self.default_agent_id = (default_agent_id or "").strip() or None
+        self.orchestration = orchestration
+        self._registry = registry
+        spec_default = getattr(orchestration, "default_agent", None) if orchestration is not None else None
+        self.default_agent_id = (default_agent_id or spec_default or "").strip() or None
         self.graph = graph
         self.graph_builder = graph_builder
         self.checkpointer = checkpointer
@@ -654,6 +669,9 @@ class AgentExecutionService:
                     store=effective_store,
                 )
 
+        if self.orchestration is not None:
+            return self._build_orchestrated_graph(active_model, checkpointer, effective_store)
+
         try:
             from yarvelle_core.engine.builder import GraphBuilder
             builder_instance = (
@@ -674,6 +692,78 @@ class AgentExecutionService:
                 checkpointer=checkpointer,
                 store=effective_store,
             )
+
+    @property
+    def routes_turns(self) -> bool:
+        """True when the built-in graph routes turns (a pack orchestration spec is set)."""
+        return self.graph is None and self.graph_builder is None and self.orchestration is not None
+
+    def _agent_registry(self) -> Any:
+        """The agent catalog used for routing; loaded from the workspace once."""
+        if self._registry is None:
+            from yarvelle_core.agents.registry import AgentRegistry
+
+            ws_root = self.workspace_root.resolve()
+            skills_dir = ws_root / SKILLS_DIR
+            self._registry = AgentRegistry(
+                agents_dir=ws_root / AGENTS_DIR,
+                skills_dir=skills_dir if skills_dir.is_dir() else None,
+            )
+        return self._registry
+
+    def _build_orchestrated_graph(
+        self,
+        active_model: BaseChatModel,
+        checkpointer: Optional[Any],
+        effective_store: Optional[Any],
+    ) -> Any:
+        """The built-in graph with routing: orchestrator, main agent and agents.
+
+        Tools are not pinned to one agent here: each routed agent resolves its
+        own tools from the registry.
+        """
+        from yarvelle_core.engine.builder import GraphBuilder
+
+        builder_instance = GraphBuilder(
+            model=active_model,
+            registry=self._agent_registry(),
+            orchestration=self.orchestration,
+            default_agent=self.default_agent_id,
+            safety_policy=self.safety_policy,
+            checkpointer=checkpointer,
+        )
+        if effective_store is not None:
+            builder_instance = builder_instance.with_store(effective_store)
+        return builder_instance.build(checkpointer=checkpointer, store=effective_store)
+
+    async def _refuse_hidden_pick(
+        self,
+        agent: Any,
+        agent_dir: Path,
+        thread_id: str,
+        log_path: Path,
+        store_bodies: bool,
+    ) -> Optional[Dict[str, Any]]:
+        """Returns an error event when a caller picked a hidden agent, else None.
+
+        Hidden agents (system agents and agents marked ``hidden``) only run
+        when routing sends work to them. Picking the orchestrator is not a
+        refusal: it asks for routing. The refusal is audited as ``route.rejected``.
+        """
+        hidden = bool(getattr(agent, "hidden", False)) or agent_dir.parent.name == SYSTEM_AGENTS_DIR
+        if not hidden or agent.id == AGENT_ORCHESTRATOR:
+            return None
+        try:
+            await record_audit(
+                rejected_pick_event(agent.id, "hidden", thread_id=thread_id),
+                log_path=log_path,
+                store_bodies=store_bodies,
+            )
+        except Exception as err:  # the pick is refused either way
+            logger.error("Could not record the refused pick of '%s': %s", agent.id, err)
+        return self.format_error_event(
+            f"Agent '{agent.id}' is an internal agent and cannot be picked directly."
+        )
 
     async def execute_turn(
         self,
@@ -700,7 +790,10 @@ class AgentExecutionService:
         suggestions, and terminal completion records.
         """
         start_time = time.time()
-        effective_agent_id = str(agent_id or self.default_agent_id or "").strip()
+        # With routing on, an unpinned turn without a pack default loads the
+        # orchestrator agent only for the turn's setup; routing picks who answers.
+        fallback_id = AGENT_ORCHESTRATOR if self.routes_turns else ""
+        effective_agent_id = str(agent_id or self.default_agent_id or fallback_id).strip()
         if not effective_agent_id:
             yield self.format_error_event(
                 "No agent id was given and no default agent is configured "
@@ -732,6 +825,16 @@ class AgentExecutionService:
             logger.error("Failed to load agent '%s': %s", effective_agent_id, err)
             yield self.format_error_event(f"Agent '{effective_agent_id}' failed to load: {err}")
             return
+
+        # A caller's pick of the orchestrator asks for routing, not for that agent.
+        picked = bool(agent_id) and not (self.routes_turns and agent.id == AGENT_ORCHESTRATOR)
+        if agent_id:
+            refusal = await self._refuse_hidden_pick(
+                agent, agent_dir, thread_id, resolved_log_path, effective_store_bodies
+            )
+            if refusal is not None:
+                yield refusal
+                return
 
         if agent.risk_class == RiskClass.CLINICAL_ASSIST and not allow_clinical:
             err_msg = (
@@ -873,9 +976,10 @@ class AgentExecutionService:
             "agent_id": agent.id,
             # Only a caller's pick pins the turn. An unpinned turn leaves
             # routing to the graph (fixed routes, then the main agent).
-            "current_agent": agent.id if agent_id else None,
-            "explicit_agent": agent.id if agent_id else None,
-            "effective_tools": effective_tools,
+            "current_agent": agent.id if picked else None,
+            "explicit_agent": agent.id if picked else None,
+            # A routed turn's agent brings its own tools from the registry.
+            "effective_tools": effective_tools if picked or not self.routes_turns else None,
             "workspace_root": str(ws_root),
             "skills_dir": str(skills_dir),
             "system_prompt": system_prompt,
@@ -927,6 +1031,11 @@ class AgentExecutionService:
                 tool_context = None
         elif isinstance(kwargs.get("tool_context"), ToolContext):
             tool_context = kwargs["tool_context"]
+
+        if self.routes_turns and not picked:
+            # The context above is scoped to the default agent's tools; the
+            # tool node builds one for whichever agent routing picks.
+            tool_context = None
 
         graph_config = {
             "configurable": {

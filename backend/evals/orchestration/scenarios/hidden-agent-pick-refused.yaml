@@ -1,0 +1,37 @@
+# A caller picks a hidden agent directly. The pick is refused and audited
+# (route.rejected), and the turn is routed as if nothing had been picked. A
+# later pick of a visible agent still answers directly.
+schema: 1
+id: hidden-agent-pick-refused
+title: A direct pick of a hidden agent is refused and the turn is routed
+tags: [hidden, user-selected, guard, multi-turn]
+pack: eval-neutral
+backends: [fake]
+turns:
+  - user: "Check this month's spending against the budget."
+    explicit_agent: internal-auditor
+    expect:
+      route: main_agent
+      agents_exactly: [budget-planner]
+      agents_forbidden: [internal-auditor]
+      provenance:
+        must_not_cite: [internal-auditor]
+      answer:
+        must_mention: ["310"]
+    fake:
+      main:
+        - task: [budget-planner]
+        - answer: "You have spent 290 of 600, so 310 is left this month."
+      agents:
+        budget-planner: ["Spent 290 of 600; 310 left."]
+  - user: "Polish this: thanks for you help with the budget"
+    explicit_agent: writing-coach
+    expect:
+      route: user_selected
+      agents_exactly: [writing-coach]
+      max_task_calls: 0
+      answer:
+        must_mention: ["your help"]
+    fake:
+      agents:
+        writing-coach: ["Thank you for your help with the budget."]

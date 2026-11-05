@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from typing import List, Set
 
+from yarvelle_core.engine.orchestration.routing import BUILTIN_DOCUMENT_ROUTE_ID
 from yarvelle_core.testing.orch_eval.pack import EvalPack
 from yarvelle_core.testing.orch_eval.schema import NoticeExpectation, Scenario
 
@@ -33,6 +34,8 @@ def lint_against_pack(scenario: Scenario, pack: EvalPack) -> List[str]:
         return [f"scenario names pack {scenario.pack!r}, but the pack loaded is {pack.id!r}"]
     known: Set[str] = set(pack.agent_ids)
     hidden: Set[str] = set(pack.hidden_ids)
+    # Without pack routes only core's built-in document route can fire.
+    route_ids: List[str] = [BUILTIN_DOCUMENT_ROUTE_ID] if scenario.routing == "builtin" else list(pack.route_ids)
     if scenario.limits is not None and scenario.limits.max_agents is not None and scenario.limits.max_agents > 16:
         problems.append("limits.max_agents is above the runtime maximum of 16")
 
@@ -58,7 +61,11 @@ def lint_against_pack(scenario: Scenario, pack: EvalPack) -> List[str]:
                 problems.append(f"{where}: the user text does not raise guardrail_flag {flag!r} (words: {pack.flag_words[flag]})")
         if turn.explicit_agent is not None:
             unknown([turn.explicit_agent], "explicit_agent")
-            not_hidden([turn.explicit_agent], "explicit_agent")
+            if turn.explicit_agent in hidden and expect.route == "user_selected":
+                problems.append(
+                    f"{where}: explicit_agent {turn.explicit_agent!r} is hidden; a hidden pick is refused, "
+                    "so the turn cannot route user_selected"
+                )
         required = [*(expect.agents_exactly or []), *expect.agents_all_of, *expect.agents_any_of]
         unknown(required, "expected agents")
         not_hidden(required, "expected agents")
@@ -75,8 +82,12 @@ def lint_against_pack(scenario: Scenario, pack: EvalPack) -> List[str]:
             unknown(expect.provenance.must_not_cite, "provenance.must_not_cite")
         if expect.route is not None:
             kind, _, value = expect.route.partition(":")
-            if kind == "fixed_route" and value not in pack.route_ids:
-                problems.append(f"{where}: route names fixed route {value!r}; pack has {pack.route_ids}")
+            if kind == "fixed_route" and value not in route_ids:
+                problems.append(f"{where}: route names fixed route {value!r}; the graph has {route_ids}")
+            if kind == "model_classified" and scenario.routing == "hybrid":
+                problems.append(f"{where}: route model_classified needs routing 'classifier' or 'builtin'")
+            if kind == "main_agent" and scenario.routing != "hybrid":
+                problems.append(f"{where}: route main_agent needs routing 'hybrid'")
             if kind == "default_agent" and value not in FALLBACK_REASONS:
                 problems.append(f"{where}: default_agent reason must be one of {list(FALLBACK_REASONS)}, got {value!r}")
             if kind == "user_selected" and turn.explicit_agent is None:
@@ -84,6 +95,10 @@ def lint_against_pack(scenario: Scenario, pack: EvalPack) -> List[str]:
         if turn.fake is not None:
             for step in turn.fake.main:
                 unknown(list(step.task or []), "fake main task")
+                if step.route is not None:
+                    unknown([step.route], "fake main route")
+                    if scenario.routing == "hybrid":
+                        problems.append(f"{where}: a fake 'route' step needs routing 'classifier' or 'builtin'")
             unknown(list(turn.fake.agents), "fake agents")
             not_hidden(list(turn.fake.agents), "fake agents")
     return problems

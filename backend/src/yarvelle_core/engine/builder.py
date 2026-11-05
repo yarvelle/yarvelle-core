@@ -173,12 +173,15 @@ class GraphBuilder:
         orchestration: Optional[Any] = None,
         orchestration_audit_sink: Optional[Callable[..., Any]] = None,
         turn_task_sink: Optional[Callable[..., Any]] = None,
+        include_main_agent: bool = True,
         **kwargs: Any,
     ) -> None:
         """Initialize GraphBuilder configuration.
 
         ``default_agent`` is the pack's ``orchestration.default_agent``; the
         orchestrator uses it only when routing cannot pick a registered agent.
+        ``include_main_agent=False`` leaves out the main agent, so model-routed
+        turns use the routing model's single pick instead of hand-offs.
         """
         self.model = model
         self.checkpointer = checkpointer
@@ -207,6 +210,7 @@ class GraphBuilder:
         self.orchestration_audit_sink = orchestration_audit_sink
         # Where each turn's hand-off records go; defaults to the ``turn_tasks`` table.
         self.turn_task_sink = turn_task_sink
+        self.include_main_agent = include_main_agent
         self.suggestion_model = kwargs.get("suggestion_model")
         self.extra_kwargs = kwargs
 
@@ -393,6 +397,7 @@ class GraphBuilder:
             if self.use_dynamic_orchestrator:
                 if (
                     main_agent_node is None
+                    and self.include_main_agent
                     and self.model is not None
                     and self.registry is not None
                     and self.registry.get_delegatable_agents(exclude="")
