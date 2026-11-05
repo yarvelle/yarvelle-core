@@ -38,6 +38,7 @@ SYSTEM_DENYLIST_TABLES: FrozenSet[str] = frozenset(
         "credentials",
         "profile_keys",
         "audit_events",
+        "turn_tasks",
         "approvals",
         "mcp_tool_pins",
         "scope_grants",

@@ -57,7 +57,12 @@ def _agent_ids(values: list[str]) -> list[str]:
 
 
 class TurnInput(_Strict):
-    """Extra turn inputs that drive fixed and user-selected routes."""
+    """Extra turn inputs and input-side expectations.
+
+    ``guardrail_flag`` is the flag the input guardrail is expected to raise
+    from the user's text (through the pack's ``guardrail_flags`` words); the
+    harness does not inject it. ``attachments`` are sent with the turn.
+    """
 
     guardrail_flag: Optional[str] = Field(default=None, pattern=r"^[a-z0-9_-]{1,64}$")
     attachments: list[str] = Field(default_factory=list)

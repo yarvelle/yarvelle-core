@@ -12,6 +12,9 @@ Layout:
   (`pack.yaml` with the routing config, and `agents/<id>/` in the normal
   agent layout). It has everyday-task agents only, one hidden agent and two
   fixed routes. Tools listed under `offline_tools` are local no-op stand-ins.
+  `guardrail_flags` lists the words that raise each guardrail flag; the
+  harness input guardrail raises a flag when the user's text contains one of
+  them, so a flag route fires from the text alone.
 - `conftest.py`: the pytest gate described below.
 
 This directory is not part of the wheel or the sdist, and it sits outside the
@@ -38,18 +41,25 @@ also writes the JSON result to a file.
 ## What a run checks
 
 Each scenario runs through the real graph on one thread, one turn at a time.
-For every turn the driver collects the route decision, the hand-offs from
-the orchestration audit records, the `task_status` and
+The driver sends only what a caller sends (the message, an explicit agent
+pick and attachments); the graph resets routing state between turns, raises
+guardrail flags and writes the route audit records itself. For every turn the
+driver collects the route decision, the raised flags, the route and hand-off
+audit records, the stored hand-off records, the `task_status` and
 `orchestration_notice` stream events, provenance and the final reply, then
 checks:
 
 - always: the turn finished, a reply exists, no more hand-offs than the
   call cap, hidden agents never ran, provenance carries the agent titles,
-  no subagent tokens reached the stream, the reply names no agent ids, and
-  (on the fake backend) the script matched the calls made;
+  no subagent tokens reached the stream, the reply names no agent ids, the
+  route has a matching `route.*` audit record, every hand-off has one stored
+  record with the same final state, and (on the fake backend) the script
+  matched the calls made;
 - when the scenario sets them: the route, required and forbidden agents,
-  task-call bounds, continuity with an earlier turn, task states, notices,
-  provenance citations and missing parts, reply text and budgets.
+  the guardrail flag raised from the text (`input.guardrail_flag`), the
+  route, required and forbidden agents, task-call bounds, continuity with an
+  earlier turn, task states, notices, provenance citations and missing parts,
+  reply text and budgets.
 
 The fake backend replays the `fake:` script of each turn: main-agent steps
 (`task`, `answer` or `error`) and per-agent replies (text, `{error: ...}` or

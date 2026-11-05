@@ -871,8 +871,10 @@ class AgentExecutionService:
             "user_id": effective_user_id,
             "profile_id": effective_profile_id,
             "agent_id": agent.id,
-            "current_agent": agent.id,
-            "explicit_agent": agent_id,
+            # Only a caller's pick pins the turn. An unpinned turn leaves
+            # routing to the graph (fixed routes, then the main agent).
+            "current_agent": agent.id if agent_id else None,
+            "explicit_agent": agent.id if agent_id else None,
             "effective_tools": effective_tools,
             "workspace_root": str(ws_root),
             "skills_dir": str(skills_dir),

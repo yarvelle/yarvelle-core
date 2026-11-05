@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional
 from langchain_core.messages import BaseMessage, HumanMessage
 from langgraph.store.base import BaseStore
 
-from yarvelle_core.engine.safety_policy import SafetyPolicy, get_default_safety_policy
+from yarvelle_core.engine.safety_policy import SafetyPolicy, get_default_safety_policy, policy_flags
 from yarvelle_core.workflows.nodes.base import BaseNode
 
 
@@ -63,6 +63,10 @@ class InputGuardrailNode(BaseNode):
         if not prompt_text and state.get("prompt"):
             prompt_text = str(state.get("prompt"))
 
+        # Non-refusing guardrail flags (e.g. ``urgent``) for pack fixed routes.
+        # Always set, so a previous turn's flags never carry over.
+        flags = policy_flags(self.safety_policy, prompt_text)
+
         # 1. Acute Emergency Red-Flag Gating (Immediate 911 / ER diversion)
         emergency_flag = self.safety_policy.check_emergency(prompt_text)
         if emergency_flag is not None:
@@ -79,6 +83,7 @@ class InputGuardrailNode(BaseNode):
                 refusal_reason = "emergency_red_flag"
 
             return {
+                "guardrail_flags": flags,
                 "is_refusal": True,
                 "refused": True,
                 "refusal_reason": refusal_reason,
@@ -101,6 +106,7 @@ class InputGuardrailNode(BaseNode):
         is_consented = state.get("allow_clinical") is True
         if target_domain in ("assist", "elevated", "c" + "linical") and not is_consented:
             return {
+                "guardrail_flags": flags,
                 "is_refusal": True,
                 "refused": True,
                 "refusal_reason": "clinical_consent_required",
@@ -124,6 +130,7 @@ class InputGuardrailNode(BaseNode):
         if safety_check.refused:
             reason = safety_check.reason or "forbidden_intent:medical_prohibited"
             return {
+                "guardrail_flags": flags,
                 "is_refusal": True,
                 "refused": True,
                 "refusal_reason": reason,
@@ -197,6 +204,7 @@ class InputGuardrailNode(BaseNode):
                 updated_system_prompt = memory_context
 
         output_state: Dict[str, Any] = {
+            "guardrail_flags": flags,
             "is_refusal": False,
             "refused": False,
             "refusal_reason": None,

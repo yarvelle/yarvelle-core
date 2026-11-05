@@ -30,7 +30,7 @@ from yarvelle_core.constants.defaults import DEFAULT_AUDIT_LIMIT
 from yarvelle_core.constants.paths import DEFAULT_AUDIT_LOG_FILE, LOGS_DIR
 from yarvelle_core.db.models import AuditEventRecord
 from yarvelle_core.db.session import get_session_factory
-from yarvelle_core.schemas.audit import AuditEvent
+from yarvelle_core.schemas.audit import AuditDurability, AuditEvent, audit_durability
 
 logger = logging.getLogger(__name__)
 
@@ -70,62 +70,80 @@ def compute_payload_hash(payload: Any) -> Optional[str]:
         return None
 
 
+class AuditWriteError(RuntimeError):
+    """A ``strict`` audit event could not be recorded; the caller must stop."""
+
+
+_best_effort_failures = 0
+
+
+def best_effort_failure_count() -> int:
+    """How many ``best_effort`` audit writes failed in this process."""
+    return _best_effort_failures
+
+
 async def _persist_to_db(record: AuditEventRecord, db: Optional[Any] = None, session_factory: Optional[Any] = None) -> None:
-    """Persists an AuditEventRecord to the relational database with non-blocking fault isolation."""
+    """Persists an AuditEventRecord to the relational database. Raises on failure."""
+    if db is not None:
+        db.add(record)
+        await db.commit()
+        return
+
+    if session_factory is not None:
+        async with session_factory() as session:
+            session.add(record)
+            await session.commit()
+        return
+
+    # Check for FastAPI dependency override (e.g. during pytest with in-memory SQLite)
+    written = False
     try:
-        if db is not None:
-            db.add(record)
-            await db.commit()
-            return
+        from yarvelle_core.main import app
+        from yarvelle_core.api.deps import get_db
 
-        if session_factory is not None:
-            async with session_factory() as session:
-                session.add(record)
-                await session.commit()
-            return
-
-        # Check for FastAPI dependency override (e.g. during pytest with in-memory SQLite)
-        written = False
-        try:
-            from yarvelle_core.main import app
-            from yarvelle_core.api.deps import get_db
-
-            override = app.dependency_overrides.get(get_db)
-            if override is not None:
-                gen = override()
-                if hasattr(gen, "__anext__"):
-                    session = await gen.__anext__()
+        override = app.dependency_overrides.get(get_db)
+        if override is not None:
+            gen = override()
+            if hasattr(gen, "__anext__"):
+                session = await gen.__anext__()
+                try:
+                    session.add(record)
+                    await session.commit()
+                    written = True
+                finally:
                     try:
-                        session.add(record)
-                        await session.commit()
-                        written = True
-                    finally:
-                        try:
-                            await gen.__anext__()
-                        except StopAsyncIteration:
-                            pass
-                elif hasattr(gen, "__next__"):
-                    session = next(gen)
+                        await gen.__anext__()
+                    except StopAsyncIteration:
+                        pass
+            elif hasattr(gen, "__next__"):
+                session = next(gen)
+                try:
+                    session.add(record)
+                    await session.commit()
+                    written = True
+                finally:
                     try:
-                        session.add(record)
-                        await session.commit()
-                        written = True
-                    finally:
-                        try:
-                            next(gen)
-                        except StopIteration:
-                            pass
-        except Exception as override_err:
-            logger.debug("Dependency override DB session failed: %s", override_err)
+                        next(gen)
+                    except StopIteration:
+                        pass
+    except Exception as override_err:
+        # The override is a test convenience; the default session below is authoritative.
+        logger.debug("Dependency override DB session failed: %s", override_err)
 
-        if not written:
-            factory = session_factory or get_session_factory()
-            async with factory() as session:
-                session.add(record)
-                await session.commit()
-    except Exception as err:
-        # Non-blocking fault isolation: log warning and do not crash agent execution
-        logger.warning("Failed to persist audit event to database: %s", err)
+    if not written:
+        factory = get_session_factory()
+        async with factory() as session:
+            session.add(record)
+            await session.commit()
+
+
+def _audit_write_failed(mode: AuditDurability, sink: str, event_type: str, err: Exception) -> None:
+    """Raises for ``strict`` events; logs and counts ``best_effort`` ones."""
+    global _best_effort_failures
+    if mode == "strict":
+        raise AuditWriteError(f"could not write strict audit event {event_type} to {sink}") from err
+    _best_effort_failures += 1
+    logger.warning("Failed to write audit event %s to %s: %s", event_type, sink, err)
 
 
 async def record_audit(
@@ -144,6 +162,7 @@ async def record_audit(
     run_id: Optional[str] = None,
     session_factory: Any = None,
     db: Any = None,
+    mode: Optional[AuditDurability] = None,
 ) -> AuditEvent:
     """Records an audit event to the SQL database and secondary append-only JSONL sink.
 
@@ -152,7 +171,9 @@ async def record_audit(
     2. Primary persistence to AuditEventRecord in yarvelle_core.db via get_session_factory().
     3. SHA-256 payload hash computed over canonical JSON representation for tool calls and actions.
     4. Optional secondary sink writing to logs/audit.jsonl.
-    5. Non-blocking fault isolation: Database or disk write errors do not crash caller requests.
+    5. Durability by event type (``audit_durability``), or ``mode`` when given:
+       a failed write of a ``strict`` event raises ``AuditWriteError``; a
+       ``best_effort`` failure is logged and counted, and the caller continues.
     """
     if store_bodies is None:
         store_bodies = settings.audit_store_bodies
@@ -171,6 +192,7 @@ async def record_audit(
         raw_data = {}
 
     event_type = raw_data.get("event") or safe_event.event or "run"
+    durability: AuditDurability = mode or audit_durability(str(event_type))
     tool_name = raw_data.get("tool") or safe_event.tool
     profile_id = raw_data.get("profile_id") or safe_event.profile_id
     effective_run_id = run_id or raw_data.get("run_id") or raw_data.get("thread_id") or safe_event.thread_id
@@ -229,7 +251,7 @@ async def record_audit(
             event_ts = datetime.fromisoformat(ts_val)
             if not event_ts.tzinfo:
                 event_ts = event_ts.replace(tzinfo=timezone.utc)
-        except Exception:
+        except ValueError:
             event_ts = datetime.now(timezone.utc)
     else:
         event_ts = datetime.now(timezone.utc)
@@ -259,10 +281,19 @@ async def record_audit(
         scope=effective_scope,
         pack_id=str(effective_pack_id).strip() if effective_pack_id else None,
         risk_tier=str(effective_risk_tier).strip() if effective_risk_tier else None,
+        turn_id=safe_event.turn_id,
+        task_id=safe_event.task_id,
+        parent_task_id=safe_event.parent_task_id,
+        input_hash=safe_event.input_hash,
+        output_hash=safe_event.output_hash,
+        error_code=safe_event.error_code,
     )
 
     # 1. Primary Sink: SQL Database persistence
-    await _persist_to_db(record, db=db, session_factory=session_factory)
+    try:
+        await _persist_to_db(record, db=db, session_factory=session_factory)
+    except Exception as err:
+        _audit_write_failed(durability, "the database", str(event_type), err)
 
     # 2. Secondary Sink: JSONL append
     if workspace_root and not log_path:
@@ -279,7 +310,7 @@ async def record_audit(
         async with lock:
             await asyncio.to_thread(_append_line, target_path, line)
     except Exception as err:
-        logger.warning("Failed to write audit event to %s: %s", target_path, err)
+        _audit_write_failed(durability, str(target_path), str(event_type), err)
 
     return safe_event
 
@@ -417,6 +448,8 @@ class AuditLogger:
 
 
 __all__ = [
+    "AuditWriteError",
+    "best_effort_failure_count",
     "compute_payload_hash",
     "record_audit",
     "get_recent_audit_events",

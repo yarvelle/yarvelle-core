@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 import re
+import uuid
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -31,7 +32,8 @@ from pydantic import BaseModel, Field
 from yarvelle_core.agents.registry import AgentRegistry, _extract_first_line
 from yarvelle_core.config import settings
 from yarvelle_core.engine.orchestration.routing import has_attachments, select_fixed_route
-from yarvelle_core.engine.orchestration.runtime import MAIN_AGENT_ID
+from yarvelle_core.engine.orchestration.runtime import MAIN_AGENT_ID, record_route
+from yarvelle_core.engine.orchestration.task_guard import AuditSink
 from yarvelle_core.constants.agents import AGENT_DOCUMENT_EXTRACTOR, AGENT_ORCHESTRATOR
 from yarvelle_core.constants.paths import AGENTS_DIR, SKILLS_DIR
 from yarvelle_core.memory.ports.catalog_port import CatalogPort
@@ -43,7 +45,7 @@ from yarvelle_core.schemas.plan import (
     ExecutionMode,
     ExecutionPlan,
 )
-from yarvelle_core.schemas.orchestration import PackOrchestrationSpec
+from yarvelle_core.schemas.orchestration import PackOrchestrationSpec, RouteDecision, RouteSource
 from yarvelle_core.schemas.routing import RoutingHints
 from yarvelle_core.templates.engine import render_template
 from yarvelle_core.workflows.nodes.base import BaseNode
@@ -163,6 +165,17 @@ class OrchestratorDecision(BaseModel):
     )
 
 
+def _turn_id(state: Dict[str, Any]) -> str:
+    """The turn id set when the turn started, or a new one for direct node calls."""
+    turn_id = state.get("turn_id")
+    if not turn_id:
+        turn_id = uuid.uuid4().hex
+        state["turn_id"] = turn_id
+    return str(turn_id)
+
+
+_AGENT_SLUG = re.compile(r"^[a-z0-9_-]{1,64}$")
+
 _NOTICE_TEXT = {
     "model_unavailable": "No model is configured, so the default agent took this turn.",
     "main_agent_failed": "Routing could not pick an agent, so the default agent took this turn.",
@@ -183,9 +196,12 @@ class OrchestratorNode(BaseNode):
         default_agent: Optional[str] = None,
         orchestration: Optional[PackOrchestrationSpec] = None,
         main_agent_enabled: bool = False,
+        audit_sink: Optional[AuditSink] = None,
     ) -> None:
         super().__init__(name=name)
         self.model = model
+        # Receives the ``route.*`` record of each directly routed turn (strict).
+        self.audit_sink = audit_sink
         # Pack orchestration config: fixed routes run before any model call.
         self.orchestration = orchestration
         # When set, model-routed turns go to the main agent node (task tool).
@@ -293,15 +309,31 @@ class OrchestratorNode(BaseNode):
             return None
         notice = {
             "type": "orchestration_notice",
+            "turn_id": _turn_id(turn_state),
             "code": reason,
             "message": _NOTICE_TEXT[reason],
             "agent_ids": [self.default_agent],
         }
-        turn_state.setdefault("orchestration_notices", []).append(notice)
+        # Never append in place: the list may be shared with the graph state.
+        turn_state["orchestration_notices"] = list(turn_state.get("orchestration_notices") or []) + [notice]
+        turn_state["route_decision"] = RouteDecision(
+            source=RouteSource.DEFAULT_AGENT, agent_id=self.default_agent, fallback_reason=reason,  # type: ignore[arg-type]
+        ).model_dump(mode="json", exclude_none=True)
         return OrchestratorDecision(
             agent_id=self.default_agent,
             reasoning=f"Default agent ({reason}).",
             instructions="",
+        )
+
+    async def _record_route(self, state: Dict[str, Any], decision: Optional[Dict[str, Any]]) -> None:
+        """Writes the turn's ``route.*`` audit record; a failed write stops the turn."""
+        if not decision:
+            return
+        await record_route(
+            self.audit_sink,
+            RouteDecision.model_validate(decision),
+            _turn_id(state),
+            str(state["thread_id"]) if state.get("thread_id") else None,
         )
 
     def _no_route_error(self, reason: str) -> Dict[str, Any]:
@@ -890,7 +922,13 @@ class OrchestratorNode(BaseNode):
                 state=state,
                 is_explicit=True,
             )
-            state["execution_plan"] = plan.model_dump()
+            state["execution_plan"] = plan.model_dump(mode="json")
+            route_decision: Optional[Dict[str, Any]] = None
+            if _AGENT_SLUG.match(normalized):
+                route_decision = RouteDecision(source=RouteSource.USER_SELECTED, agent_id=normalized).model_dump(
+                    mode="json", exclude_none=True
+                )
+                await self._record_route(state, route_decision)
 
             # Pre-flight check and provision skills and docs for explicit target
             missing_sk = state.get("missing_skill") or state.get("required_skill")
@@ -910,10 +948,12 @@ class OrchestratorNode(BaseNode):
                 "orchestrator_reasoning": "Explicitly requested by user or pre-routed system state.",
                 "orchestrator_instructions": state.get("orchestrator_instructions", ""),
                 "next_step": normalized,
-                "execution_plan": plan.model_dump(),
+                "execution_plan": plan.model_dump(mode="json"),
                 "provisioned_references": state.get("provisioned_references", {}),
                 "provisioned_docs": list(state.get("provisioned_references", {}).keys()),
             }
+            if route_decision is not None:
+                res_dict["route_decision"] = route_decision
             if gen_skills:
                 res_dict["generated_skills"] = gen_skills
             if gen_sk:
@@ -992,7 +1032,7 @@ class OrchestratorNode(BaseNode):
             candidates=candidates,
             is_explicit=False,
         )
-        state["execution_plan"] = plan.model_dump()
+        state["execution_plan"] = plan.model_dump(mode="json")
 
         # 4. Pre-flight check: provision any missing skills or required reference documents before specialist execution
         missing_skill_name = (
@@ -1024,7 +1064,7 @@ class OrchestratorNode(BaseNode):
             "orchestrator_reasoning": decision.reasoning,
             "orchestrator_instructions": decision.instructions,
             "next_step": effective_agent,
-            "execution_plan": plan.model_dump(),
+            "execution_plan": plan.model_dump(mode="json"),
             "provisioned_references": state.get("provisioned_references", {}),
             "provisioned_docs": list(state.get("provisioned_references", {}).keys()),
         }
@@ -1032,6 +1072,7 @@ class OrchestratorNode(BaseNode):
             result_payload["orchestration_notices"] = list(state["orchestration_notices"])
         if state.get("route_decision"):
             result_payload["route_decision"] = state["route_decision"]
+            await self._record_route(state, state["route_decision"])
         if generated_skills:
             result_payload["generated_skills"] = generated_skills
         if generated_skill:

@@ -17,10 +17,11 @@ earlier ones through the checkpointer. Per turn it collects the graph state,
 the custom stream events (``task_status`` and ``orchestration_notice``) and
 the orchestration audit records, builds a :class:`TurnTrace` and checks it.
 
-Routing inputs are set fresh on every turn, the way a caller sends one turn
-at a time: the explicit agent, guardrail flags and attachments of the turn,
-and empty per-turn routing outputs, so nothing from an earlier turn's route
-carries over by accident.
+Each turn sends only what a caller sends: the user message, the explicit
+agent pick (or none) and the turn's attachments. The graph itself clears the
+previous turn's routing state, raises guardrail flags from the user's text
+(through the pack's flag words) and writes the route audit records, so the
+scenarios check the runtime's own behaviour.
 """
 
 from __future__ import annotations
@@ -39,20 +40,7 @@ ROUTE_NODE = "supervisor"
 TASK_EVENT_PREFIX = "task."
 MAIN_AGENT_ID = "main-agent"
 
-# Per-turn routing inputs and outputs. They live in graph state, so the
-# checkpointer would otherwise carry them into the next turn.
-_PER_TURN_RESET: Dict[str, Any] = {
-    "routed_subgraph": None,
-    "next_step": "",
-    "route_decision": None,
-    "orchestration_notices": [],
-    "provenance": [],
-    "execution_plan": None,
-    "target_agents": None,
-    "specialist_outputs": {},
-    "deliberation_state": None,
-    "output": None,
-}
+ROUTE_EVENT_PREFIX = "route."
 
 
 @dataclass
@@ -113,6 +101,16 @@ class _AuditCapture:
 
     async def __call__(self, event: Any) -> None:
         self.events.append(event)
+
+
+class _TurnTaskCapture:
+    """In-memory stand-in for the ``turn_tasks`` table."""
+
+    def __init__(self) -> None:
+        self.rows: List[Any] = []
+
+    async def __call__(self, rows: Sequence[Any]) -> None:
+        self.rows.extend(rows)
 
 
 def _route_label(decision: Optional[Dict[str, Any]]) -> Optional[str]:
@@ -233,12 +231,15 @@ class ScenarioRunner:
         spec = self._spec(scenario)
         view = self._view(spec)
         audit = _AuditCapture()
+        turn_tasks = _TurnTaskCapture()
         checkpointer = self._checkpointer()
         graph = GraphBuilder(
             model=self.backend.model_for(Role(kind="main")),
             registry=self.pack.registry,
             orchestration=spec,
             orchestration_audit_sink=audit,
+            turn_task_sink=turn_tasks,
+            safety_policy=self.pack.safety_policy(),
             checkpointer=checkpointer,
         ).build()
         thread_id = f"orch-eval-{scenario.id}-{uuid.uuid4().hex[:8]}"
@@ -246,7 +247,7 @@ class ScenarioRunner:
 
         traces: List[TurnTrace] = []
         for number, turn in enumerate(scenario.turns, start=1):
-            trace = await self._run_turn(graph, config, thread_id, number, turn, audit)
+            trace = await self._run_turn(graph, config, thread_id, number, turn, audit, turn_tasks)
             cost = self.backend.cost_per_mtok.cost_usd(trace.input_tokens, trace.output_tokens)
             checks = check_turn(trace, turn, view, previous=traces, usd=cost)
             traces.append(trace)
@@ -264,6 +265,7 @@ class ScenarioRunner:
         number: int,
         turn: Turn,
         audit: _AuditCapture,
+        turn_tasks: _TurnTaskCapture,
     ) -> TurnTrace:
         from langchain_core.messages import HumanMessage
 
@@ -275,16 +277,13 @@ class ScenarioRunner:
         before = await graph.aget_state(config)
         start_messages = len((before.values or {}).get("messages") or []) if before is not None else 0
         audit_start = len(audit.events)
+        tasks_start = len(turn_tasks.rows)
 
-        flag = turn.input.guardrail_flag if turn.input is not None else None
         attachments = list(turn.input.attachments) if turn.input is not None else []
         state_in: Dict[str, Any] = {
-            **_PER_TURN_RESET,
             "messages": [HumanMessage(content=turn.user)],
             "thread_id": thread_id,
             "explicit_agent": turn.explicit_agent,
-            "current_agent": turn.explicit_agent,
-            "guardrail_flags": [flag] if flag else [],
             "attachments": attachments,
         }
 
@@ -334,11 +333,14 @@ class ScenarioRunner:
         values: Dict[str, Any] = dict(after.values or {}) if after is not None else {}
         decision = values.get("route_decision")
         trace.route = _route_label(decision)
-        if trace.route is None and turn.explicit_agent and "agent" in trace.nodes:
-            trace.route = "user_selected"
-        trace.route_agent = (decision or {}).get("agent_id") or turn.explicit_agent
+        trace.route_agent = (decision or {}).get("agent_id")
+        trace.guardrail_flags = [str(f) for f in values.get("guardrail_flags") or []]
 
         turn_audit = audit.events[audit_start:]
+        trace.route_events = [
+            str(e.event) for e in turn_audit if str(getattr(e, "event", "")).startswith(ROUTE_EVENT_PREFIX)
+        ]
+        trace.turn_tasks = [r.model_dump(mode="json") for r in turn_tasks.rows[tasks_start:]]
         records = _tasks_from_audit(turn_audit)
         trace.tasks = [t for t in records if "started" in t.states]
         trace.rejected_tasks = [t for t in records if "started" not in t.states]

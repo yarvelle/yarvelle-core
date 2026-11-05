@@ -219,8 +219,8 @@ def test_main_agent_delegates_through_task_tool(registry: AgentRegistry) -> None
     assert outcome.messages[-1].content == "Here is your plan: Day 1: beach."
     tool_results = [m for m in outcome.messages if isinstance(m, ToolMessage)]
     assert tool_results and "Day 1: beach." in str(tool_results[0].content)
-    assert sink.kinds() == ["task.started", "task.completed"]
-    done = sink.events[1]
+    assert sink.kinds() == ["route.main_agent", "task.started", "task.completed"]
+    done = sink.events[2]
     assert (done.turn_id, done.task_id, done.agent_id) == ("turn-1", "call-1", "trip-organizer")
     assert done.input_hash and done.output_hash and done.duration_ms is not None
 
@@ -249,8 +249,8 @@ def test_hidden_or_unknown_agent_is_refused(registry: AgentRegistry) -> None:
     router = HybridRouter(registry=registry, model=model, spec=_spec(), audit_sink=sink)
     outcome = asyncio.run(router.run(_turn()))
     assert outcome is not None and outcome.tasks_started == 0
-    assert sink.kinds() == ["task.failed"]
-    assert sink.events[0].error_code == "policy.denied" and sink.events[0].allowed is False
+    assert sink.kinds() == ["route.main_agent", "task.failed"]
+    assert sink.events[1].error_code == "policy.denied" and sink.events[1].allowed is False
 
 
 def test_fan_out_is_capped_at_max_agents(registry: AgentRegistry) -> None:
@@ -320,7 +320,8 @@ def test_main_agent_failure_falls_back_to_default(registry: AgentRegistry) -> No
     assert outcome.decision.source == RouteSource.DEFAULT_AGENT
     assert outcome.decision.fallback_reason == "main_agent_failed"
     assert [n.code for n in outcome.notices] == ["main_agent_failed"]
-    assert sink.kinds() == ["route.default"]
+    # The main agent was chosen first, then the turn fell back to the default.
+    assert sink.kinds() == ["route.main_agent", "route.default"]
 
 
 # ------------------------------------------------------------------ graph wiring
@@ -368,7 +369,7 @@ def test_main_agent_node_returns_answer_messages(registry: AgentRegistry) -> Non
     assert result["next_step"] == "output_guardrail"
     assert result["messages"][-1].content == "Plan: save 10%."
     assert result["route_decision"] == {"source": "main_agent"}
-    assert sink.kinds() == ["task.started", "task.completed"]
+    assert sink.kinds() == ["route.main_agent", "task.started", "task.completed"]
 
 
 def test_builder_wires_main_agent_node(registry: AgentRegistry) -> None:

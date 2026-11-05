@@ -161,7 +161,8 @@ class Sink:
     def by_task(self) -> Dict[str, List[str]]:
         out: Dict[str, List[str]] = {}
         for e in self.events:
-            out.setdefault(str(e.task_id), []).append(e.event)
+            if e.event.startswith("task."):
+                out.setdefault(str(e.task_id), []).append(e.event)
         return out
 
 

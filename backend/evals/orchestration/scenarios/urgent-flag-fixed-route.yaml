@@ -1,5 +1,6 @@
-# A guardrail flag sends the turn straight to the escalation desk with no
-# model call before the route. The next turn routes normally again.
+# The input guardrail raises the urgent flag from the user's text, which sends
+# the turn straight to the escalation desk with no model call before the
+# route. The next turn raises no flag and routes normally again.
 schema: 1
 id: urgent-flag-fixed-route
 title: An urgent flag takes the fixed route, and the route does not stick

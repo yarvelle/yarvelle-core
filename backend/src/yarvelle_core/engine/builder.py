@@ -106,7 +106,7 @@ if TYPE_CHECKING:
         ToolNode,
         ToolValidatorNode,
     )
-from yarvelle_core.workflows.state import AgentState
+from yarvelle_core.workflows.state import AgentState, turn_end_values, turn_start_values
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +116,29 @@ async def _record_orchestration_audit(event: Any) -> None:
     from yarvelle_core.audit.logger import record_audit
 
     await record_audit(event)
+
+
+async def _store_turn_tasks(rows: Sequence[Any]) -> None:
+    """Default sink for a turn's hand-off records: the ``turn_tasks`` table."""
+    from datetime import datetime, timezone
+
+    from yarvelle_core.db.models import TurnTask
+    from yarvelle_core.db.session import get_session_factory
+    from yarvelle_core.scope.context import DEFAULT_SCOPE, current_scope
+
+    def _when(value: Optional[str]) -> Optional[datetime]:
+        if not value:
+            return None
+        parsed = datetime.fromisoformat(value)
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+    scope = current_scope() or DEFAULT_SCOPE
+    async with get_session_factory()() as session:
+        for row in rows:
+            data = row.model_dump()
+            data["started_at"] = _when(data.get("started_at"))
+            session.add(TurnTask(scope=scope, **data))
+        await session.commit()
 
 
 class GraphBuilder:
@@ -149,6 +172,7 @@ class GraphBuilder:
         default_agent: Optional[str] = None,
         orchestration: Optional[Any] = None,
         orchestration_audit_sink: Optional[Callable[..., Any]] = None,
+        turn_task_sink: Optional[Callable[..., Any]] = None,
         **kwargs: Any,
     ) -> None:
         """Initialize GraphBuilder configuration.
@@ -181,6 +205,8 @@ class GraphBuilder:
         # default agent and per-turn limits for the main agent.
         self.orchestration = orchestration
         self.orchestration_audit_sink = orchestration_audit_sink
+        # Where each turn's hand-off records go; defaults to the ``turn_tasks`` table.
+        self.turn_task_sink = turn_task_sink
         self.suggestion_model = kwargs.get("suggestion_model")
         self.extra_kwargs = kwargs
 
@@ -377,6 +403,7 @@ class GraphBuilder:
                         orchestration=self.orchestration,
                         default_agent=self.default_agent,
                         audit_sink=self.orchestration_audit_sink or _record_orchestration_audit,
+                        task_sink=self.turn_task_sink or _store_turn_tasks,
                     )
                 supervisor_node = OrchestratorNode(
                     model=self.model,
@@ -384,6 +411,7 @@ class GraphBuilder:
                     default_agent=self.default_agent,
                     orchestration=self.orchestration,
                     main_agent_enabled=main_agent_node is not None,
+                    audit_sink=self.orchestration_audit_sink or _record_orchestration_audit,
                 )
             else:
                 supervisor_node = OrchestratorNode(
@@ -391,6 +419,7 @@ class GraphBuilder:
                     default_agent=self.default_agent,
                     orchestration=self.orchestration,
                     name="supervisor",
+                    audit_sink=self.orchestration_audit_sink or _record_orchestration_audit,
                 )
 
         agent_node = self._custom_nodes.get("agent") or self._custom_nodes.get("agent_execution")
@@ -492,10 +521,15 @@ class GraphBuilder:
 
         async def _input_guardrail_wrapper(
             state: AgentState,
+            config: Optional[RunnableConfig] = None,
             *,
             store: Optional[BaseStore] = None,
         ) -> Dict[str, Any]:
-            res = await _invoke_node_with_store(input_guard_node, state, store=store)
+            # A turn starts here: drop the previous turn's routing results so
+            # its route, notices and hand-offs never carry over.
+            run_id = ((config or {}).get("configurable") or {}).get("run_id")
+            fresh = turn_start_values(str(run_id) if run_id else None, state.get("explicit_agent"))
+            res = {**fresh, **await _invoke_node_with_store(input_guard_node, {**state, **fresh}, store=store)}
             if res.get("is_refusal") or res.get("refused"):
                 reason = res.get("refusal_reason") or state.get("default_refusal_reason") or "forbidden_intent:policy_prohibited"
                 category = None
@@ -707,7 +741,15 @@ class GraphBuilder:
             builder.add_node("reflection", reflection_node)
         builder.add_node("refusal", refusal_node)
         builder.add_node("suggestion", _suggestion_wrapper)
-        builder.add_node("audit", audit_node)
+        async def _audit_wrapper(state: AgentState) -> Dict[str, Any]:
+            # The turn ends here: the caller's one-turn choices (agent pick,
+            # execution plan) are dropped so they do not pin the next turn.
+            res = audit_node(state) if callable(audit_node) else audit_node.execute(state)
+            if inspect.isawaitable(res):
+                res = await res
+            return {**(res or {}), **turn_end_values()}
+
+        builder.add_node("audit", _audit_wrapper)
         if self.include_error_node:
             builder.add_node("error", error_node)
 

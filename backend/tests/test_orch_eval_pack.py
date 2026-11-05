@@ -43,11 +43,13 @@ SPEC = {
     "default_agent": "alpha",
     "fixed_routes": [{"route_id": "rush", "when": {"kind": "guardrail_flag", "flag": "rush"}, "agent_id": "alpha"}],
 }
+FLAGS = {"rush": ["asap", "right now"]}
 
 
 @pytest.fixture()
 def pack(tmp_path: Path):
-    return load_eval_pack(_write(tmp_path / "pk", {"alpha": {}, "beta": {}, "ghost": {"hidden": True}}, SPEC))
+    agents = {"alpha": {}, "beta": {}, "ghost": {"hidden": True}}
+    return load_eval_pack(_write(tmp_path / "pk", agents, SPEC, guardrail_flags=FLAGS))
 
 
 def test_pack_loads_agents_titles_and_routes(pack):
@@ -143,3 +145,27 @@ def test_shipped_scenarios_lint_against_shipped_pack(monkeypatch: pytest.MonkeyP
         assert lint_against_pack(sc, pack) == [], path
     assert pack.hidden_ids == ["internal-auditor"]
     assert len(pack.agent_ids) in range(6, 9)
+
+
+def test_pack_flag_words_drive_the_harness_policy(pack):
+    assert pack.flag_words == {"rush": ["asap", "right now"]}
+    assert pack.flags_for("Book it ASAP please") == ["rush"]
+    assert pack.flags_for("Book it whenever") == []
+
+
+def test_pack_rejects_flag_routes_without_words(tmp_path: Path):
+    root = _write(tmp_path / "pk", {"alpha": {}}, SPEC)
+    with pytest.raises(EvalPackError, match="guardrail_flags"):
+        load_eval_pack(root)
+    empty = _write(tmp_path / "pk2", {"alpha": {}}, SPEC, guardrail_flags={"rush": [" "]})
+    with pytest.raises(EvalPackError, match="no words"):
+        load_eval_pack(empty)
+
+
+def test_lint_flag_must_be_raised_by_the_user_text(pack):
+    ok = _scenario([{"user": "Need it asap", "input": {"guardrail_flag": "rush"}, "expect": {"route": "fixed_route:rush"}}])
+    assert lint_against_pack(ok, pack) == []
+    silent = lint_against_pack(_scenario([{"user": "Whenever", "input": {"guardrail_flag": "rush"}}]), pack)
+    assert silent and "does not raise" in silent[0]
+    unknown = lint_against_pack(_scenario([{"user": "asap", "input": {"guardrail_flag": "night"}}]), pack)
+    assert unknown and "not listed" in unknown[0]
