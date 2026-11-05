@@ -20,9 +20,13 @@ Commands:
 
 * ``lint``: validate scenario files, and check their agent ids and routes
   against the eval pack they name;
-* ``run``: run scenarios on a chosen backend and print a JSON result.
-  Free backends: ``fake``, ``ollama``. Paid ``provider`` requires
-  ``--max-usd`` greater than 0. Exits 1 when any check fails.
+* ``run``: run scenarios on a chosen backend, print JSON, and write
+  ``results.json`` / ``report.md`` / ``report.html`` under
+  ``~/.yarvelle-evals/<run>/`` (override with ``--out-dir``). Free
+  backends: ``fake``, ``ollama``. Paid ``provider`` requires ``--max-usd``
+  greater than 0. Exits 1 when any check fails, 2 on a baseline regression;
+* ``baseline save``: remember a run as the baseline for its backend+model;
+* ``compare``: diff a run against a baseline without re-running scenarios.
 """
 
 from __future__ import annotations
@@ -31,6 +35,7 @@ import argparse
 import asyncio
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -83,6 +88,35 @@ def _build_parser() -> argparse.ArgumentParser:
     run.add_argument("--base-url", help="Override the model endpoint (Ollama or OpenAI-compatible)")
     run.add_argument("--seed", type=int, default=None, help="Sampling seed (default 1729)")
     run.add_argument("--out", help="Also write the JSON result to this file")
+    run.add_argument(
+        "--out-dir",
+        help="Root directory for run reports (default: ~/.yarvelle-evals or YARVELLE_EVALS_DIR)",
+    )
+    run.add_argument(
+        "--baseline",
+        help="Compare this run to a baseline (path, run id, or latest:<backend>:<model>)",
+    )
+    run.add_argument(
+        "--save-baseline",
+        action="store_true",
+        help="After a green run, save it as the baseline for this backend+model",
+    )
+    run.add_argument(
+        "--no-report",
+        action="store_true",
+        help="Skip writing the report directory (still prints JSON to stdout)",
+    )
+
+    baseline = sub.add_parser("baseline", help="Manage saved baselines under the evals output root")
+    baseline_sub = baseline.add_subparsers(dest="baseline_command")
+    b_save = baseline_sub.add_parser("save", help="Save a run's results.json as the baseline for its backend+model")
+    b_save.add_argument("run", help="Run id, run directory, or path to results.json")
+    b_save.add_argument("--out-dir", help="Evals root (default: ~/.yarvelle-evals)")
+
+    compare = sub.add_parser("compare", help="Compare a run against a baseline without re-running")
+    compare.add_argument("current", help="Current run id, directory, or results.json")
+    compare.add_argument("--baseline", required=True, help="Baseline path, run id, or latest:<backend>:<model>")
+    compare.add_argument("--out-dir", help="Evals root used to resolve run ids (default: ~/.yarvelle-evals)")
     return parser
 
 
@@ -328,6 +362,32 @@ def _run(args: argparse.Namespace) -> int:
     }
     if describe_backend is not None and hasattr(describe_backend, "meter"):
         document["spend"] = describe_backend.meter.snapshot()
+
+    from yarvelle_core.testing.orch_eval.baseline import (
+        EXIT_REGRESSION,
+        compare_runs,
+        render_compare_markdown,
+        resolve_baseline_ref,
+        save_baseline,
+    )
+    from yarvelle_core.testing.orch_eval.report import (
+        default_out_root,
+        enrich_document,
+        new_run_id,
+        write_run_reports,
+    )
+
+    root = Path(args.out_dir).expanduser() if args.out_dir else default_out_root()
+    backend_name = (document.get("backend") or {}).get("backend") or args.backend
+    run_id = new_run_id(str(backend_name))
+    run_dir = root / run_id
+    started = document.get("started_at") or datetime.now(timezone.utc).isoformat()
+    enrich_document(document, run_id=run_id, out_dir=run_dir, started_at=started)
+
+    if not args.no_report:
+        write_run_reports(document, run_dir)
+        print(f"report: {run_dir}", file=sys.stderr)
+
     out_text = json.dumps(document, indent=2, sort_keys=False, default=str)
     if args.out:
         Path(args.out).write_text(out_text + "\n", encoding="utf-8")
@@ -341,7 +401,80 @@ def _run(args: argparse.Namespace) -> int:
             print(f"      {failure}", file=sys.stderr)
     totals = document["totals"]
     print(f"{totals['passed']} of {totals['scenarios']} scenario(s) passed.", file=sys.stderr)
-    return 0 if document["passed"] else 1
+
+    exit_code = 0 if document["passed"] else 1
+    if args.baseline:
+        try:
+            baseline_path = resolve_baseline_ref(args.baseline, root)
+            baseline_doc = json.loads(baseline_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError, FileNotFoundError) as err:
+            print(f"baseline error: {err}", file=sys.stderr)
+            return 1
+        compare = compare_runs(document, baseline_doc)
+        compare_text = render_compare_markdown(compare)
+        if not args.no_report:
+            (run_dir / "compare.md").write_text(compare_text + "\n", encoding="utf-8")
+            (run_dir / "compare.json").write_text(
+                json.dumps(compare.to_dict(), indent=2) + "\n", encoding="utf-8"
+            )
+        print(compare_text, file=sys.stderr)
+        if compare.has_regression:
+            exit_code = EXIT_REGRESSION if exit_code == 0 else exit_code
+            print(
+                f"regression vs baseline {compare.baseline_run_id}: "
+                f"{len(compare.regressions)} finding(s)",
+                file=sys.stderr,
+            )
+
+    if args.save_baseline and document.get("passed") and exit_code == 0:
+        saved = save_baseline(run_dir / "results.json", root)
+        print(f"baseline saved: {saved}", file=sys.stderr)
+    elif args.save_baseline:
+        print("baseline not saved: run did not pass cleanly", file=sys.stderr)
+
+    return exit_code
+
+
+def _baseline_cmd(args: argparse.Namespace) -> int:
+    from yarvelle_core.testing.orch_eval.baseline import resolve_baseline_ref, save_baseline
+    from yarvelle_core.testing.orch_eval.report import default_out_root
+
+    if args.baseline_command != "save":
+        print("usage: ... baseline save <run>", file=sys.stderr)
+        return 2
+    root = Path(args.out_dir).expanduser() if args.out_dir else default_out_root()
+    try:
+        results_path = resolve_baseline_ref(args.run, root)
+        saved = save_baseline(results_path, root)
+    except (OSError, ValueError, FileNotFoundError) as err:
+        print(f"baseline error: {err}", file=sys.stderr)
+        return 1
+    print(f"baseline saved: {saved}")
+    return 0
+
+
+def _compare_cmd(args: argparse.Namespace) -> int:
+    from yarvelle_core.testing.orch_eval.baseline import (
+        EXIT_REGRESSION,
+        compare_runs,
+        load_results,
+        render_compare_markdown,
+        resolve_baseline_ref,
+    )
+    from yarvelle_core.testing.orch_eval.report import default_out_root
+
+    root = Path(args.out_dir).expanduser() if args.out_dir else default_out_root()
+    try:
+        current = load_results(resolve_baseline_ref(args.current, root))
+        baseline = load_results(resolve_baseline_ref(args.baseline, root))
+    except (OSError, ValueError, FileNotFoundError) as err:
+        print(f"compare error: {err}", file=sys.stderr)
+        return 1
+    compare = compare_runs(current, baseline)
+    text = render_compare_markdown(compare)
+    print(text)
+    print(json.dumps(compare.to_dict(), indent=2))
+    return EXIT_REGRESSION if compare.has_regression else 0
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -374,6 +507,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return _run_lint(args.paths, args.pack)
     if args.command == "run":
         return _run(args)
+    if args.command == "baseline":
+        return _baseline_cmd(args)
+    if args.command == "compare":
+        return _compare_cmd(args)
     parser.print_help()
     return 2
 
