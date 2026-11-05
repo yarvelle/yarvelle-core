@@ -651,6 +651,7 @@ def test_synthesizer_backward_compatibility_without_deliberation_state():
             "specialist_b": "Summary from specialist B without deliberation.",
         },
         "deliberation_state": None,
+        "agent_titles": {"specialist_a": "Specialist A", "specialist_b": "Specialist B"},
     }
     output = ResponseSynthesizerNode.synthesize_response(state)
 

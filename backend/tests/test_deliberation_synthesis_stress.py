@@ -703,7 +703,14 @@ def test_stress_conflict_with_missing_target_proposal():
 
 def test_stress_mixed_taint_propagation():
     """Adversarially tests mixed taint propagation: 2 tainted agents, 2 clean agents."""
-    node = ResponseSynthesizerNode()
+    node = ResponseSynthesizerNode(
+        agent_titles={
+            "agent_clean_1": "Agent Clean 1",
+            "agent_clean_2": "Agent Clean 2",
+            "agent_tainted_1": "Agent Tainted 1",
+            "agent_tainted_2": "Agent Tainted 2",
+        }
+    )
 
     props = {
         "agent_clean_1": AgentProposal(
@@ -877,8 +884,9 @@ def test_stress_degraded_fallback_with_multiple_missing_agents():
     assert "# Deliberation Plan (for stakeholder review)" in output
     assert "*Note: Multi-agent deliberation degraded to single-agent answer due to insufficient valid proposals. Missing agents: specialist_beta, specialist_gamma, specialist_delta.*" in output
     assert "Specialist Alpha proposal: Proceed with primary pipeline configuration." in output
-    # Verifies constituent disclaimer was stripped
-    assert "Temporary constituent disclaimer" not in output
+    # Agent text is passed through as written (no pattern-based stripping)
+    assert "Temporary constituent disclaimer" in output
+    assert output.count(CANONICAL_DISCLAIMER) == 1
     # Verifies canonical disclaimer appended
     assert output.endswith(CANONICAL_DISCLAIMER)
 

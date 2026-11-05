@@ -91,6 +91,8 @@ class MainAgentNode(BaseNode):
         if notices:
             result["orchestration_notices"] = list(state.get("orchestration_notices") or []) + notices
         if outcome.decision.source == RouteSource.MAIN_AGENT:
+            # Which hand-offs fed this reply, by task id (built from the audit records).
+            result["provenance"] = [p.model_dump(mode="json") for p in outcome.provenance]
             result.update(
                 messages=outcome.messages,
                 current_agent=MAIN_AGENT_ID,

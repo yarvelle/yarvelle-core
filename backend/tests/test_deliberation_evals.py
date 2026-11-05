@@ -1203,7 +1203,7 @@ def test_eval_taint_propagation_and_synthesis_warning_flag():
         "prompt": "Evaluate input reliability",
     }
 
-    synthesizer = ResponseSynthesizerNode()
+    synthesizer = ResponseSynthesizerNode(agent_titles={"specialist_a": "Specialist A", "specialist_b": "Specialist B"})
     synthesized = synthesizer.synthesize_deliberation(state)
 
     # Assert warning banner is present

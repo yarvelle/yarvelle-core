@@ -200,7 +200,8 @@ def test_slow_subagent_times_out_while_others_complete(registry: AgentRegistry) 
     started = time.monotonic()
     outcome = asyncio.run(router.run(_turn(), turn_id="t-1"))
     assert time.monotonic() - started < 4.0
-    assert outcome is not None and outcome.messages[-1].content == "Here is the trip."
+    assert outcome is not None and outcome.messages[-1].content.startswith("Here is the trip.")
+    assert "Budget Planner did not answer" in outcome.messages[-1].content
     assert sink.by_task() == {"slow": ["task.started", "task.timed_out"], "fast": ["task.started", "task.completed"]}
     tools = _tool_texts(outcome.messages)
     assert tools["slow"].status == "error" and "did not answer" in str(tools["slow"].content)
@@ -222,7 +223,8 @@ def test_one_failure_is_surfaced_and_the_turn_still_answers(registry: AgentRegis
     router = HybridRouter(registry=registry, model=model, spec=_spec(), audit_sink=sink)
     outcome = asyncio.run(router.run(_turn()))
     assert outcome is not None and outcome.decision.source.value == "main_agent"
-    assert outcome.messages[-1].content == "Partial plan."
+    assert outcome.messages[-1].content.startswith("Partial plan.")
+    assert "did not answer" in outcome.messages[-1].content
     assert sink.by_task()["b"] == ["task.started", "task.failed"]
     failed = next(e for e in sink.events if e.event == "task.failed")
     assert failed.error_code == "task.error" and failed.reason == "RuntimeError"

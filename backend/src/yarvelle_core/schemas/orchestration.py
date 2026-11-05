@@ -139,6 +139,16 @@ class FixedRoute(_Strict):
         return _check_agent_id(v)
 
 
+class SynthesisSpec(_Strict):
+    """How the main agent composes its reply (``orchestration.synthesis``)."""
+
+    instructions: str = Field(
+        default="",
+        max_length=4000,
+        description="Extra guidance appended to the main agent's system prompt for composing the reply.",
+    )
+
+
 class PackOrchestrationSpec(_Strict):
     """Pack-level orchestration config (``orchestration:`` in pack.yaml).
 
@@ -151,6 +161,7 @@ class PackOrchestrationSpec(_Strict):
     default_agent: str
     fixed_routes: List[FixedRoute] = Field(default_factory=list)
     limits: OrchestrationLimits = Field(default_factory=OrchestrationLimits)
+    synthesis: SynthesisSpec = Field(default_factory=SynthesisSpec)
 
     @field_validator("default_agent")
     @classmethod
@@ -249,6 +260,23 @@ class SSETaskStatusEvent(_Strict):
         return _check_agent_id(v)
 
 
+class TaskProvenance(_Strict):
+    """Where part of a main-agent reply came from: one hand-off of the turn.
+
+    Built from the turn's ``task.*`` audit records. ``verified`` is true when
+    the subagent run that answered reported the same agent name
+    (``lc_agent_name``) as the hand-off asked for.
+    """
+
+    task_id: str = Field(..., min_length=1)
+    agent_id: str
+    agent_title: str = Field(..., description="Display title of the agent, safe to show to users.")
+    state: TaskState
+    truncated: bool = False
+    output_hash: Optional[str] = Field(default=None, description="sha256 of the subagent answer, from the audit record.")
+    verified: bool = False
+
+
 class SSEOrchestrationNoticeEvent(_Strict):
     """User-visible notice about a fallback or degraded turn."""
 
@@ -289,5 +317,7 @@ __all__ = [
     "RouteTrigger",
     "SSEOrchestrationNoticeEvent",
     "SSETaskStatusEvent",
+    "SynthesisSpec",
+    "TaskProvenance",
     "TaskState",
 ]

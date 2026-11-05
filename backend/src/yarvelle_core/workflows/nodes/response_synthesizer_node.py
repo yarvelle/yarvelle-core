@@ -14,8 +14,10 @@
 Consolidates multi-agent specialist outputs and blackboard deliberation state into
 a unified coordinated plan, formats resource allocation tables with skipped constraint
 notations, summarizes multi-round trade-offs, formats structured minority reports and
-open amendment notes, flags untrusted inputs, deduplicates constituent disclaimers,
-appends the canonical disclaimer footer, and records zero-body audit events.
+open amendment notes, flags untrusted inputs, appends the canonical disclaimer
+footer once, and records zero-body audit events. Agents are named by their
+registry titles. Outside deliberation the reply is composed by a model; this
+node never assembles one from templates.
 """
 
 from __future__ import annotations
@@ -25,7 +27,6 @@ from functools import wraps
 import json
 import logging
 from pathlib import Path
-import re
 import time
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence, Union
 
@@ -51,12 +52,6 @@ CANONICAL_DISCLAIMER = (
     "Verify important decisions with qualified professionals."
 )
 
-CONSTITUENT_DISCLAIMER_PATTERNS = [
-    re.compile(r"DISCLAIMER:.*?(?=\n\n|\Z)", re.IGNORECASE | re.DOTALL),
-    re.compile(r"NOTE: I am not an? (?:attorney|advisor|agent).*?(?=\n\n|\Z)", re.IGNORECASE | re.DOTALL),
-    re.compile(r"Please consult your (?:advisor|provider) before.*?(?=\n\n|\Z)", re.IGNORECASE | re.DOTALL),
-    re.compile(r"\*Disclaimer:.*?\*(?=\n\n|\Z)", re.IGNORECASE | re.DOTALL),
-]
 
 
 class class_or_instance_method:
@@ -89,9 +84,11 @@ class ResponseSynthesizerNode(BaseNode):
         self,
         name: str = "response_synthesizer",
         model: Optional[BaseChatModel] = None,
+        agent_titles: Optional[Dict[str, str]] = None,
     ) -> None:
         super().__init__(name=name)
         self.model = model
+        self.agent_titles = dict(agent_titles or {})
 
     async def __call__(
         self, state: Dict[str, Any], *, store: Optional[BaseStore] = None, **kwargs: Any
@@ -99,33 +96,19 @@ class ResponseSynthesizerNode(BaseNode):
         """LangGraph node execution callable interface supporting store injection."""
         return await self.execute(state, store=store, **kwargs)
 
-    @classmethod
-    def strip_reference_preamble(cls, text: str) -> str:
-        """Strips robotic 'Based on the provided reference document/guide...' opening phrases."""
-        if not text:
-            return ""
-        pattern = r"^(?:(?:\*|_){0,2}(?:(?:Based on|According to|From) (?:the )?(?:provided )?reference (?:document|guide|material|checklist|information|docs?)(?: provided)?)[,:]?(?:\*|_){0,2}[,:]?\s*)"
-        cleaned = re.sub(pattern, "", text.lstrip(), flags=re.IGNORECASE)
-        cleaned = cleaned.lstrip("*_ \t")
-        if cleaned and cleaned != text:
-            cleaned = cleaned[0].upper() + cleaned[1:] if len(cleaned) > 1 else cleaned.upper()
-        return cleaned
+    def _title(self, agent_id: str, state: Optional[Dict[str, Any]] = None) -> str:
+        """Display title for an agent from the registry titles; never a prettified id."""
+        titles = dict((state or {}).get("agent_titles") or {})
+        titles.update(self.agent_titles)
+        return titles.get(agent_id) or agent_id
 
-    @classmethod
-    def strip_disclaimers(cls, text: str) -> str:
-        """Removes constituent agent disclaimers and reference preambles from specialist text."""
-        if not text:
-            return ""
-        cleaned = cls.strip_reference_preamble(text)
-        for pat in CONSTITUENT_DISCLAIMER_PATTERNS:
-            cleaned = pat.sub("", cleaned).strip()
-        cleaned = re.sub(
-            r"(?m)^\s*(?:\*|_)?DISCLAIMER:.*(?:\*|_)?\s*$",
-            "",
-            cleaned,
-            flags=re.IGNORECASE,
-        ).strip()
-        return cleaned
+    @staticmethod
+    def _without_footer(text: str) -> str:
+        """Drops a trailing copy of the canonical footer so it is added only once."""
+        body = str(text or "").rstrip()
+        if body.endswith(CANONICAL_DISCLAIMER):
+            body = body[: -len(CANONICAL_DISCLAIMER)].rstrip()
+        return body
 
     def synthesize_deliberation(self, state: Dict[str, Any]) -> str:
         """Synthesizes structured multi-agent deliberation state (ADR 0001 §2.11).
@@ -144,9 +127,9 @@ class ResponseSynthesizerNode(BaseNode):
         # 0. Degraded fallback handling
         if delib_state.get("degraded"):
             missing = delib_state.get("missing_agents") or []
-            missing_str = f" Missing agents: {', '.join(missing)}." if missing else ""
+            missing_str = f" Missing agents: {', '.join(self._title(a, state) for a in missing)}." if missing else ""
             fallback_text = state.get("output") or "Multi-agent deliberation degraded to single-agent answer due to insufficient valid proposals."
-            clean_fb = self.strip_disclaimers(str(fallback_text))
+            clean_fb = self._without_footer(str(fallback_text))
             full_out = (
                 f"# Deliberation Plan (for stakeholder review)\n\n"
                 f"*Note: Multi-agent deliberation degraded to single-agent answer due to insufficient valid proposals.{missing_str}*\n\n"
@@ -192,11 +175,11 @@ class ResponseSynthesizerNode(BaseNode):
         sections.append("### Consolidated Recommendations\n")
         if proposals:
             for aid, prop in sorted(proposals.items()):
-                agent_name = aid.replace("-", " ").replace("_", " ").title()
+                agent_name = self._title(aid, state)
                 taint_tag = " [⚠️ Untrusted Source]" if getattr(prop, "tainted", False) else ""
                 sections.append(f"#### {agent_name} Perspective{taint_tag}")
                 if prop.summary:
-                    clean_sum = self.strip_disclaimers(prop.summary)
+                    clean_sum = self._without_footer(prop.summary)
                     sections.append(f"- **Summary**: {clean_sum}")
                 if prop.recommendations:
                     sections.append("- **Key Recommendations**:")
@@ -367,46 +350,34 @@ class ResponseSynthesizerNode(BaseNode):
         if specialist_outputs is None:
             specialist_outputs = {}
 
-        # If no specialist_outputs, check if single output exists in state
-        if not specialist_outputs:
-            single_out = state.get("output")
-            if not single_out:
-                for m in reversed(state.get("messages", [])):
-                    msg_type = getattr(m, "type", "")
-                    if msg_type in ("human", "user") or (isinstance(m, dict) and m.get("role") in ("user", "human")):
-                        break
-                    if isinstance(m, AIMessage) and m.content:
-                        single_out = m.content
-                        break
-                    elif isinstance(m, dict) and m.get("role") in ("assistant", "ai") and m.get("content"):
-                        single_out = m.get("content")
-                        break
-            if single_out:
-                clean_text = self.strip_disclaimers(str(single_out))
-                full_output = f"{clean_text}\n\n{CANONICAL_DISCLAIMER}"
-                state["output"] = full_output
-                return full_output
-            full_output = f"No specialist outputs were generated.\n\n{CANONICAL_DISCLAIMER}"
-            state["output"] = full_output
-            return full_output
-
-        # Single agent fast-path
-        if len(specialist_outputs) == 1:
-            single_text = str(list(specialist_outputs.values())[0])
-            clean_text = self.strip_disclaimers(single_text)
-            full_output = f"{clean_text}\n\n{CANONICAL_DISCLAIMER}"
-            state["output"] = full_output
-            return full_output
-
-        # Multi-agent synthesis (domain-neutral coordination summary)
-        sections: List[str] = ["# Multi-Agent Coordination Summary\n"]
-        for agent_id, output_text in specialist_outputs.items():
-            agent_title = str(agent_id).replace("-", " ").replace("_", " ").title()
-            clean_output = self.strip_disclaimers(str(output_text))
-            sections.append(f"## {agent_title} Perspective\n{clean_output}\n")
-        sections.append(CANONICAL_DISCLAIMER)
-
-        full_output = "\n".join(sections)
+        # Outside deliberation the reply is composed by a model (the main agent or
+        # the routed agent); this node only adds the footer once. It never builds
+        # a reply from templates or agent ids.
+        answer = state.get("output")
+        if not answer:
+            for m in reversed(state.get("messages", [])):
+                msg_type = getattr(m, "type", "")
+                if msg_type in ("human", "user") or (isinstance(m, dict) and m.get("role") in ("user", "human")):
+                    break
+                if isinstance(m, AIMessage) and m.content:
+                    answer = m.content
+                    break
+                if isinstance(m, dict) and m.get("role") in ("assistant", "ai") and m.get("content"):
+                    answer = m.get("content")
+                    break
+        if not answer and len(specialist_outputs) == 1:
+            answer = str(next(iter(specialist_outputs.values())))
+        if not answer and specialist_outputs:
+            # Degraded: several agents answered but nothing composed them. Keep
+            # every answer, named by registry title, rather than drop any.
+            logger.warning("Several agent outputs reached the synthesizer without a composed reply")
+            answer = "\n\n".join(
+                f"**{self._title(str(aid), state)}:** {self._without_footer(str(text))}"
+                for aid, text in specialist_outputs.items()
+            )
+        if not answer:
+            answer = "No agent produced an answer for this turn."
+        full_output = f"{self._without_footer(str(answer))}\n\n{CANONICAL_DISCLAIMER}"
         state["output"] = full_output
         return full_output
 
@@ -529,7 +500,7 @@ class ResponseSynthesizerNode(BaseNode):
             except Exception:
                 pass
 
-        clean_completion = self.strip_disclaimers(full_output)
+        clean_completion = self._without_footer(full_output)
 
         # Collect staged actions if in deliberation mode (ADR 0001 §2.6, §2.11)
         staged_actions = []
