@@ -34,9 +34,19 @@ from __future__ import annotations
 import time
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from yarvelle_core.testing.orch_eval.checks import CheckResult, PackView, check_turn
+from yarvelle_core.testing.orch_eval.judge import (
+    DEFAULT_JUDGE_SAMPLES,
+    SameModelJudgeError,
+    assert_distinct_models,
+    can_enable_gate,
+    score_turn,
+    trace_summary_from_turn,
+)
+from yarvelle_core.testing.orch_eval.report import HARD_RULE_NAMES
 from yarvelle_core.testing.orch_eval.faults import FaultInjectingFakeModel, FaultPlan
 from yarvelle_core.testing.orch_eval.pack import EvalPack
 from yarvelle_core.testing.orch_eval.schema import Scenario, Turn
@@ -50,21 +60,40 @@ ROUTE_EVENT_PREFIX = "route."
 
 
 @dataclass
+class JudgeRunOptions:
+    """How the optional LLM judge runs for a suite."""
+
+    enabled: bool = False
+    gate: bool = False
+    samples: int = DEFAULT_JUDGE_SAMPLES
+    agreement: Optional[float] = None
+    allow_self_judge: bool = False
+    rubrics_dir: Optional[Path] = None
+    model: Any = None
+    subject_model: str = ""
+    judge_model: str = ""
+
+
+@dataclass
 class TurnResult:
     trace: TurnTrace
     checks: List[CheckResult]
+    judge: Optional[Dict[str, Any]] = None
 
     @property
     def passed(self) -> bool:
         return not any(c.failed for c in self.checks)
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        out: Dict[str, Any] = {
             "turn": self.trace.turn,
             "passed": self.passed,
             "checks": [c.to_dict() for c in self.checks],
             "trace": self.trace.to_dict(),
         }
+        if self.judge is not None:
+            out["judge"] = self.judge
+        return out
 
 
 @dataclass
@@ -203,10 +232,12 @@ class ScenarioRunner:
         backend: Any,
         *,
         checkpointer_factory: Optional[Callable[[], Any]] = None,
+        judge: Optional[JudgeRunOptions] = None,
     ) -> None:
         self.pack = pack
         self.backend = backend
         self._checkpointer_factory = checkpointer_factory
+        self.judge = judge or JudgeRunOptions()
 
     def _checkpointer(self, *, encrypt: bool = False) -> Any:
         if self._checkpointer_factory is not None:
@@ -279,6 +310,83 @@ class ScenarioRunner:
             checkpointer=checkpointer,
         ).build()
 
+
+    def _apply_judge(
+        self,
+        *,
+        turn: Turn,
+        trace: TurnTrace,
+        checks: List[CheckResult],
+        previous: Sequence[TurnTrace],
+    ) -> tuple[List[CheckResult], Optional[Dict[str, Any]]]:
+        """Score the turn with the LLM judge when enabled and layer-1 passed."""
+        opts = self.judge
+        if not opts.enabled or turn.judge is None:
+            return checks, None
+        hard_failed = any(
+            c.failed
+            and (c.name in HARD_RULE_NAMES or c.name.startswith("invariant"))
+            for c in checks
+        )
+        # Drop the placeholder skip; we will append a real judge check.
+        checks = [c for c in checks if not c.name.startswith("judge:")]
+        name = f"judge:{turn.judge.rubric}"
+        if hard_failed:
+            checks.append(
+                CheckResult(name, "skip", "layer-1 hard rules failed; judge not run")
+            )
+            return checks, None
+        try:
+            assert_distinct_models(
+                opts.subject_model,
+                opts.judge_model,
+                allow_self_judge=opts.allow_self_judge,
+            )
+        except SameModelJudgeError as err:
+            checks.append(CheckResult(name, "fail", str(err)))
+            return checks, None
+        from yarvelle_core.testing.orch_eval.backends import Role
+
+        model = opts.model
+        if model is None:
+            model = self.backend.model_for(Role(kind="judge"))
+        conversation = []
+        for t in previous:
+            conversation.append({"role": "user", "text": t.user})
+            if t.answer:
+                conversation.append({"role": "assistant", "text": t.answer})
+        result = score_turn(
+            model,
+            rubric=turn.judge.rubric,
+            criteria=turn.judge.criteria,
+            min_score=turn.judge.min_score,
+            user=turn.user,
+            answer=trace.answer or "",
+            trace_summary=trace_summary_from_turn(trace),
+            conversation=conversation,
+            samples=opts.samples,
+            rubrics_dir=opts.rubrics_dir,
+        )
+        gated = bool(opts.gate and can_enable_gate(opts.agreement))
+        gate_failed = False
+        if gated and not result.unsure and result.score < turn.judge.min_score:
+            gate_failed = True
+        result.gated = gated
+        result.gate_failed = gate_failed
+        detail = (
+            f"score={result.score} verdict={result.verdict}"
+            + (" unsure" if result.unsure else "")
+            + (f" (gate)" if gated else " (report-only)")
+        )
+        if gate_failed:
+            checks.append(CheckResult(name, "fail", detail))
+        elif gated:
+            checks.append(CheckResult(name, "pass", detail))
+        else:
+            # Soft: never fails the turn.
+            checks.append(CheckResult(name, "pass", detail))
+        return checks, result.to_dict()
+
     async def run(self, scenario: Scenario) -> ScenarioResult:
         from yarvelle_core.testing.orch_eval.backends import Role
 
@@ -318,8 +426,11 @@ class ScenarioRunner:
             )
             cost = self.backend.cost_per_mtok.cost_usd(trace.input_tokens, trace.output_tokens)
             checks = check_turn(trace, turn, view, previous=traces, usd=cost)
+            checks, judge_payload = self._apply_judge(
+                turn=turn, trace=trace, checks=checks, previous=traces
+            )
             traces.append(trace)
-            result.turns.append(TurnResult(trace=trace, checks=checks))
+            result.turns.append(TurnResult(trace=trace, checks=checks, judge=judge_payload))
             # Expected cancels and expected errors are not run-stopping failures.
             if trace.error and turn.expect.error_matches is None and not turn.expect.cancelled:
                 result.skipped_turns = len(scenario.turns) - number
@@ -491,6 +602,7 @@ async def run_scenarios(
     backend_factory: Callable[[], Any],
     *,
     samples: Optional[int] = None,
+    judge: Optional[JudgeRunOptions] = None,
 ) -> List[ScenarioResult]:
     """Runs each scenario on a fresh backend and graph. Scenarios that do not
     list the backend are left out. Noisy backends run ``samples`` times
@@ -504,10 +616,16 @@ async def run_scenarios(
         for sample_i in range(1, count + 1):
             if sample_i > 1:
                 backend = backend_factory()
-            result = await ScenarioRunner(pack, backend).run(scenario)
+            result = await ScenarioRunner(pack, backend, judge=judge).run(scenario)
             result.sample = sample_i if count > 1 else None
             results.append(result)
     return results
 
 
-__all__ = ["ScenarioResult", "ScenarioRunner", "TurnResult", "run_scenarios"]
+__all__ = [
+    "JudgeRunOptions",
+    "ScenarioResult",
+    "ScenarioRunner",
+    "TurnResult",
+    "run_scenarios",
+]

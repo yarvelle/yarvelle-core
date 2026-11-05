@@ -1,0 +1,22 @@
+# HUMAN LABEL — not model output.
+schema: 1
+id: carry-bad-forgot
+kind: human_label
+rubric: context_carryover
+criteria: >
+  The answer must reuse the person and day established earlier.
+user: "Move that call to Friday morning instead."
+answer: "Sure — I booked a new meeting for Friday morning."
+conversation:
+  - role: user
+    text: "Find a free hour on Thursday for a call with Sam."
+  - role: assistant
+    text: "Thursday at 2 pm is free for the call with Sam."
+trace_summary:
+  route: main_agent
+  agents: [calendar-helper]
+  notices: []
+label:
+  score: 2
+  verdict: fail
+  notes: "Drops Sam and the prior Thursday booking."

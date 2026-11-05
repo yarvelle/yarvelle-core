@@ -1,0 +1,21 @@
+# HUMAN LABEL — not model output.
+schema: 1
+id: synth-bad-invented
+kind: human_label
+rubric: synthesis
+criteria: >
+  The answer must only use facts present in the agent findings; no invention.
+user: "How much is left after the receipt?"
+answer: "You still have exactly $1,000 left and a free gift card is on the way."
+conversation:
+  - role: assistant
+    text: "The receipt total is 42.50."
+trace_summary:
+  route: main_agent
+  agents: [budget-planner]
+  notices: []
+  provenance_titles: ["Budget planner"]
+label:
+  score: 1
+  verdict: fail
+  notes: "Invented remaining balance and a gift card."

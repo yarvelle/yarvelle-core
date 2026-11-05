@@ -1,0 +1,18 @@
+# HUMAN LABEL — not model output.
+schema: 1
+id: deleg-bad-wrong-agent
+kind: human_label
+rubric: delegation_fit
+criteria: >
+  A receipt total question should not be answered as a calendar booking.
+user: "What is the total on this receipt?"
+answer: "I put a calendar hold on Thursday for you instead."
+conversation: []
+trace_summary:
+  route: main_agent
+  agents: [calendar-helper]
+  notices: []
+label:
+  score: 1
+  verdict: fail
+  notes: "Wrong specialist for a receipt question."

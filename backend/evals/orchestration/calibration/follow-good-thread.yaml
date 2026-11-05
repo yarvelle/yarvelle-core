@@ -1,0 +1,22 @@
+# HUMAN LABEL — not model output.
+schema: 1
+id: follow-good-thread
+kind: human_label
+rubric: followup
+criteria: >
+  A follow-up about the same event should stay on that thread.
+user: "Actually, make it 30 minutes shorter."
+answer: "Updated — your call with Sam on Friday morning is now 30 minutes shorter."
+conversation:
+  - role: user
+    text: "Move that call to Friday morning instead."
+  - role: assistant
+    text: "Moved your call with Sam to Friday morning."
+trace_summary:
+  route: main_agent
+  agents: [calendar-helper]
+  notices: []
+label:
+  score: 5
+  verdict: pass
+  notes: "Stays on the same call thread."

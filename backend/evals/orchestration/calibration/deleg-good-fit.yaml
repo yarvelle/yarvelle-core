@@ -1,0 +1,19 @@
+# HUMAN LABEL — not model output.
+schema: 1
+id: deleg-good-fit
+kind: human_label
+rubric: delegation_fit
+criteria: >
+  A receipt question should be answered from the document extractor's findings.
+user: "What is the total on this receipt?"
+answer: "The receipt total is 18.20."
+conversation: []
+trace_summary:
+  route: fixed_route:document-intake
+  agents: [document-extractor]
+  notices: []
+  provenance_titles: ["Document extractor"]
+label:
+  score: 5
+  verdict: pass
+  notes: "Right specialist and matching answer."
