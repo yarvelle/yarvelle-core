@@ -486,12 +486,14 @@ class CassetteBackend:
         self.scenario_id = scenario_id
         self._stores: Dict[Path, CassetteStore] = {}
         self._models: Dict[str, CassetteChatModel] = {}
+        self._begun = False
         if mode == "record":
             self.name = getattr(inner, "name", backend_label)
 
     def begin_scenario(self, *, pack_id: str, scenario_id: str) -> None:
         self.pack_id = pack_id
         self.scenario_id = scenario_id
+        self._begun = True
         self._models.clear()
 
     def set_agents(self, agent_ids: Iterable[str]) -> None:
@@ -549,9 +551,13 @@ class CassetteBackend:
             "cassette_root": str(self.cassette_root),
             "cassette_backend": self.backend_label,
             "cassette_model": self.model_label,
-            "pack": self.pack_id,
-            "scenario": self.scenario_id,
         }
+        # pack/scenario are only meaningful after begin_scenario; a fresh
+        # factory() used for the top-level run describe must not report
+        # the constructor defaults as "unknown".
+        if self._begun:
+            desc["pack"] = self.pack_id
+            desc["scenario"] = self.scenario_id
         if self.inner is not None and hasattr(self.inner, "describe"):
             desc["inner"] = self.inner.describe()
             # Prefer subject model from the live backend when recording.

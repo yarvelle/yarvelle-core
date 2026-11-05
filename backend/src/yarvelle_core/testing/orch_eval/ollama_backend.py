@@ -97,7 +97,14 @@ def require_ollama_models(
 
 
 class OllamaBackend:
-    """Eval backend that builds chat models through the core model factory."""
+    """Eval backend that builds chat models through the core model factory.
+
+    Subject and judge models are built with ``reasoning=False`` by default so
+    thinking models (for example Qwen3) return their reply in ``content``
+    instead of an empty body with unused thinking tokens. Pass
+    ``reasoning=True`` (or ``None`` for the model default) when a run needs
+    the thinking channel. The flag is forwarded to ChatOllama as ``think``.
+    """
 
     name = "ollama"
     cost_per_mtok: CostTable = FREE
@@ -110,6 +117,7 @@ class OllamaBackend:
         base_url: str = DEFAULT_OLLAMA_BASE_URL,
         seed: int = DEFAULT_SEED,
         temperature: float = DEFAULT_TEMPERATURE,
+        reasoning: Optional[bool] = False,
         require_ready: bool = True,
         status: Optional[OllamaStatus] = None,
     ) -> None:
@@ -118,6 +126,7 @@ class OllamaBackend:
         self.base_url = base_url.rstrip("/")
         self.seed = seed
         self.temperature = temperature
+        self.reasoning = reasoning
         self._status = status
         self._models: Dict[str, Any] = {}
         if require_ready:
@@ -137,14 +146,17 @@ class OllamaBackend:
         from yarvelle_core.model.factory import create_chat_model
 
         name = self.judge_model if key == "judge" else self.subject_model
-        model = create_chat_model(
-            provider="ollama",
-            model=name,
-            base_url=self.base_url,
-            temperature=self.temperature,
-            streaming=True,
-            seed=self.seed,
-        )
+        model_kwargs: Dict[str, Any] = {
+            "provider": "ollama",
+            "model": name,
+            "base_url": self.base_url,
+            "temperature": self.temperature,
+            "streaming": True,
+            "seed": self.seed,
+        }
+        if self.reasoning is not None:
+            model_kwargs["reasoning"] = self.reasoning
+        model = create_chat_model(**model_kwargs)
         self._models[key] = model
         return model
 
@@ -159,6 +171,7 @@ class OllamaBackend:
             "judge_digest": status.digests.get(self.judge_model),
             "temperature": self.temperature,
             "seed": self.seed,
+            "reasoning": self.reasoning,
             "reachable": status.reachable,
         }
 

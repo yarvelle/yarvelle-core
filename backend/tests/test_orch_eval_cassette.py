@@ -180,3 +180,19 @@ def test_normalize_messages_drops_ids():
     msg = AIMessage(content="x", id="abc")
     norm = normalize_messages([msg])
     assert "id" not in norm[0]
+
+
+def test_describe_omits_pack_until_begun(tmp_path: Path):
+    be = CassetteBackend(
+        cassette_root=tmp_path,
+        mode="replay",
+        backend_label="ollama",
+        model_label="qwen3:8b",
+    )
+    desc = be.describe()
+    assert "pack" not in desc and "scenario" not in desc
+    be.begin_scenario(pack_id="eval-neutral", scenario_id="live-smoke-greeting")
+    desc2 = be.describe()
+    assert desc2["pack"] == "eval-neutral"
+    assert desc2["scenario"] == "live-smoke-greeting"
+

@@ -57,4 +57,5 @@ def test_ollama_backend_describe_without_network():
     assert described["subject_model"] == "qwen3:8b"
     assert described["judge_model"] == "llama3.1:8b"
     assert described["subject_digest"] == "abc"
+    assert described["reasoning"] is False
     assert backend.cost_per_mtok.is_free
