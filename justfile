@@ -25,6 +25,10 @@ test:
     @echo "Running frontend test suite..."
     pnpm --dir frontend test
 
+# Run the local-only orchestration evals (refuses to run on CI)
+eval-orch:
+    YARVELLE_EVAL=1 PYTHONPATH=backend/src uv run --project backend pytest backend/evals -m orch_eval
+
 # Run all linters (Python, TypeScript, tokens, import boundaries, license headers)
 lint:
     @echo "Running backend import linter..."

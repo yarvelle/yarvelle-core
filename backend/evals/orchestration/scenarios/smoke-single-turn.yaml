@@ -1,0 +1,25 @@
+# Smallest valid scenario. It checks that the loader, the schema and the
+# local gates work end to end; real conversations are added alongside it.
+schema: 1
+id: smoke-single-turn
+title: One request answered by one specialist
+tags: [smoke]
+pack: eval-neutral
+backends: [fake]
+samples: {fake: 1}
+turns:
+  - user: "Suggest one book for a long train ride."
+    expect:
+      route: main_agent
+      agents_exactly: [reading-guide]
+      max_task_calls: 1
+      notices: []
+      answer:
+        must_mention: ["book"]
+        must_not_mention: ["Response from"]
+    fake:
+      main:
+        - task: [reading-guide]
+        - answer: "A good book for the ride is a short mystery novel."
+      agents:
+        reading-guide: ["Try a short mystery novel."]
