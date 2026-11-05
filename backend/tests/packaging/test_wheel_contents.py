@@ -64,6 +64,13 @@ def test_wheel_contains_all_content_and_entry_points(tmp_path: Path):
 
         assert "yarvelle_core/cli.py" in names, "Built wheel is missing yarvelle_core/cli.py module"
 
+        # The orchestration eval harness library ships; the local-only eval
+        # scenarios under backend/evals never do.
+        assert "yarvelle_core/testing/orch_eval/__init__.py" in names
+        assert "yarvelle_core/testing/orch_eval/guard.py" in names
+        leaked = [n for n in names if n.startswith("evals/") or "/evals/orchestration/" in n or n.endswith("smoke-single-turn.yaml")]
+        assert not leaked, f"Built wheel contains local-only eval files: {leaked}"
+
         # Inspect entry_points.txt in .dist-info
         entry_points_files = [n for n in names if n.endswith(".dist-info/entry_points.txt")]
         assert len(entry_points_files) == 1, f"Expected 1 entry_points.txt file, found: {entry_points_files}"

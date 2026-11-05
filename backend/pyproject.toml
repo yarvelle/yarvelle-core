@@ -106,6 +106,9 @@ minversion = "8.0"
 addopts = "-ra --asyncio-mode=auto"
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "orch_eval: local-only orchestration evals under backend/evals; never run on CI (needs YARVELLE_EVAL=1)",
+]
 filterwarnings = [
     "ignore::DeprecationWarning:fastapi.testclient",
     "ignore::DeprecationWarning:starlette.testclient",
