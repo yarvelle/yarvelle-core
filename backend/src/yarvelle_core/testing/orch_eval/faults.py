@@ -78,9 +78,12 @@ class FaultInjectingFakeModel(BaseChatModel):
 
     Call :meth:`set_turn` before each turn with the plan for that turn. Call
     counts are per role and reset every turn so ``after_calls`` works.
+
+    ``inner`` may be a chat model or a ``bind_tools`` RunnableBinding; real
+    providers return the latter, while the scripted fake returns itself.
     """
 
-    inner: BaseChatModel
+    inner: Any
     _plan: FaultPlan = PrivateAttr(default_factory=FaultPlan)
     _agent_ids: frozenset = PrivateAttr(default_factory=frozenset)
     _turn: int = PrivateAttr(default=0)

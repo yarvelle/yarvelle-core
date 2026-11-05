@@ -1,0 +1,25 @@
+# Local token prices for orchestration eval spend estimates and live metering.
+# Dollars per million tokens. Free / local models are omitted (treated as $0).
+# Update by hand; never fetched from the network.
+models:
+  gpt-4o:
+    input_per_mtok: 2.50
+    output_per_mtok: 10.00
+  gpt-4o-mini:
+    input_per_mtok: 0.15
+    output_per_mtok: 0.60
+  gpt-4.1:
+    input_per_mtok: 2.00
+    output_per_mtok: 8.00
+  gpt-4.1-mini:
+    input_per_mtok: 0.40
+    output_per_mtok: 1.60
+  claude-3-5-sonnet-latest:
+    input_per_mtok: 3.00
+    output_per_mtok: 15.00
+  claude-3-5-haiku:
+    input_per_mtok: 0.80
+    output_per_mtok: 4.00
+  gemini-2.0-flash:
+    input_per_mtok: 0.10
+    output_per_mtok: 0.40

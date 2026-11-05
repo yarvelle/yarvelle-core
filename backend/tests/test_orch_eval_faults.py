@@ -169,3 +169,18 @@ def test_suggestion_calls_bypass_faults():
 def test_fault_spec_rejects_bad_shapes(data):
     with pytest.raises(ValueError):
         FaultSpec.model_validate(data)
+
+
+def test_bind_tools_accepts_non_chat_model_binding():
+    """Real providers return a RunnableBinding from bind_tools; wrapping must allow it."""
+    from langchain_core.runnables import RunnableLambda
+    from yarvelle_core.testing.orch_eval.faults import FaultInjectingFakeModel
+
+    class _Providerish:
+        def bind_tools(self, tools, **kwargs):
+            return RunnableLambda(lambda x: x)
+
+    wrapped = FaultInjectingFakeModel(inner=_Providerish())  # type: ignore[arg-type]
+    bound = wrapped.bind_tools([])
+    assert isinstance(bound, FaultInjectingFakeModel)
+    assert not hasattr(bound.inner, "_llm_type")  # binding, not a chat model

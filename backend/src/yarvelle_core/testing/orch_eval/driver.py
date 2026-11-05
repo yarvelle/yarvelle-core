@@ -75,6 +75,7 @@ class ScenarioResult:
     turns: List[TurnResult] = field(default_factory=list)
     error: Optional[str] = None
     skipped_turns: int = 0
+    sample: Optional[int] = None
 
     @property
     def passed(self) -> bool:
@@ -93,6 +94,7 @@ class ScenarioResult:
             "id": self.scenario_id,
             "title": self.title,
             "backend": self.backend,
+            "sample": self.sample,
             "passed": self.passed,
             "error": self.error,
             "skipped_turns": self.skipped_turns,
@@ -452,12 +454,9 @@ class ScenarioRunner:
         trace.route_events = [
             str(e.event) for e in turn_audit if str(getattr(e, "event", "")).startswith(ROUTE_EVENT_PREFIX)
         ]
-        # A cancel can land before the checkpoint commits the decision; recover
-        # the route label from the audit trail when the state is empty.
-        if trace.route is None and "route.main_agent" in trace.route_events:
-            trace.route = "main_agent"
-        elif trace.route is None and "route.user_selected" in trace.route_events:
-            trace.route = "user_selected"
+        # Route and agent come from checkpoint state. The supervisor commits
+        # route_decision before the main_agent node runs, so a mid-hand-off
+        # cancel still leaves them on the checkpoint.
         trace.turn_tasks = [r.model_dump(mode="json") for r in turn_tasks.rows[tasks_start:]]
         records = _tasks_from_audit(turn_audit)
         trace.tasks = [t for t in records if "started" in t.states]
@@ -486,15 +485,24 @@ async def run_scenarios(
     scenarios: Sequence[Scenario],
     pack: EvalPack,
     backend_factory: Callable[[], Any],
+    *,
+    samples: Optional[int] = None,
 ) -> List[ScenarioResult]:
     """Runs each scenario on a fresh backend and graph. Scenarios that do not
-    list the backend are left out."""
+    list the backend are left out. Noisy backends run ``samples`` times
+    (scenario default: 1 for fake/replay, 3 otherwise)."""
     results: List[ScenarioResult] = []
     for scenario in scenarios:
         backend = backend_factory()
         if backend.name not in scenario.backends:
             continue
-        results.append(await ScenarioRunner(pack, backend).run(scenario))
+        count = samples if samples is not None else scenario.samples_for(backend.name)  # type: ignore[arg-type]
+        for sample_i in range(1, count + 1):
+            if sample_i > 1:
+                backend = backend_factory()
+            result = await ScenarioRunner(pack, backend).run(scenario)
+            result.sample = sample_i if count > 1 else None
+            results.append(result)
     return results
 
 
