@@ -1,0 +1,25 @@
+# Extra unrelated specialists in a forty-agent registry must not be pulled in
+# for a narrow calendar ask. Catalog size stays bounded.
+schema: 1
+id: scale-40-ignores-distractors
+title: Forty-agent registry does not over-delegate on a narrow ask
+tags: [scale, registry]
+pack: eval-scale-40
+backends: [fake]
+turns:
+  - user: "Which evening next week is free for dinner with Sam?"
+    expect:
+      route: main_agent
+      agents_exactly: [calendar-helper]
+      agents_forbidden: [internal-reviewer, party-planner, movie-night, gift-ideas]
+      max_task_calls: 1
+      notices: []
+      budget: {latency_ms_p95: 5000, model_calls: 6, prompt_chars: 20000}
+      answer:
+        must_mention: ["Thursday"]
+    fake:
+      main:
+        - task: [calendar-helper]
+        - answer: "Thursday evening next week is free for dinner with Sam."
+      agents:
+        calendar-helper: ["Thursday evening next week is free."]

@@ -1,0 +1,54 @@
+# Three wordings of the same trip+budget request must hand off to the same
+# agents. On the fake backend the scripts lock the set; on Ollama the later
+# turns must match whatever turn 1 chose (metamorphic equality).
+schema: 1
+id: paraphrase-weekend-trip
+title: Paraphrased trip requests keep the same agent set
+tags: [paraphrase, metamorphic, multi-turn]
+pack: eval-neutral
+backends: [fake, ollama]
+samples: {fake: 1, ollama: 1}
+turns:
+  - user: "Plan a weekend in Austin for two, under 600 dollars."
+    expect:
+      route: main_agent
+      agents_forbidden: [internal-auditor, writing-coach]
+      max_task_calls: 3
+      notices: []
+      answer:
+        must_not_mention: ["internal-auditor"]
+    fake:
+      main:
+        - task: [trip-organizer, budget-planner]
+        - answer: "Austin plan: two nights on South Congress, all within $600."
+      agents:
+        trip-organizer: ["Two nights on South Congress, barbecue on Saturday."]
+        budget-planner: ["Lodging 380, food 150, transport 70: total 600."]
+  - user: "Could you put together a two-person Austin weekend that stays under six hundred?"
+    expect:
+      route: main_agent
+      same_agents_as_turn: {turn: 1, mode: equal}
+      agents_forbidden: [internal-auditor]
+      max_task_calls: 3
+      notices: []
+    fake:
+      main:
+        - task: [trip-organizer, budget-planner]
+        - answer: "Same Austin weekend under $600: South Congress stay, Saturday barbecue."
+      agents:
+        trip-organizer: ["South Congress stay, Saturday barbecue."]
+        budget-planner: ["Still about 600 total."]
+  - user: "We need an Austin weekend for a couple, budget capped at 600."
+    expect:
+      route: main_agent
+      same_agents_as_turn: {turn: 1, mode: equal}
+      agents_forbidden: [internal-auditor]
+      max_task_calls: 3
+      notices: []
+    fake:
+      main:
+        - task: [trip-organizer, budget-planner]
+        - answer: "Couple's Austin weekend, capped at $600, ready to book."
+      agents:
+        trip-organizer: ["Couple's Austin weekend outline."]
+        budget-planner: ["Capped at 600."]

@@ -174,9 +174,21 @@ def test_provenance_cite_and_missing_by_title():
 
 
 def test_budget_limits():
-    trace = _trace(model_calls=5, latency_ms=50.0, input_tokens=10, output_tokens=5)
-    got = _status(check_budget(trace, _expect(budget={"model_calls": 4, "latency_ms_p95": 100, "tokens": 15, "usd": 0}), 0.0))
-    assert got == {"budget:model_calls": "fail", "budget:latency_ms": "pass", "budget:tokens": "pass", "budget:usd": "pass"}
+    trace = _trace(model_calls=5, latency_ms=50.0, input_tokens=10, output_tokens=5, prompt_chars=100)
+    got = _status(
+        check_budget(
+            trace,
+            _expect(budget={"model_calls": 4, "latency_ms_p95": 100, "tokens": 15, "usd": 0, "prompt_chars": 80}),
+            0.0,
+        )
+    )
+    assert got == {
+        "budget:model_calls": "fail",
+        "budget:latency_ms": "pass",
+        "budget:tokens": "pass",
+        "budget:usd": "pass",
+        "budget:prompt_chars": "fail",
+    }
 
 
 def test_judge_is_reported_as_skipped():

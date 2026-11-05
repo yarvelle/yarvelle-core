@@ -1,0 +1,7 @@
+id: internal-reviewer
+title: Internal Reviewer
+description: Reviews other agents' work. Internal only; never answers users.
+persona: persona.md
+tools: []
+skills: []
+hidden: true

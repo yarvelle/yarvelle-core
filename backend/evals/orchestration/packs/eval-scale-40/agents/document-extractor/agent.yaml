@@ -1,0 +1,6 @@
+id: document-extractor
+title: Document Extractor
+description: Reads uploaded files and pulls out totals and key lines.
+persona: persona.md
+tools: []
+skills: []

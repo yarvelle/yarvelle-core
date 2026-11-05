@@ -1,0 +1,21 @@
+# Even with forty agents, an urgent flag still takes the fixed route with no
+# model call before routing.
+schema: 1
+id: scale-40-urgent-still-fixed
+title: Forty-agent registry still honors the urgent fixed route
+tags: [scale, fixed-route]
+pack: eval-scale-40
+backends: [fake]
+turns:
+  - user: "I am stuck outside after the last bus left."
+    input: {guardrail_flag: urgent}
+    expect:
+      route: fixed_route:urgent-escalation
+      agents_exactly: [escalation-desk]
+      agents_forbidden: [internal-reviewer]
+      model_calls_before_route: 0
+      max_task_calls: 0
+      budget: {latency_ms_p95: 5000, prompt_chars: 20000}
+    fake:
+      agents:
+        escalation-desk: ["Go inside the station and ask staff for a safe waiting area and the first morning bus."]

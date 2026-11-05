@@ -365,6 +365,12 @@ def check_budget(trace: TurnTrace, expect: TurnExpectation, usd: float) -> List[
         out.append(_ok("budget:usd") if usd <= b.usd else _fail("budget:usd", f"{usd:.6f} > {b.usd}"))
     if b.model_calls is not None:
         out.append(_ok("budget:model_calls") if trace.model_calls <= b.model_calls else _fail("budget:model_calls", f"{trace.model_calls} > {b.model_calls}"))
+    if b.prompt_chars is not None:
+        out.append(
+            _ok("budget:prompt_chars")
+            if trace.prompt_chars <= b.prompt_chars
+            else _fail("budget:prompt_chars", f"{trace.prompt_chars} > {b.prompt_chars}")
+        )
     return out
 
 

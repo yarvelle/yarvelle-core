@@ -1,0 +1,35 @@
+# With forty registered agents, a clear specialist request hands off only to
+# the matching agent. Latency and prompt catalog size stay within bounds.
+schema: 1
+id: scale-40-picks-right-agent
+title: A forty-agent registry still picks the matching specialist
+tags: [scale, registry]
+pack: eval-scale-40
+backends: [fake]
+turns:
+  - user: "Build a grocery list for three vegetarian dinners this week."
+    expect:
+      route: main_agent
+      agents_exactly: [grocery-list]
+      agents_forbidden: [internal-reviewer, trip-organizer, budget-planner, workout-logger]
+      max_task_calls: 1
+      notices: []
+      budget: {latency_ms_p95: 5000, model_calls: 6, prompt_chars: 20000}
+      answer:
+        must_mention: ["tofu"]
+        must_not_mention: ["internal-reviewer"]
+    fake:
+      main:
+        - task: [grocery-list]
+        - answer: "Grocery list: tofu, lentils, tortillas, spinach, rice, and salsa."
+      agents:
+        grocery-list: ["Tofu, lentils, tortillas, spinach, rice, salsa."]
+  - user: "Thanks, that covers dinner."
+    expect:
+      route: main_agent
+      agents_exactly: []
+      max_task_calls: 0
+      budget: {latency_ms_p95: 5000, prompt_chars: 20000}
+    fake:
+      main:
+        - answer: "Glad the list helps. Enjoy the dinners."

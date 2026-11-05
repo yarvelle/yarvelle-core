@@ -1,0 +1,44 @@
+# Different phrasings of a calendar question must keep the calendar helper.
+schema: 1
+id: paraphrase-calendar-slot
+title: Paraphrased calendar asks keep the calendar helper
+tags: [paraphrase, metamorphic]
+pack: eval-neutral
+backends: [fake]
+turns:
+  - user: "Which evening next week is free for dinner with Sam?"
+    expect:
+      route: main_agent
+      agents_exactly: [calendar-helper]
+      max_task_calls: 1
+      notices: []
+    fake:
+      main:
+        - task: [calendar-helper]
+        - answer: "Thursday evening next week is free for dinner with Sam."
+      agents:
+        calendar-helper: ["Thursday evening next week is free."]
+  - user: "When can Sam and I do dinner one night next week?"
+    expect:
+      route: main_agent
+      same_agents_as_turn: {turn: 1, mode: equal}
+      agents_exactly: [calendar-helper]
+      notices: []
+    fake:
+      main:
+        - task: [calendar-helper]
+        - answer: "Thursday still works for dinner with Sam."
+      agents:
+        calendar-helper: ["Thursday still free."]
+  - user: "Find an open weeknight next week for a meal with Sam."
+    expect:
+      route: main_agent
+      same_agents_as_turn: {turn: 1, mode: equal}
+      agents_exactly: [calendar-helper]
+      notices: []
+    fake:
+      main:
+        - task: [calendar-helper]
+        - answer: "Thursday evening remains open for the meal with Sam."
+      agents:
+        calendar-helper: ["Thursday evening remains open."]

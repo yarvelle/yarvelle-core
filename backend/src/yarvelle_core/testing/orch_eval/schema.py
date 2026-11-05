@@ -122,6 +122,11 @@ class BudgetExpectation(_Strict):
     tokens: Optional[int] = Field(default=None, gt=0)
     usd: Optional[float] = Field(default=None, ge=0)
     model_calls: Optional[int] = Field(default=None, ge=0)
+    prompt_chars: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description="Upper bound on main-prompt plus subagent catalog characters.",
+    )
 
 
 class TurnExpectation(_Strict):
