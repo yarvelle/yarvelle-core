@@ -91,10 +91,10 @@ def iter_scenario_files(paths: Iterable[PathLike]) -> list[Path]:
     return sorted(found)
 
 
-def load_scenarios(paths: Iterable[PathLike]) -> list[Scenario]:
-    """Loads every scenario under ``paths``. Refuses on CI; rejects duplicate ids."""
+def load_scenario_files(paths: Iterable[PathLike]) -> list[tuple[Path, Scenario]]:
+    """Loads every scenario under ``paths`` with its file. Refuses on CI; rejects duplicate ids."""
     ensure_not_ci()
-    scenarios: list[Scenario] = []
+    loaded: list[tuple[Path, Scenario]] = []
     seen: dict[str, Path] = {}
     for file_path in iter_scenario_files(paths):
         scenario = load_scenario(file_path)
@@ -103,5 +103,10 @@ def load_scenarios(paths: Iterable[PathLike]) -> list[Scenario]:
                 file_path, f"duplicate scenario id {scenario.id!r} (also in {seen[scenario.id]})"
             )
         seen[scenario.id] = file_path
-        scenarios.append(scenario)
-    return scenarios
+        loaded.append((file_path, scenario))
+    return loaded
+
+
+def load_scenarios(paths: Iterable[PathLike]) -> list[Scenario]:
+    """Loads every scenario under ``paths``. Refuses on CI; rejects duplicate ids."""
+    return [scenario for _path, scenario in load_scenario_files(paths)]

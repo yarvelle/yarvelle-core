@@ -8,6 +8,10 @@ Layout:
 
 - `orchestration/scenarios/*.yaml`: one conversation per file. The format is
   defined in `yarvelle_core.testing.orch_eval.schema`; unknown keys fail.
+- `orchestration/pack/`: the neutral eval pack the scenarios run against
+  (`pack.yaml` with the routing config, and `agents/<id>/` in the normal
+  agent layout). It has everyday-task agents only, one hidden agent and two
+  fixed routes. Tools listed under `offline_tools` are local no-op stand-ins.
 - `conftest.py`: the pytest gate described below.
 
 This directory is not part of the wheel or the sdist, and it sits outside the
@@ -16,12 +20,40 @@ pytest `testpaths`, so `pytest backend/tests/` never collects it.
 ## Running
 
 ```bash
-# Validate scenario files
+# Validate scenario files, including agent ids and routes against the pack
 YARVELLE_EVAL=1 uv run --project backend yarvelle-core eval orchestration lint backend/evals/orchestration/scenarios
+
+# Run them on the scripted fake backend (free, offline). Prints a JSON
+# result; exits 1 when any check fails.
+YARVELLE_EVAL=1 uv run --project backend yarvelle-core eval orchestration run backend/evals/orchestration/scenarios
 
 # Through pytest
 just eval-orch
 ```
+
+The pack is found next to the scenarios by its id; pass `--pack DIR` to use
+another one. `run --scenario ID` runs a single scenario and `--out FILE`
+also writes the JSON result to a file.
+
+## What a run checks
+
+Each scenario runs through the real graph on one thread, one turn at a time.
+For every turn the driver collects the route decision, the hand-offs from
+the orchestration audit records, the `task_status` and
+`orchestration_notice` stream events, provenance and the final reply, then
+checks:
+
+- always: the turn finished, a reply exists, no more hand-offs than the
+  call cap, hidden agents never ran, provenance carries the agent titles,
+  no subagent tokens reached the stream, the reply names no agent ids, and
+  (on the fake backend) the script matched the calls made;
+- when the scenario sets them: the route, required and forbidden agents,
+  task-call bounds, continuity with an earlier turn, task states, notices,
+  provenance citations and missing parts, reply text and budgets.
+
+The fake backend replays the `fake:` script of each turn: main-agent steps
+(`task`, `answer` or `error`) and per-agent replies (text, `{error: ...}` or
+`{tool: name}`).
 
 ## Gates
 

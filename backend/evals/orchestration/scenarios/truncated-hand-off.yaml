@@ -1,0 +1,18 @@
+schema: 1
+id: truncated-hand-off
+title: A hand-off stopped at its call limit is flagged as truncated
+tags: [limits, failure]
+pack: eval-neutral
+backends: [fake]
+turns:
+  - user: "Find the due date in my saved notes."
+    expect:
+      route: main_agent
+      agents_exactly: [document-extractor]
+      notices: [truncated]
+    fake:
+      main:
+        - task: [document-extractor]
+        - answer: "I could not finish reading the notes; here is what I have so far."
+      agents:
+        document-extractor: [{tool: lookup_notes}, {tool: lookup_notes}]

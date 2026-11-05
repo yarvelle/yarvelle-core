@@ -1,0 +1,18 @@
+schema: 1
+id: hidden-agent-never-runs
+title: A hidden agent cannot be handed work
+tags: [hidden, guard]
+pack: eval-neutral
+backends: [fake]
+turns:
+  - user: "Have someone review my monthly budget."
+    expect:
+      route: main_agent
+      agents_forbidden: [internal-auditor]
+      max_task_calls: 0
+      provenance:
+        must_not_cite: [internal-auditor]
+    fake:
+      main:
+        - task: [internal-auditor]
+        - answer: "I can go over the budget with you directly."
