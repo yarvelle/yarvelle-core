@@ -68,9 +68,11 @@ from yarvelle_core.constants.api import (
     SSE_EVENT_DONE,
     SSE_EVENT_ERROR,
     SSE_EVENT_MESSAGE,
+    SSE_EVENT_ORCHESTRATION_NOTICE,
     SSE_EVENT_PANEL_START,
     SSE_EVENT_REFUSAL,
     SSE_EVENT_SUGGESTIONS,
+    SSE_EVENT_TASK_STATUS,
     SSE_EVENT_TOKEN,
     SSE_EVENT_TOOL_END,
     SSE_EVENT_TOOL_START,
@@ -86,6 +88,7 @@ from yarvelle_core.engine.graph import (
     generate_follow_up_suggestions,
     resolve_checkpointer_path,
 )
+from yarvelle_core.engine.orchestration.runtime import MAIN_AGENT_ID
 from yarvelle_core.engine.prompt_builder import build_system_prompt
 from yarvelle_core.loaders.agent_loader import find_agent_dir, load_agent
 from yarvelle_core.model.factory import create_chat_model
@@ -99,13 +102,29 @@ from yarvelle_core.workflows.state import AgentState
 
 logger = get_logger("yarvelle_core.engine.service")
 
+_SUBAGENT_AGENT_TYPE = "subagent"
+
+
+def is_subagent_token(metadata: Optional[Dict[str, Any]]) -> bool:
+    """True for model tokens produced inside a subagent hand-off.
+
+    Subagent output reaches the user only through the main agent's answer;
+    the stream carries their ``task_status`` changes, never their tokens.
+    """
+    meta = metadata or {}
+    if meta.get("ls_agent_type") == _SUBAGENT_AGENT_TYPE:
+        return True
+    agent_name = meta.get("lc_agent_name")
+    namespace = str(meta.get("langgraph_checkpoint_ns") or meta.get("checkpoint_ns") or "")
+    return bool(agent_name) and agent_name != MAIN_AGENT_ID and namespace.startswith("main_agent")
+
 # Nodes whose chat model invocations are internal/structural and must never stream tokens to the user chat UI
 NON_STREAMING_NODES: set[str] = {
     "suggestion",
     "suggestion_node",
     "supervisor",
     "orchestrator",
-    "dispatcher",
+    "deliberation",
     "input_guardrail",
     "safety_guard_node",
     "output_guardrail",
@@ -975,6 +994,7 @@ class AgentExecutionService:
                         tags = event.get("tags") or []
                         if (
                             (node_name and node_name in NON_STREAMING_NODES)
+                            or is_subagent_token(event.get("metadata"))
                             or "internal" in tags
                             or "no_stream" in tags
                             or "suggestion" in tags
@@ -1013,6 +1033,8 @@ class AgentExecutionService:
                                 tool=data.get("tool_name"),
                                 thread_id=thread_id,
                             )
+                            yield data
+                        elif name in (SSE_EVENT_TASK_STATUS, SSE_EVENT_ORCHESTRATION_NOTICE):
                             yield data
                         elif name == SSE_EVENT_REFUSAL:
                             refusal_triggered = True
@@ -1406,6 +1428,7 @@ class AgentExecutionService:
                         tags = event.get("tags") or []
                         if (
                             (node_name and node_name in NON_STREAMING_NODES)
+                            or is_subagent_token(event.get("metadata"))
                             or "internal" in tags
                             or "no_stream" in tags
                             or "suggestion" in tags
@@ -1419,7 +1442,14 @@ class AgentExecutionService:
                     elif ev_kind == "on_custom_event":
                         name = event.get("name")
                         data = event.get("data", {})
-                        if name in (SSE_EVENT_TOOL_START, SSE_EVENT_TOOL_END, SSE_EVENT_REFUSAL, SSE_EVENT_SUGGESTIONS):
+                        if name in (
+                            SSE_EVENT_TOOL_START,
+                            SSE_EVENT_TOOL_END,
+                            SSE_EVENT_REFUSAL,
+                            SSE_EVENT_SUGGESTIONS,
+                            SSE_EVENT_TASK_STATUS,
+                            SSE_EVENT_ORCHESTRATION_NOTICE,
+                        ):
                             yield data
                             if name == SSE_EVENT_SUGGESTIONS:
                                 suggestions = data.get("suggestions", [])

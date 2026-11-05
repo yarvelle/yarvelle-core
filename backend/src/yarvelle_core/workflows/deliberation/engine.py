@@ -55,7 +55,7 @@ except ImportError:
 
 
 async def _emit_sse_event(name: str, data: Dict[str, Any]) -> None:
-    """Emits an SSE streaming custom event if event dispatcher is active."""
+    """Emits an SSE streaming custom event when a run context is active."""
     if adispatch_custom_event is not None:
         try:
             payload = {"type": name, **data} if "type" not in data else data

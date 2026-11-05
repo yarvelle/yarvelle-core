@@ -139,7 +139,7 @@ class GraphBuilder:
         include_reflection: bool = True,
         include_tool_validator: bool = True,
         include_error_node: bool = True,
-        include_dispatcher: bool = True,
+        include_deliberation: bool = True,
         include_synthesizer: bool = True,
         registry: Optional[AgentRegistry] = None,
         tool_registry: Optional[Any] = None,
@@ -171,7 +171,7 @@ class GraphBuilder:
         self.include_reflection = include_reflection
         self.include_tool_validator = include_tool_validator
         self.include_error_node = include_error_node
-        self.include_dispatcher = include_dispatcher
+        self.include_deliberation = include_deliberation
         self.include_synthesizer = include_synthesizer
         self.registry = registry
         self.tool_registry = tool_registry
@@ -184,9 +184,9 @@ class GraphBuilder:
         self.suggestion_model = kwargs.get("suggestion_model")
         self.extra_kwargs = kwargs
 
-    def with_dispatcher(self, enabled: bool = True) -> GraphBuilder:
-        """Enable or disable multi-agent execution dispatcher."""
-        self.include_dispatcher = enabled
+    def with_deliberation(self, enabled: bool = True) -> GraphBuilder:
+        """Enable or disable the deliberation panel node."""
+        self.include_deliberation = enabled
         return self
 
     def with_response_synthesizer(self, enabled: bool = True) -> GraphBuilder:
@@ -327,6 +327,7 @@ class GraphBuilder:
                 bound_model = self.model
 
         # 2. Instantiate discrete workflow nodes
+        from yarvelle_core.workflows.deliberation.node import DeliberationNode
         from yarvelle_core.workflows.nodes import (
             AgentExecutionNode,
             AgentNode,
@@ -424,11 +425,9 @@ class GraphBuilder:
         suggestion_node = self._custom_nodes.get("suggestion") or SuggestionNode(model=suggestion_model)
         audit_node = self._custom_nodes.get("audit") or AuditNode()
         error_node = self._custom_nodes.get("error") or ErrorNode()
-        dispatcher_node = self._custom_nodes.get("dispatcher") or self._custom_nodes.get("execution_dispatcher")
-        if dispatcher_node is None and self.include_dispatcher:
-            from yarvelle_core.workflows.dispatcher import ExecutionDispatcher
-
-            dispatcher_node = ExecutionDispatcher(
+        deliberation_node: Optional[Any] = self._custom_nodes.get("deliberation")
+        if deliberation_node is None and self.include_deliberation:
+            deliberation_node = DeliberationNode(
                 model=bound_model or self.model,
                 registry=self.registry,
                 tool_registry=self.tool_registry,
@@ -463,10 +462,10 @@ class GraphBuilder:
             return await target(state)
 
         # Node Wrappers with SSE dispatching and store ingestion
-        async def _dispatcher_wrapper(state: AgentState) -> Dict[str, Any]:
-            if dispatcher_node is None:
+        async def _deliberation_wrapper(state: AgentState) -> Dict[str, Any]:
+            if deliberation_node is None:
                 return {}
-            return await (dispatcher_node(state) if callable(dispatcher_node) else dispatcher_node.execute(state))
+            return await _invoke_node_with_store(deliberation_node, state)
 
         async def _synthesizer_wrapper(
             state: AgentState,
@@ -679,8 +678,8 @@ class GraphBuilder:
         builder.add_node("input_guardrail", _input_guardrail_wrapper)
         if self.include_supervisor:
             builder.add_node("supervisor", supervisor_node)
-        if self.include_dispatcher and dispatcher_node is not None:
-            builder.add_node("dispatcher", _dispatcher_wrapper)
+        if self.include_deliberation and deliberation_node is not None:
+            builder.add_node("deliberation", _deliberation_wrapper)
         if self.include_synthesizer and synthesizer_node is not None:
             builder.add_node("response_synthesizer", _synthesizer_wrapper)
         builder.add_node("agent", agent_node)
@@ -746,19 +745,13 @@ class GraphBuilder:
                     ):
                         return sg_k
 
+                # Multi-agent work runs in the main agent; only a deliberation
+                # panel keeps its own node.
                 plan = state.get("execution_plan")
-                if plan and self.include_dispatcher and dispatcher_node is not None:
+                if plan and self.include_deliberation and deliberation_node is not None:
                     mode = plan.get("mode") if isinstance(plan, dict) else getattr(plan, "mode", None)
-                    mode_val = getattr(mode, "value", str(mode)).lower()
-                    if mode_val in ("parallel", "pipeline", "deliberate"):
-                        return "dispatcher"
-
-                if (
-                    target_norm in ("dispatcher", "execution_dispatcher")
-                    and self.include_dispatcher
-                    and dispatcher_node is not None
-                ):
-                    return "dispatcher"
+                    if str(getattr(mode, "value", mode)).lower() == "deliberate":
+                        return "deliberation"
 
                 if (
                     target_norm in ("response_synthesizer", "synthesizer")
@@ -770,8 +763,8 @@ class GraphBuilder:
                 return "agent"
 
             super_destinations = {"agent": "agent"}
-            if self.include_dispatcher and dispatcher_node is not None:
-                super_destinations["dispatcher"] = "dispatcher"
+            if self.include_deliberation and deliberation_node is not None:
+                super_destinations["deliberation"] = "deliberation"
             if self.include_synthesizer and synthesizer_node is not None:
                 super_destinations["response_synthesizer"] = "response_synthesizer"
             if self.include_error_node:
@@ -795,9 +788,9 @@ class GraphBuilder:
                     main_destinations["error"] = "error"
                 builder.add_conditional_edges("main_agent", route_main_agent, main_destinations)
 
-        # Dispatcher conditional routing
-        if self.include_dispatcher and dispatcher_node is not None:
-            def route_dispatcher(state: AgentState) -> str:
+        # Deliberation conditional routing
+        if self.include_deliberation and deliberation_node is not None:
+            def route_deliberation(state: AgentState) -> str:
                 if (state.get("next_step") == "error" or state.get("error")) and self.include_error_node:
                     return "error"
                 if self.include_synthesizer and synthesizer_node is not None:
@@ -812,7 +805,7 @@ class GraphBuilder:
             if self.include_error_node:
                 disp_destinations["error"] = "error"
 
-            builder.add_conditional_edges("dispatcher", route_dispatcher, disp_destinations)
+            builder.add_conditional_edges("deliberation", route_deliberation, disp_destinations)
 
         # Response synthesizer edge
         if self.include_synthesizer and synthesizer_node is not None:
@@ -958,7 +951,7 @@ class GraphBuilder:
             "nodes": [
                 "input_guardrail",
                 *(["supervisor", "orchestrator"] if self.include_supervisor else []),
-                *(["dispatcher", "execution_dispatcher"] if self.include_dispatcher else []),
+                *(["deliberation"] if self.include_deliberation else []),
                 "agent",
                 "agent_execution",
                 *(["response_synthesizer", "synthesizer"] if self.include_synthesizer else []),

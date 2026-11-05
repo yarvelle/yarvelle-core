@@ -26,6 +26,7 @@ OrchestrationAuditEventType = Literal[
     "task.completed",
     "task.failed",
     "task.timed_out",
+    "task.cancelled",
 ]
 """Multi-agent orchestration events.
 
@@ -48,6 +49,7 @@ AuditEventType = Literal[
     "task.completed",
     "task.failed",
     "task.timed_out",
+    "task.cancelled",
 ]
 
 AuditDurability = Literal["strict", "best_effort"]

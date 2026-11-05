@@ -69,7 +69,7 @@ yarvelle-core/
 │   │   ├── storage/                # Partitioned Content-Addressed Storage (CAS)
 │   │   ├── tools/                  # Sandboxed file, attachment, extraction, and delegation tools
 │   │   ├── vault/                  # Envelope encryption keyring vault (HKDF-SHA256 AES-256-GCM DEKs)
-│   │   └── workflows/              # LangGraph state machine, dispatcher, nodes & deliberation engine
+│   │   └── workflows/              # LangGraph state machine, nodes & deliberation engine
 │   │       ├── deliberation/       # Bounded blackboard deliberation (ADR-0001: propose, doc_critique, auditor, gate, revise, tool_gate, subgraph, engine)
 │   │       └── nodes/              # InputGuardrail, Orchestrator, AgentExecution, Tool, ResponseSynthesizer, OutputGuardrail, Suggestion, Refusal
 │   └── tests/                      # Pytest unit, integration, conformance, adversarial & golden eval suites
@@ -99,18 +99,17 @@ yarvelle-core/
 
 ### 2.1 Execution Topologies (`ExecutionMode` in `schemas/plan.py`)
 
-`yarvelle-core` supports four deterministic execution topologies dispatched by `ExecutionDispatcher`:
+A turn runs one of these ways:
 
 | Mode | Value | Execution Semantics |
 | :--- | :--- | :--- |
 | `SINGLE` | `"single"` | Single specialist agent handles the user turn with up to `DEFAULT_MAX_ITERATIONS` tool loops. |
-| `PARALLEL` | `"parallel"` | Multiple independent specialists run concurrently via `asyncio.gather`. |
-| `PIPELINE` | `"pipeline"` | Topologically sorted DAG where downstream agents receive `# PRIOR SPECIALIST OUTPUTS` as read-only context. |
+| main agent | — | Multi-agent turns run in the main agent (`engine/orchestration/`), which hands work to registered agents through the Deep Agents `task` tool. Each hand-off is bounded by a timeout and a model-call cap; failures, timeouts and truncation come back as error tool messages and `orchestration_notice` events, progress as `task_status` events, and a user cancel cancels in-flight hand-offs. Subagent tokens are never streamed. |
 | `DELIBERATE` | `"deliberate"` | Bounded, multi-round scoped blackboard deliberation (`Propose -> CrossExamine -> ConvergenceGate -> SelectiveRevise -> Synthesize & Gate`) per [ADR 0001](docs/adr/0001-multi-agent-deliberation.md). |
 
 ### 2.2 System Agents (`agents/_system/`)
 
-1. **`orchestrator`**: Complexity-tiered intent routing (`SINGLE`, `PARALLEL`, `PIPELINE`, `DELIBERATE`), declarative routing-hint confirmation, and dynamic skill/panel provisioning.
+1. **`orchestrator`**: Intent routing (`SINGLE`, main agent, `DELIBERATE`), declarative routing-hint confirmation, and dynamic skill/panel provisioning.
 2. **`document-extractor`**: Sandboxed attachment ingestion, PII sanitization, structured Pydantic dossier extraction, and numerical grounding verification.
 3. **`skill-generator`**: Synthesis of dynamic skill manifests and validation templates from reference guidelines.
 4. **`suggestion-generator`**: Context-aware follow-up suggestion chips emitted over SSE.
@@ -165,12 +164,12 @@ Agents interact with the environment exclusively through registered, sandboxed t
      │ (Passed)
      ▼
 ┌────────────────────────────────────────────────────────┐
-│ Phase 3: Orchestrate & Provision                       │ ◄── SINGLE | PARALLEL | PIPELINE | DELIBERATE
+│ Phase 3: Orchestrate & Provision                       │ ◄── SINGLE | MAIN AGENT | DELIBERATE        
 └────────────────────────────────────────────────────────┘
      │
      ▼
 ┌────────────────────────────────────────────────────────┐
-│ Phase 4: Execution Dispatcher / Deliberation Subgraph  │ ◄── Propose -> CrossExamine -> SelectiveRevise
+│ Phase 4: Main Agent Hand-offs / Deliberation Node      │ ◄── Propose -> CrossExamine -> SelectiveRevise
 └────────────────────────────────────────────────────────┘
      │
      ▼

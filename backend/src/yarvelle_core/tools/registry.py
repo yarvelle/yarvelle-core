@@ -9,7 +9,7 @@
 #
 # Required Notice: Copyright 2026 Spectrayan (https://spectrayan.com)
 
-"""Registry and execution dispatcher for Phase 0 closed tools."""
+"""Registry and safe execution of Phase 0 closed tools."""
 
 from __future__ import annotations
 
