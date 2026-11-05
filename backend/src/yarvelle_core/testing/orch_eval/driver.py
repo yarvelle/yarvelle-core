@@ -201,7 +201,21 @@ class ScenarioRunner:
             return self._checkpointer_factory()
         from langgraph.checkpoint.memory import MemorySaver
 
-        return MemorySaver()
+        from yarvelle_core.vault.checkpoints import (
+            EncryptionPreservingSaverMixin,
+            checkpoint_encryption_enabled,
+            checkpoint_serializer,
+        )
+
+        if not checkpoint_encryption_enabled():
+            return MemorySaver()
+
+        # Same serializer production savers use, so scenarios exercise encrypted
+        # checkpoints (and resume through them) when encryption is switched on.
+        class _EncryptedMemorySaver(EncryptionPreservingSaverMixin, MemorySaver):
+            pass
+
+        return _EncryptedMemorySaver(serde=checkpoint_serializer())
 
     def _spec(self, scenario: Scenario) -> Any:
         spec = self.pack.spec

@@ -225,3 +225,32 @@ def test_run_scenarios_skips_other_backends(pack: EvalPack):
     other = parse_scenario({"schema": 1, "id": "o", "title": "t", "pack": "eval-test", "backends": ["ollama"], "turns": [{"user": "x"}]})
     results = asyncio.run(run_scenarios([other, scenario([TRIP_TURN])], pack, FakeBackend))
     assert [r.scenario_id for r in results] == ["s"]
+
+
+def test_default_checkpointer_is_encrypted_when_enabled(pack: EvalPack, monkeypatch: pytest.MonkeyPatch):
+    import os
+
+    from yarvelle_core.config import settings
+    from yarvelle_core.vault import checkpoints as cp
+
+    kek = os.urandom(32)
+    monkeypatch.setattr("yarvelle_core.vault.kek.get_kek", lambda: kek)
+    monkeypatch.setattr(settings, "checkpoint_encryption", True)
+    monkeypatch.setattr(settings, "checkpoint_plaintext_reads", False)
+    cp.reset_checkpoint_keyring_cache()
+    try:
+        saver = ScenarioRunner(pack, FakeBackend())._checkpointer()
+        assert isinstance(saver.serde, cp.EncryptedCheckpointSerializer)
+        sealed = []
+        original = saver.serde.cipher.encrypt
+        saver.serde.cipher.encrypt = lambda data: sealed.append(1) or original(data)
+        follow_up = {
+            "user": "Cheaper please.",
+            "expect": {"route": "main_agent", "agents_exactly": ["budget-planner"]},
+            "fake": {"main": [{"task": ["budget-planner"]}, {"answer": "About 300 instead."}], "agents": {"budget-planner": ["300."]}},
+        }
+        result = run(pack, scenario([TRIP_TURN, follow_up]), checkpointer_factory=lambda: saver)
+        assert result.passed, result.failures()
+        assert sealed
+    finally:
+        cp.reset_checkpoint_keyring_cache()

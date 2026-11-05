@@ -54,6 +54,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.checkpoint.serde.base import SerializerProtocol
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
@@ -87,6 +88,12 @@ from yarvelle_core.resources.loader import get_resource_loader
 from yarvelle_core.engine.safety_policy import get_default_safety_policy
 from yarvelle_core.schemas.audit import AuditEvent
 from yarvelle_core.tools.registry import CLOSED_TOOL_DEFINITIONS, execute_tool
+from yarvelle_core.vault.checkpoints import (
+    EncryptedCheckpointSerializer,
+    EncryptionPreservingSaverMixin,
+    checkpoint_serializer,
+)
+
 if TYPE_CHECKING:
     from yarvelle_core.workflows.nodes import (
         AgentNode,
@@ -477,9 +484,36 @@ def reset_db_init_cache() -> None:
     _DB_LOCKS.clear()
 
 
-def create_sqlite_saver(db_path: Union[str, Path]) -> SqliteSaver:
-    """Creates a synchronous SqliteSaver instance with WAL mode and busy timeout."""
+class EncryptedSqliteSaver(EncryptionPreservingSaverMixin, SqliteSaver):
+    """SqliteSaver whose encrypted serializer survives LangGraph's allowlist narrowing."""
+
+
+class EncryptedAsyncSqliteSaver(EncryptionPreservingSaverMixin, AsyncSqliteSaver):
+    """AsyncSqliteSaver whose encrypted serializer survives LangGraph's allowlist narrowing."""
+
+
+def _saver_serde(serde: Optional[SerializerProtocol]) -> SerializerProtocol:
+    """Explicit serde wins; otherwise follow the checkpoint encryption settings."""
+    return serde if serde is not None else checkpoint_serializer()
+
+
+def create_sqlite_saver(
+    db_path: Union[str, Path],
+    serde: Optional[SerializerProtocol] = None,
+) -> SqliteSaver:
+    """Creates a synchronous SqliteSaver instance with WAL mode and busy timeout.
+
+    Checkpoint blobs are encrypted when ``settings.checkpoint_encryption`` is on
+    (or when an ``EncryptedCheckpointSerializer`` is passed explicitly).
+    """
     import sqlite3
+
+    resolved_serde = _saver_serde(serde)
+    saver_cls = (
+        EncryptedSqliteSaver
+        if isinstance(resolved_serde, EncryptedCheckpointSerializer)
+        else SqliteSaver
+    )
 
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -487,7 +521,7 @@ def create_sqlite_saver(db_path: Union[str, Path]) -> SqliteSaver:
 
     conn = sqlite3.connect(str(path), check_same_thread=False, timeout=SQLITE_CONNECT_TIMEOUT_SECONDS)
     conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS};")
-    saver = SqliteSaver(conn)
+    saver = saver_cls(conn, serde=resolved_serde)
 
     cursor = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='checkpoints';")
     table_exists = cursor.fetchone() is not None
@@ -504,6 +538,7 @@ def create_sqlite_saver(db_path: Union[str, Path]) -> SqliteSaver:
 @asynccontextmanager
 async def create_async_sqlite_saver(
     db_path: Union[str, Path],
+    serde: Optional[SerializerProtocol] = None,
 ) -> AsyncIterator[AsyncSqliteSaver]:
     """Async context manager creating an AsyncSqliteSaver for FastAPI SSE streams.
 
@@ -512,14 +547,22 @@ async def create_async_sqlite_saver(
     - Configures 10-second busy timeout (PRAGMA busy_timeout=10000;) to eliminate lock errors.
     - Single-flight initialization guard (asyncio.Lock + table verification) preventing concurrent DDL setup.
     - Explicitly sets saver.is_setup = True to prevent redundant executescript DDL on checkpoint reads/writes.
+    - Encrypts checkpoint blobs when ``settings.checkpoint_encryption`` is on; the key is
+      resolved before the connection opens, so a missing vault key fails fast.
     """
+    resolved_serde = _saver_serde(serde)
+    saver_cls = (
+        EncryptedAsyncSqliteSaver
+        if isinstance(resolved_serde, EncryptedCheckpointSerializer)
+        else AsyncSqliteSaver
+    )
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     canon_path = str(path.resolve())
 
     async with aiosqlite.connect(str(path), timeout=SQLITE_CONNECT_TIMEOUT_SECONDS) as conn:
         await conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS};")
-        saver = AsyncSqliteSaver(conn)
+        saver = saver_cls(conn, serde=resolved_serde)
 
         async with _get_db_lock(canon_path):
             async with conn.execute(
@@ -570,6 +613,8 @@ __all__ = [
     "resolve_checkpointer_path",
     "create_sqlite_saver",
     "create_async_sqlite_saver",
+    "EncryptedSqliteSaver",
+    "EncryptedAsyncSqliteSaver",
     "reset_db_init_cache",
     "get_thread_history",
     "MAX_TOOL_ITERATIONS",

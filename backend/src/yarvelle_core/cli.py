@@ -123,6 +123,70 @@ def _run_eval(argv: Sequence[str]) -> int:
 
     return orch_eval_main(argv[1:])
 
+def _run_checkpoints(args: argparse.Namespace) -> int:
+    """Inspects or migrates the checkpoint database between plaintext and encrypted rows."""
+    import json
+
+    from yarvelle_core.vault.checkpoints import (
+        CheckpointKeyring,
+        checkpoint_db_status,
+        decrypt_checkpoint_db,
+        encrypt_checkpoint_db,
+        load_checkpoint_keyring,
+    )
+    from yarvelle_core.vault.errors import VaultError
+
+    if args.db:
+        db_path = Path(args.db).expanduser()
+    else:
+        from yarvelle_core.engine.graph import resolve_checkpointer_path
+
+        db_path = resolve_checkpointer_path()
+
+    try:
+        keyring: CheckpointKeyring = load_checkpoint_keyring(args.key_version)
+        if args.action == "status":
+            report = checkpoint_db_status(db_path, keyring)
+        elif args.action == "encrypt":
+            report = encrypt_checkpoint_db(
+                db_path, keyring, dry_run=args.dry_run, backup=not args.no_backup
+            )
+        else:
+            report = decrypt_checkpoint_db(
+                db_path, keyring, dry_run=args.dry_run, backup=not args.no_backup
+            )
+    except (VaultError, FileNotFoundError) as err:
+        print(f"Error: {err}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(json.dumps({**report.as_dict(), "active_key_id": keyring.active.key_id}, indent=2))
+        return 0
+
+    print(f"Checkpoint database: {report.db_path}")
+    print(f"Active key id:       {keyring.active.key_id}")
+    print(f"Plaintext rows:      {report.plaintext_rows}")
+    print(f"Active-key rows:     {report.active_key_rows}")
+    for key_id, count in sorted(report.other_key_rows.items()):
+        print(f"Rows under {key_id}: {count}")
+    if args.action != "status":
+        verb = "Would change" if report.dry_run else "Changed"
+        print(f"{verb} rows:        {report.rows_changed}")
+        if report.backup_path:
+            print(f"Backup written to:   {report.backup_path}")
+    if args.action == "encrypt" and not report.dry_run:
+        print(
+            "All rows now use the active key. Plaintext reads can be turned off "
+            "(YARVELLE_CORE_CHECKPOINT_PLAINTEXT_READS=false)."
+        )
+    elif args.action == "decrypt" and not report.dry_run:
+        print(
+            "All rows are plaintext again. Turn encryption off "
+            "(YARVELLE_CORE_CHECKPOINT_ENCRYPTION=false) before restarting, or new "
+            "checkpoints will be written encrypted."
+        )
+    return 0
+
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     """Main CLI entry point for yarvelle-core console script."""
@@ -166,6 +230,36 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help="Display runtime configuration and environment paths",
     )
 
+    # checkpoints command (encryption at rest status and migration)
+    checkpoints_parser = subparsers.add_parser(
+        "checkpoints",
+        help="Show or migrate checkpoint encryption (status, encrypt, decrypt)",
+    )
+    checkpoints_parser.add_argument(
+        "action",
+        choices=("status", "encrypt", "decrypt"),
+        help="status: count rows; encrypt: seal plaintext rows and re-key old ones; "
+        "decrypt: turn encrypted rows back into plaintext",
+    )
+    checkpoints_parser.add_argument(
+        "--db", default=None, help="Checkpoint database path (default: the runtime's checkpoint DB)"
+    )
+    checkpoints_parser.add_argument(
+        "--dry-run", action="store_true", help="Report what would change without writing"
+    )
+    checkpoints_parser.add_argument(
+        "--no-backup",
+        action="store_true",
+        help="Skip the backup copy written next to the database before changes",
+    )
+    checkpoints_parser.add_argument(
+        "--key-version",
+        type=int,
+        default=None,
+        help="Active key version (default: the checkpoint_key_version setting)",
+    )
+    checkpoints_parser.add_argument("--json", action="store_true", help="Print a JSON report")
+
     # eval command (local-only harnesses; delegated before parsing)
     subparsers.add_parser(
         "eval",
@@ -194,6 +288,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return _run_packs()
     elif args.command == "info":
         return _run_info()
+    elif args.command == "checkpoints":
+        return _run_checkpoints(args)
     elif args.command == "help":
         parser.print_help()
         return 0
