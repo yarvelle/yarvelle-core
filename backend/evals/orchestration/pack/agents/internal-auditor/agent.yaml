@@ -1,0 +1,7 @@
+id: internal-auditor
+title: Internal Auditor
+description: Reviews other agents' work. Internal only; never answers users.
+persona: persona.md
+tools: []
+skills: []
+hidden: true

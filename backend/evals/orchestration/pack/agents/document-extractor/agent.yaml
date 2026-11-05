@@ -1,0 +1,7 @@
+id: document-extractor
+title: Document Extractor
+description: Reads uploaded documents and pulls out the key fields.
+persona: persona.md
+tools: []
+skills: []
+max_iterations: 1
