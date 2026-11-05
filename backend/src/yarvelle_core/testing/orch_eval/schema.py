@@ -161,15 +161,17 @@ class JudgeSpec(_Strict):
 
 
 class FakeMainStep(_Strict):
-    """One scripted main-agent response: either delegate or answer."""
+    """One scripted main-agent response: delegate, answer, or fail."""
 
     task: Optional[list[AgentId]] = None
     answer: Optional[str] = None
+    error: Optional[str] = Field(default=None, min_length=1)
 
     @model_validator(mode="after")
     def _one_of(self) -> "FakeMainStep":
-        if (self.task is None) == (self.answer is None):
-            raise ValueError("a fake main step needs exactly one of 'task' or 'answer'")
+        given = [v for v in (self.task, self.answer, self.error) if v is not None]
+        if len(given) != 1:
+            raise ValueError("a fake main step needs exactly one of 'task', 'answer' or 'error'")
         if self.task is not None:
             if not self.task:
                 raise ValueError("a fake 'task' step needs at least one agent id")
@@ -177,11 +179,28 @@ class FakeMainStep(_Strict):
         return self
 
 
+class FakeAgentStep(_Strict):
+    """A scripted agent response other than plain text: fail, or call a tool."""
+
+    error: Optional[str] = Field(default=None, min_length=1)
+    tool: Optional[str] = Field(default=None, pattern=r"^[a-z][a-z0-9_]{0,63}$")
+
+    @model_validator(mode="after")
+    def _one_of(self) -> "FakeAgentStep":
+        if (self.error is None) == (self.tool is None):
+            raise ValueError("a fake agent step needs exactly one of 'error' or 'tool'")
+        return self
+
+
 class FakeScript(_Strict):
-    """Script for the fake backend. Every other backend ignores it."""
+    """Script for the fake backend. Every other backend ignores it.
+
+    Agent steps are plain reply text, ``{error: ...}`` to fail the call, or
+    ``{tool: name}`` to call one of the agent's tools.
+    """
 
     main: list[FakeMainStep] = Field(default_factory=list)
-    agents: dict[AgentId, list[str]] = Field(default_factory=dict)
+    agents: dict[AgentId, list[Union[str, FakeAgentStep]]] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _check(self) -> "FakeScript":
