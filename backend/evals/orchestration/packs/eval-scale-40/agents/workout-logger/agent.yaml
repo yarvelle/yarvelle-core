@@ -1,0 +1,6 @@
+id: workout-logger
+title: Workout Logger
+description: Logs a short workout and suggests the next session.
+persona: persona.md
+tools: []
+skills: []

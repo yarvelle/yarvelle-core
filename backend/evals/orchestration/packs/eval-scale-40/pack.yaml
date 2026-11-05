@@ -1,0 +1,34 @@
+# Neutral forty-agent eval pack for scale scenarios. Everyday-task agents
+# only; no domain content. Loaded through the normal agent registry.
+schema: 1
+id: eval-scale-40
+title: Forty-agent neutral orchestration eval pack
+orchestration:
+  default_agent: desk-assistant
+  limits:
+    max_agents: 4
+    agent_timeout_s: 20
+    turn_timeout_s: 60
+  fixed_routes:
+  - route_id: urgent-escalation
+    when:
+      kind: guardrail_flag
+      flag: urgent
+    agent_id: escalation-desk
+    description: Urgent requests always go to the escalation desk.
+  - route_id: document-intake
+    when:
+      kind: has_attachments
+      mime_types:
+      - application/pdf
+      - image/*
+    agent_id: document-extractor
+    description: Uploaded documents go to the document extractor.
+offline_tools:
+  document-extractor:
+  - lookup_notes
+guardrail_flags:
+  urgent:
+  - urgent
+  - stranded
+  - stuck

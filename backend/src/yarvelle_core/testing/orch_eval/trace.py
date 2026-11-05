@@ -59,6 +59,7 @@ class TurnTrace:
     input_tokens: int = 0
     output_tokens: int = 0
     latency_ms: float = 0.0
+    prompt_chars: int = 0
     subagent_token_leaks: List[str] = field(default_factory=list)
     script_problems: List[str] = field(default_factory=list)
     cancelled: bool = False

@@ -1,0 +1,38 @@
+# Paraphrases that still raise the urgent flag must keep the fixed route.
+schema: 1
+id: paraphrase-urgent-flag
+title: Paraphrased stuck requests keep the escalation fixed route
+tags: [paraphrase, fixed-route, metamorphic]
+pack: eval-neutral
+backends: [fake]
+turns:
+  - user: "I am stuck at the airport and my flight was cancelled."
+    input: {guardrail_flag: urgent}
+    expect:
+      route: fixed_route:urgent-escalation
+      agents_exactly: [escalation-desk]
+      model_calls_before_route: 0
+      max_task_calls: 0
+    fake:
+      agents:
+        escalation-desk: ["Go to the airline desk now and ask for rebooking."]
+  - user: "We are stranded after the last train left; what do we do?"
+    input: {guardrail_flag: urgent}
+    expect:
+      route: fixed_route:urgent-escalation
+      agents_exactly: [escalation-desk]
+      model_calls_before_route: 0
+      same_agents_as_turn: {turn: 1, mode: equal}
+    fake:
+      agents:
+        escalation-desk: ["Ask station staff for a hotel voucher and the first morning train."]
+  - user: "This is urgent: the ferry left without us and we are stuck on the pier."
+    input: {guardrail_flag: urgent}
+    expect:
+      route: fixed_route:urgent-escalation
+      agents_exactly: [escalation-desk]
+      model_calls_before_route: 0
+      same_agents_as_turn: {turn: 1, mode: equal}
+    fake:
+      agents:
+        escalation-desk: ["Call the ferry desk for the next sailing and a waiting area."]

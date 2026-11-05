@@ -1,0 +1,19 @@
+# An out-of-scope ask with no matching specialist must stay on the main agent
+# with no hand-off, and must not invent a route to an unrelated agent.
+schema: 1
+id: adversarial-out-of-scope
+title: Out-of-scope asks stay on the main agent with no hand-off
+tags: [adversarial, no-delegation]
+pack: eval-neutral
+backends: [fake]
+turns:
+  - user: "What is the square root of 1849, and show the long division?"
+    expect:
+      route: main_agent
+      agents_exactly: []
+      max_task_calls: 0
+      agents_forbidden: [trip-organizer, budget-planner, calendar-helper, writing-coach, document-extractor, escalation-desk, internal-auditor]
+      notices: []
+    fake:
+      main:
+        - answer: "43. I can walk through the long division if you want the steps written out."

@@ -8,13 +8,16 @@ Layout:
 
 - `orchestration/scenarios/*.yaml`: one conversation per file. The format is
   defined in `yarvelle_core.testing.orch_eval.schema`; unknown keys fail.
-- `orchestration/pack/`: the neutral eval pack the scenarios run against
-  (`pack.yaml` with the routing config, and `agents/<id>/` in the normal
-  agent layout). It has everyday-task agents only, one hidden agent and two
-  fixed routes. Tools listed under `offline_tools` are local no-op stand-ins.
-  `guardrail_flags` lists the words that raise each guardrail flag; the
-  harness input guardrail raises a flag when the user's text contains one of
-  them, so a flag route fires from the text alone.
+- `orchestration/pack/`: the default neutral eval pack the scenarios run
+  against (`pack.yaml` with the routing config, and `agents/<id>/` in the
+  normal agent layout). It has everyday-task agents only, one hidden agent
+  and two fixed routes. Tools listed under `offline_tools` are local no-op
+  stand-ins. `guardrail_flags` lists the words that raise each guardrail
+  flag; the harness input guardrail raises a flag when the user's text
+  contains one of them, so a flag route fires from the text alone.
+- `orchestration/packs/<pack-id>/`: extra eval packs (for example a
+  forty-agent registry used by scale scenarios). Scenarios name a pack by
+  id; the runner finds `pack/` or `packs/<id>/` next to them.
 - `conftest.py`: the pytest gate described below.
 
 This directory is not part of the wheel or the sdist, and it sits outside the

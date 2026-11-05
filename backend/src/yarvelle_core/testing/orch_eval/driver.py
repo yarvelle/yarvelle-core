@@ -294,6 +294,22 @@ class ScenarioRunner:
             max_agents=int(spec.limits.max_agents),
         )
 
+    def _prompt_chars(self) -> int:
+        """Characters the main agent sees for its prompt and subagent catalog.
+
+        Deep Agents puts every delegatable agent's name and description into the
+        ``task`` tool schema. Keeping that catalog short is what "prompt size
+        stays bounded" means for a large registry.
+        """
+        from yarvelle_core.engine.orchestration.runtime import compose_main_prompt
+
+        main = len(compose_main_prompt(None, getattr(self.pack.spec, "synthesis", None)))
+        catalog = 0
+        for spec in self.pack.registry.list_subagents():
+            catalog += len(str(spec.get("name") or ""))
+            catalog += len(str(spec.get("description") or ""))
+        return main + catalog
+
     def _build_graph(self, scenario: Scenario, spec: Any, model: Any, audit: Any, turn_tasks: Any, checkpointer: Any) -> Any:
         from yarvelle_core.engine.builder import GraphBuilder
 
@@ -424,6 +440,9 @@ class ScenarioRunner:
             trace = await self._run_turn(
                 graph, config, thread_id, number, turn, audit, turn_tasks, cancel_after_ms=cancel_ms
             )
+            # Catalog size is fixed for the pack; record it on every turn so
+            # budget.prompt_chars can bound large-registry scenarios.
+            trace.prompt_chars = self._prompt_chars()
             cost = self.backend.cost_per_mtok.cost_usd(trace.input_tokens, trace.output_tokens)
             checks = check_turn(trace, turn, view, previous=traces, usd=cost)
             checks, judge_payload = self._apply_judge(

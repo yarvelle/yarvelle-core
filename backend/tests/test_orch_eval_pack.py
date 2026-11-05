@@ -94,6 +94,19 @@ def test_find_pack_dir_walks_up_by_id(tmp_path: Path):
     assert find_pack_dir(nested / "s.yaml", "missing") is None
 
 
+def test_find_pack_dir_supports_packs_subdir(tmp_path: Path):
+    root = _write(tmp_path / "packs" / "scale", {"alpha": {}}, {"default_agent": "alpha"})
+    # _write stamps id "p"; rewrite so the directory name matches the pack id.
+    pack_file = root / "pack.yaml"
+    data = yaml.safe_load(pack_file.read_text(encoding="utf-8"))
+    data["id"] = "scale"
+    pack_file.write_text(yaml.safe_dump(data), encoding="utf-8")
+    nested = tmp_path / "scenarios"
+    nested.mkdir(parents=True)
+    (nested / "s.yaml").write_text("x: 1\n", encoding="utf-8")
+    assert find_pack_dir(nested / "s.yaml", "scale") == root
+
+
 def _scenario(turns, pack_id="p"):
     return parse_scenario({"schema": 1, "id": "s", "title": "t", "pack": pack_id, "backends": ["fake"], "turns": turns})
 
@@ -141,13 +154,22 @@ def test_lint_wrong_pack(pack):
 def test_shipped_scenarios_lint_against_shipped_pack(monkeypatch: pytest.MonkeyPatch):
     for name in CI_ENV_VARS:
         monkeypatch.delenv(name, raising=False)
-    pack = load_eval_pack(EVAL_DIR / "pack")
     loaded = load_scenario_files([EVAL_DIR / "scenarios"])
-    assert 12 <= len(loaded) <= 40
+    assert 12 <= len(loaded) <= 80
+    packs = {}
     for path, sc in loaded:
-        assert lint_against_pack(sc, pack) == [], path
-    assert pack.hidden_ids == ["internal-auditor"]
-    assert len(pack.agent_ids) in range(6, 9)
+        if sc.pack not in packs:
+            found = find_pack_dir(path, sc.pack)
+            assert found is not None, path
+            packs[sc.pack] = load_eval_pack(found)
+        assert lint_against_pack(sc, packs[sc.pack]) == [], path
+    neutral = packs["eval-neutral"]
+    assert neutral.hidden_ids == ["internal-auditor"]
+    assert len(neutral.agent_ids) in range(6, 9)
+    if "eval-scale-40" in packs:
+        scale = packs["eval-scale-40"]
+        assert len(scale.agent_ids) == 40
+        assert "internal-reviewer" in scale.hidden_ids
 
 
 def test_pack_flag_words_drive_the_harness_policy(pack):
