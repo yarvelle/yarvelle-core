@@ -1,0 +1,20 @@
+schema: 1
+id: task-call-cap
+title: The main agent cannot start more hand-offs than the turn allows
+tags: [limits]
+pack: eval-neutral
+backends: [fake]
+limits: {max_agents: 2}
+turns:
+  - user: "Plan a trip, budget it, book the dates and write the invite."
+    expect:
+      route: main_agent
+      max_task_calls: 2
+      agents_forbidden: [writing-coach]
+    fake:
+      main:
+        - task: [trip-organizer, budget-planner, calendar-helper]
+        - answer: "Trip and budget are ready; the dates come next."
+      agents:
+        trip-organizer: ["A long weekend by the coast."]
+        budget-planner: ["About 400 for two nights."]

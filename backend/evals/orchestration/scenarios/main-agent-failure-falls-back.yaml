@@ -1,0 +1,19 @@
+schema: 1
+id: main-agent-failure-falls-back
+title: When the main agent fails the default agent answers, with a notice
+tags: [failure, fallback]
+pack: eval-neutral
+backends: [fake]
+turns:
+  - user: "Draft a two-line welcome message for new club members."
+    expect:
+      route: default_agent:main_agent_failed
+      agents_exactly: [writing-coach]
+      notices: [main_agent_failed]
+      answer:
+        must_mention: ["welcome"]
+    fake:
+      main:
+        - error: "provider down"
+      agents:
+        writing-coach: ["Welcome to the club! We meet every Thursday at seven."]

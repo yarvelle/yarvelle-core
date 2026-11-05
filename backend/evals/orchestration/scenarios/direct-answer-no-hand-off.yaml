@@ -1,0 +1,20 @@
+schema: 1
+id: direct-answer-no-hand-off
+title: Small talk is answered without any hand-off
+tags: [no-delegation]
+pack: eval-neutral
+backends: [fake]
+turns:
+  - user: "Hi there!"
+    expect:
+      route: main_agent
+      agents_exactly: []
+      max_task_calls: 0
+      notices: []
+      provenance:
+        must_not_cite: [trip-organizer, budget-planner, calendar-helper, writing-coach]
+      answer:
+        must_mention: ["hello"]
+    fake:
+      main:
+        - answer: "Hello! What can I help you with today?"

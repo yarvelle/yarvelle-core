@@ -9,7 +9,7 @@
 #
 # Required Notice: Copyright 2026 Spectrayan (https://spectrayan.com)
 
-"""Validates every orchestration scenario file (local-only, opt-in)."""
+"""Validates every orchestration scenario file against the eval pack (local-only, opt-in)."""
 
 from __future__ import annotations
 
@@ -17,15 +17,25 @@ from pathlib import Path
 
 import pytest
 
+from yarvelle_core.testing.orch_eval.lint import lint_against_pack
 from yarvelle_core.testing.orch_eval.loader import iter_scenario_files, load_scenario
+from yarvelle_core.testing.orch_eval.pack import load_eval_pack
 
 pytestmark = pytest.mark.orch_eval
 
-SCENARIOS_DIR = Path(__file__).resolve().parent / "scenarios"
+HERE = Path(__file__).resolve().parent
+SCENARIOS_DIR = HERE / "scenarios"
+PACK_DIR = HERE / "pack"
 SCENARIO_FILES = iter_scenario_files([SCENARIOS_DIR])
 
 
+@pytest.fixture(scope="module")
+def pack():
+    return load_eval_pack(PACK_DIR)
+
+
 @pytest.mark.parametrize("path", SCENARIO_FILES, ids=[p.stem for p in SCENARIO_FILES])
-def test_scenario_file_is_valid(path: Path) -> None:
+def test_scenario_file_is_valid(path: Path, pack) -> None:
     scenario = load_scenario(path)
     assert scenario.turns
+    assert lint_against_pack(scenario, pack) == []

@@ -1,0 +1,61 @@
+# A longer conversation that moves between agents, comes back to an earlier
+# one, and ends without a hand-off.
+schema: 1
+id: five-turn-errands
+title: Five turns across several agents on one thread
+tags: [multi-turn, continuity, long]
+pack: eval-neutral
+backends: [fake]
+turns:
+  - user: "I need to plan my sister's birthday dinner on the 20th."
+    expect:
+      route: main_agent
+      agents_exactly: [calendar-helper]
+    fake:
+      main:
+        - task: [calendar-helper]
+        - answer: "The 20th is a Saturday and your evening is free."
+      agents:
+        calendar-helper: ["Saturday the 20th, evening free."]
+  - user: "Keep it under 150 for six people."
+    expect:
+      route: main_agent
+      agents_exactly: [budget-planner]
+      answer:
+        must_mention: ["25"]
+    fake:
+      main:
+        - task: [budget-planner]
+        - answer: "That is 25 per person; a set menu or a potluck fits."
+      agents:
+        budget-planner: ["150 for six is 25 each."]
+  - user: "Write a short invite for the group chat."
+    expect:
+      route: main_agent
+      agents_exactly: [writing-coach]
+      answer:
+        must_mention: ["Saturday"]
+    fake:
+      main:
+        - task: [writing-coach]
+        - answer: "Invite: Dinner for Maya on Saturday the 20th at 7. Bring your appetite!"
+      agents:
+        writing-coach: ["Dinner for Maya on Saturday the 20th at 7. Bring your appetite!"]
+  - user: "Put a reminder two days before."
+    expect:
+      route: main_agent
+      same_agents_as_turn: {turn: 1, mode: equal}
+    fake:
+      main:
+        - task: [calendar-helper]
+        - answer: "Reminder set for Thursday the 18th."
+      agents:
+        calendar-helper: ["Reminder on Thursday the 18th."]
+  - user: "Perfect, thank you."
+    expect:
+      route: main_agent
+      agents_exactly: []
+      max_task_calls: 0
+    fake:
+      main:
+        - answer: "You are welcome. Have a lovely dinner!"

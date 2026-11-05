@@ -1,0 +1,32 @@
+# A guardrail flag sends the turn straight to the escalation desk with no
+# model call before the route. The next turn routes normally again.
+schema: 1
+id: urgent-flag-fixed-route
+title: An urgent flag takes the fixed route, and the route does not stick
+tags: [fixed-route, multi-turn]
+pack: eval-neutral
+backends: [fake]
+turns:
+  - user: "My flight is cancelled and I am stuck at the airport tonight."
+    input: {guardrail_flag: urgent}
+    expect:
+      route: fixed_route:urgent-escalation
+      agents_exactly: [escalation-desk]
+      model_calls_before_route: 0
+      max_task_calls: 0
+      answer:
+        must_mention: ["airline desk"]
+    fake:
+      agents:
+        escalation-desk: ["Go to the airline desk now and ask for rebooking and a hotel voucher."]
+  - user: "OK, I am rebooked. Can you plan my day tomorrow?"
+    expect:
+      route: main_agent
+      agents_exactly: [trip-organizer]
+      agents_forbidden: [escalation-desk]
+    fake:
+      main:
+        - task: [trip-organizer]
+        - answer: "Tomorrow: a late breakfast, then the old town walk before your evening flight."
+      agents:
+        trip-organizer: ["Late breakfast, old town walk, evening flight."]

@@ -1,0 +1,28 @@
+# One of two hand-offs fails. The reply keeps the part that worked and names
+# the missing part by the agent's title.
+schema: 1
+id: partial-failure-names-missing-agent
+title: A failed hand-off is reported by title, the rest still answers
+tags: [failure, provenance]
+pack: eval-neutral
+backends: [fake]
+turns:
+  - user: "Plan a weekend in Lisbon and tell me what it will cost."
+    expect:
+      route: main_agent
+      agents_exactly: [trip-organizer, budget-planner]
+      task_states: {trip-organizer: completed, budget-planner: failed}
+      notices:
+        - {code: partial_failure, agent_ids: [budget-planner]}
+      provenance:
+        must_cite: [trip-organizer]
+        missing: [budget-planner]
+      answer:
+        must_mention: ["Alfama"]
+    fake:
+      main:
+        - task: [trip-organizer, budget-planner]
+        - answer: "Stay in Alfama and take the tram to Belem on Sunday."
+      agents:
+        trip-organizer: ["Two nights in Alfama, Belem on Sunday."]
+        budget-planner: [{error: "budget service unavailable"}]

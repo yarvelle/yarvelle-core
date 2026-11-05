@@ -1,0 +1,29 @@
+schema: 1
+id: user-selected-agent
+title: A user-picked agent answers directly, then routing resumes
+tags: [user-selected, multi-turn]
+pack: eval-neutral
+backends: [fake]
+turns:
+  - user: "Polish this: we is having a party saturday come"
+    explicit_agent: writing-coach
+    expect:
+      route: user_selected
+      agents_exactly: [writing-coach]
+      max_task_calls: 0
+      answer:
+        must_mention: ["Saturday"]
+    fake:
+      agents:
+        writing-coach: ["We are having a party on Saturday. Please come!"]
+  - user: "Which evening next week is free for the party?"
+    expect:
+      route: main_agent
+      agents_exactly: [calendar-helper]
+      agents_forbidden: [writing-coach]
+    fake:
+      main:
+        - task: [calendar-helper]
+        - answer: "Wednesday evening next week is free."
+      agents:
+        calendar-helper: ["Wednesday 18:00 onwards is open."]

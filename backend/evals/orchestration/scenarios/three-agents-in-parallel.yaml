@@ -1,0 +1,27 @@
+schema: 1
+id: three-agents-in-parallel
+title: One request fans out to three agents and is composed into one reply
+tags: [parallel]
+pack: eval-neutral
+backends: [fake]
+turns:
+  - user: "Plan a team offsite next month: venue, budget and a date everyone can make."
+    expect:
+      route: main_agent
+      agents_exactly: [trip-organizer, budget-planner, calendar-helper]
+      max_task_calls: 3
+      task_states: {trip-organizer: completed, budget-planner: completed, calendar-helper: completed}
+      notices: []
+      provenance:
+        must_cite: [trip-organizer, budget-planner, calendar-helper]
+      answer:
+        must_mention: ["lake house", "the 14th"]
+        no_slug_leak: true
+    fake:
+      main:
+        - task: [trip-organizer, budget-planner, calendar-helper]
+        - answer: "Offsite plan: the lake house, about 2,000 in total, on the 14th."
+      agents:
+        trip-organizer: ["The lake house an hour north fits twelve."]
+        budget-planner: ["Venue 1,200, food 600, transport 200."]
+        calendar-helper: ["Everyone is free on the 14th."]

@@ -1,0 +1,28 @@
+schema: 1
+id: attachment-fixed-route
+title: An uploaded document goes to the document extractor
+tags: [fixed-route, attachments, multi-turn]
+pack: eval-neutral
+backends: [fake]
+turns:
+  - user: "What is the total on this receipt?"
+    input: {attachments: ["receipt.pdf"]}
+    expect:
+      route: fixed_route:document-intake
+      agents_exactly: [document-extractor]
+      model_calls_before_route: 0
+      answer:
+        must_mention: ["42.50"]
+    fake:
+      agents:
+        document-extractor: ["The receipt total is 42.50."]
+  - user: "Add that to this month's budget."
+    expect:
+      route: main_agent
+      agents_exactly: [budget-planner]
+    fake:
+      main:
+        - task: [budget-planner]
+        - answer: "Added 42.50 under groceries; you have 310 left this month."
+      agents:
+        budget-planner: ["Groceries now 290 of 600; 310 left."]

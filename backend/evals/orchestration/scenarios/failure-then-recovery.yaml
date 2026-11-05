@@ -1,0 +1,41 @@
+# A hand-off fails on one turn; the next turn asks again and it answers. The
+# failure notice belongs only to the turn it happened on.
+schema: 1
+id: failure-then-recovery
+title: A failed hand-off on one turn does not leak into the next
+tags: [failure, multi-turn]
+pack: eval-neutral
+backends: [fake]
+turns:
+  - user: "When am I free next Tuesday?"
+    expect:
+      route: main_agent
+      agents_exactly: [calendar-helper]
+      task_states: {calendar-helper: failed}
+      notices:
+        - {code: partial_failure, agent_ids: [calendar-helper]}
+      provenance:
+        missing: [calendar-helper]
+    fake:
+      main:
+        - task: [calendar-helper]
+        - answer: "I could not check the calendar just now."
+      agents:
+        calendar-helper: [{error: "calendar timed out"}]
+  - user: "Try again please."
+    expect:
+      route: main_agent
+      agents_exactly: [calendar-helper]
+      task_states: {calendar-helper: completed}
+      notices: []
+      provenance:
+        must_cite: [calendar-helper]
+      answer:
+        must_mention: ["Tuesday"]
+        must_not_mention: ["did not answer"]
+    fake:
+      main:
+        - task: [calendar-helper]
+        - answer: "Next Tuesday you are free from 1 pm to 4 pm."
+      agents:
+        calendar-helper: ["Tuesday 13:00 to 16:00 is open."]

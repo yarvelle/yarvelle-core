@@ -1,0 +1,50 @@
+# Two agents plan a trip; the follow-up narrows to one of them; a closing
+# remark needs no hand-off at all.
+schema: 1
+id: weekend-trip-follow-up
+title: Trip plan, budget follow-up, then a plain thank-you
+tags: [multi-turn, continuity]
+pack: eval-neutral
+backends: [fake]
+turns:
+  - user: "Plan a weekend in Austin for two, under 600 dollars."
+    expect:
+      route: main_agent
+      agents_exactly: [trip-organizer, budget-planner]
+      min_task_calls: 2
+      max_task_calls: 2
+      notices: []
+      provenance:
+        must_cite: [trip-organizer, budget-planner]
+      answer:
+        must_mention: ["Austin", "/\\$?600/"]
+    fake:
+      main:
+        - task: [trip-organizer, budget-planner]
+        - answer: "Austin plan: two nights on South Congress, barbecue on Saturday, all within $600."
+      agents:
+        trip-organizer: ["Two nights on South Congress, barbecue on Saturday."]
+        budget-planner: ["Lodging 380, food 150, transport 70: total 600."]
+  - user: "Can we make it cheaper?"
+    expect:
+      route: main_agent
+      agents_exactly: [budget-planner]
+      same_agents_as_turn: {turn: 1, mode: subset}
+      notices: []
+      answer:
+        must_mention: ["500"]
+    fake:
+      main:
+        - task: [budget-planner]
+        - answer: "Staying one stop out of downtown brings it to about $500."
+      agents:
+        budget-planner: ["Move lodging one stop out: total 500."]
+  - user: "Thanks, that works."
+    expect:
+      route: main_agent
+      agents_exactly: []
+      max_task_calls: 0
+      notices: []
+    fake:
+      main:
+        - answer: "Glad it helps. Enjoy Austin!"

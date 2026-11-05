@@ -1,0 +1,32 @@
+schema: 1
+id: calendar-follow-up-same-agent
+title: A follow-up about the same event goes back to the same agent
+tags: [multi-turn, continuity]
+pack: eval-neutral
+backends: [fake]
+turns:
+  - user: "Find a free hour on Thursday for a call with Sam."
+    expect:
+      route: main_agent
+      agents_exactly: [calendar-helper]
+      answer:
+        must_mention: ["Thursday"]
+    fake:
+      main:
+        - task: [calendar-helper]
+        - answer: "Thursday at 2 pm is free for the call with Sam."
+      agents:
+        calendar-helper: ["Thursday 14:00 to 15:00 is open."]
+  - user: "Actually, move it to Friday morning."
+    expect:
+      route: main_agent
+      same_agents_as_turn: {turn: 1, mode: equal}
+      answer:
+        must_mention: ["Friday"]
+        must_not_mention: ["Thursday at 2 pm is free"]
+    fake:
+      main:
+        - task: [calendar-helper]
+        - answer: "Moved: Friday at 9 am with Sam."
+      agents:
+        calendar-helper: ["Friday 09:00 to 10:00 is open; moved."]
