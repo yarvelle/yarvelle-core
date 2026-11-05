@@ -110,6 +110,20 @@ def _run_info() -> int:
     return 0
 
 
+def _run_eval(argv: Sequence[str]) -> int:
+    """Dispatches ``yarvelle-core eval <harness> ...``."""
+    harnesses = ("orchestration",)
+    if not argv or argv[0] not in harnesses:
+        print(
+            "usage: yarvelle-core eval {orchestration} ...",
+            file=sys.stderr,
+        )
+        return 2
+    from yarvelle_core.testing.orch_eval.cli import main as orch_eval_main
+
+    return orch_eval_main(argv[1:])
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     """Main CLI entry point for yarvelle-core console script."""
     if argv is None:
@@ -152,11 +166,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help="Display runtime configuration and environment paths",
     )
 
+    # eval command (local-only harnesses; delegated before parsing)
+    subparsers.add_parser(
+        "eval",
+        help="Local-only evaluation harnesses (e.g. 'eval orchestration --help')",
+        add_help=False,
+    )
+
     # help command
     subparsers.add_parser(
         "help",
         help="Show this help message and exit",
     )
+
+    argv = list(argv)
+    if argv and argv[0] == "eval":
+        return _run_eval(argv[1:])
 
     try:
         args = parser.parse_args(argv)
