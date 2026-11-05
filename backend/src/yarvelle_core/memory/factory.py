@@ -93,7 +93,7 @@ def create_memory_port(
     elif selected_backend == MEMORY_BACKEND_POSTGRES:
         raise NotImplementedError(
             "Backend 'postgres' is not yet implemented. "
-            "PostgreSQL memory adapter is not yet implemented. Set CAREFOLD_MEMORY_BACKEND='sqlite'."
+            "PostgreSQL memory adapter is not yet implemented. Set YARVELLE_MEMORY_BACKEND='sqlite'."
         )
 
     else:
@@ -142,13 +142,13 @@ def create_catalog_port(
         url = spector_url or cfg.spector_url
         raise NotImplementedError(
             f"Backend 'spector' is not yet implemented (configured URL: '{url}'). "
-            "Spector catalog adapter is not yet implemented. Set CAREFOLD_MEMORY_BACKEND='sqlite'."
+            "Spector catalog adapter is not yet implemented. Set YARVELLE_MEMORY_BACKEND='sqlite'."
         )
 
     elif selected_backend == MEMORY_BACKEND_POSTGRES:
         raise NotImplementedError(
             "Backend 'postgres' is not yet implemented. "
-            "PostgreSQL catalog adapter is not yet implemented. Set CAREFOLD_MEMORY_BACKEND='sqlite'."
+            "PostgreSQL catalog adapter is not yet implemented. Set YARVELLE_MEMORY_BACKEND='sqlite'."
         )
 
     else:

@@ -24,6 +24,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from yarvelle_core import identity
 from yarvelle_core.audit.logger import record_audit
 from yarvelle_core.db.models import Reminder
 from yarvelle_core.logging import get_logger
@@ -414,7 +415,7 @@ def generate_ics_calendar(
 
         event_lines = [
             "BEGIN:VEVENT",
-            f"UID:{r_id}@carefold.local",
+            f"UID:{r_id}@{identity.local_domain()}",
             f"DTSTAMP:{now_stamp}",
             f"DTSTART:{dt_stamp}",
             f"SUMMARY:{title}",

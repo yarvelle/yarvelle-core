@@ -89,7 +89,7 @@ class OllamaProvider(BaseModelProvider):
 
         # Resolve endpoint with precedence:
         # 1. Explicit base_url or host parameter
-        # 2. Server environment variables ($OLLAMA_BASE_URL, $CAREFOLD_OLLAMA_URL)
+        # 2. Server environment variables ($OLLAMA_BASE_URL, $YARVELLE_OLLAMA_URL)
         # 3. Settings config (if available)
         # 4. DEFAULT_OLLAMA_URL constant
         url = base_url or host or kwargs.get("baseUrl")

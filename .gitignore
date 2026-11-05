@@ -49,7 +49,6 @@ htmlcov/
 
 # Yarvelle local runtime directories
 .yarvelle/
-.carefold/
 logs/
 chats/
 workspace/

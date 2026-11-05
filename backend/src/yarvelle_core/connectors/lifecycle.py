@@ -31,6 +31,8 @@ from datetime import date, datetime, timezone
 import hashlib
 import json
 import os
+
+from yarvelle_core import identity
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 from urllib.parse import urlparse
@@ -654,7 +656,7 @@ async def get_profile_data_flows(
     }
 
     # 2. Resolve built-in web_search provider
-    search_provider_name = os.getenv("CAREFOLD_SEARCH_PROVIDER", "searxng").strip().lower()
+    search_provider_name = identity.getenv("SEARCH_PROVIDER", "searxng").strip().lower()
     if search_provider_name not in ("searxng", "brave"):
         search_provider_name = "searxng"
 

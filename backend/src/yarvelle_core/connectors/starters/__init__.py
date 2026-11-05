@@ -18,9 +18,11 @@ import importlib.util
 from pathlib import Path
 from typing import Any
 
+from yarvelle_core import identity
+
 # Extend __path__ with installed pack starter directories so submodule imports
 # like `from yarvelle_core.connectors.starters.zocdoc import ...` resolve natively.
-for _pkg_name in ("carefold", "carefold_health"):
+for _pkg_name in identity.pack_packages():
     try:
         _spec = importlib.util.find_spec(_pkg_name)
         if _spec and _spec.submodule_search_locations:

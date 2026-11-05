@@ -31,11 +31,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
+from yarvelle_core import identity
 from yarvelle_core.db.models import ProfileKey
 from yarvelle_core.scope.context import DEFAULT_SCOPE, require_scope
 from yarvelle_core.vault.crypto import decrypt, encrypt
 from yarvelle_core.vault.errors import DecryptionError, VaultLockedError
-from yarvelle_core.vault.kek import DEFAULT_ARGON2_SALT
 
 DEK_LENGTH_BYTES = 32  # 256-bit AES key
 DEFAULT_DEK_VERSION = 1
@@ -303,7 +303,7 @@ def derive_scope_dek(profile_dek: bytes, scope: str) -> bytes:
 
     For backwards compatibility, the legacy default scope returns profile_dek directly.
     For all other scopes (e.g. 'finance', 'education'), derives a distinct 256-bit sub-key
-    using HKDF-SHA256 with DEFAULT_ARGON2_SALT and info=b"scope:<clean_scope>".
+    using HKDF-SHA256 with the vault salt (``identity.vault_salt()``) and info=b"scope:<clean_scope>".
     """
     if not isinstance(profile_dek, (bytes, bytearray)) or len(profile_dek) != DEK_LENGTH_BYTES:
         raise ValueError(f"profile_dek must be exactly {DEK_LENGTH_BYTES} bytes")
@@ -317,7 +317,7 @@ def derive_scope_dek(profile_dek: bytes, scope: str) -> bytes:
     hkdf = HKDF(
         algorithm=hashes.SHA256(),
         length=DEK_LENGTH_BYTES,
-        salt=DEFAULT_ARGON2_SALT,
+        salt=identity.vault_salt(),
         info=f"scope:{clean_scope}".encode("utf-8"),
     )
     return hkdf.derive(bytes(profile_dek))

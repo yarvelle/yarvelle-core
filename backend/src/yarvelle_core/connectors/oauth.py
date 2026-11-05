@@ -29,6 +29,8 @@ import hashlib
 import hmac
 import json
 import os
+
+from yarvelle_core import identity
 import secrets
 from typing import Any, Callable, Coroutine, Dict, Optional, Sequence, Tuple, Union
 from urllib.parse import urlencode, urlparse
@@ -135,13 +137,13 @@ def resolve_redirect_uri(
 
 
 def resolve_oauth_kek(kek: Optional[bytes] = None) -> bytes:
-    """Resolves the 32-byte Vault KEK, falling back to CAREFOLD_MASTER_KEY or local home key in dev/test."""
+    """Resolves the 32-byte Vault KEK, falling back to <PREFIX>_MASTER_KEY or local home key in dev/test."""
     if kek is not None:
         return bytes(kek)
     try:
         return get_kek()
     except Exception:
-        env_master = os.environ.get("CAREFOLD_MASTER_KEY", "").strip()
+        env_master = identity.getenv("MASTER_KEY", "").strip()
         if env_master:
             try:
                 raw = bytes.fromhex(env_master)
@@ -152,7 +154,7 @@ def resolve_oauth_kek(kek: Optional[bytes] = None) -> bytes:
             return hashlib.sha256(env_master.encode("utf-8")).digest()
         from yarvelle_core.config import settings
 
-        return hashlib.sha256(f"carefold-local-kek:{settings.home_dir}".encode("utf-8")).digest()
+        return hashlib.sha256(f"{identity.local_kek_label()}:{settings.home_dir}".encode("utf-8")).digest()
 
 
 def _normalize_secret_key(secret_key: Union[bytes, str, None]) -> bytes:

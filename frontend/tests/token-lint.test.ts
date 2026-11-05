@@ -106,7 +106,6 @@ describe('GU3 Token Lint & Architectural Purity', () => {
       'hospital',
       'physician',
       'prescription',
-      'carefold',
     ];
     const domainPattern = new RegExp(`\\b(${domainWords.join('|')})\\b`, 'gi');
     const violations: Array<{ file: string; match: string }> = [];

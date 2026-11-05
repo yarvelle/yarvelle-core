@@ -89,11 +89,10 @@ def resolve_user_partition(user_id: Optional[str]) -> str:
     raise CasPartitionError("CAS access without a user id is refused in multi-user mode (fail-closed).")
 
 
-def _resolve_home(yarvelle_home: Optional[Path], carefold_home: Optional[Path]) -> Path:
-    home = yarvelle_home if yarvelle_home is not None else carefold_home
-    if home is None:
-        raise ValueError("Either yarvelle_home or carefold_home must be provided")
-    return Path(home)
+def _resolve_home(yarvelle_home: Optional[Path]) -> Path:
+    if yarvelle_home is None:
+        raise ValueError("yarvelle_home must be provided")
+    return Path(yarvelle_home)
 
 
 def get_cas_path(
@@ -102,8 +101,6 @@ def get_cas_path(
     profile_id: Optional[str] = None,
     sha256_hash: str = "",
     scope: Optional[str] = DEFAULT_SCOPE,
-    *,
-    carefold_home: Optional[Path] = None,
 ) -> Path:
     """Computes the canonical Content-Addressed Storage path for an attachment.
 
@@ -112,7 +109,7 @@ def get_cas_path(
     or legacy (when scope is None):
         <yarvelle_home>/data/files/<user_id>/<profile_id>/<sha256>
     """
-    home = _resolve_home(yarvelle_home, carefold_home)
+    home = _resolve_home(yarvelle_home)
     clean_uid = resolve_user_partition(user_id)
     clean_pid = sanitize_partition_segment(profile_id, default=UNSCOPED_PROFILE_PARTITION)
     clean_hash = str(sha256_hash).strip().lower()
@@ -133,11 +130,9 @@ def resolve_cas_path(
     profile_id: Optional[str] = None,
     sha256_hash: str = "",
     scope: Optional[str] = DEFAULT_SCOPE,
-    *,
-    carefold_home: Optional[Path] = None,
 ) -> Path:
     """Resolves existing CAS file with fallback to legacy path for default scope."""
-    home = _resolve_home(yarvelle_home, carefold_home)
+    home = _resolve_home(yarvelle_home)
     scoped_path = get_cas_path(home, user_id, profile_id, sha256_hash, scope=scope)
     if scoped_path.is_file():
         return scoped_path
@@ -157,12 +152,10 @@ def cas_file_exists(
     profile_id: Optional[str] = None,
     sha256_hash: str = "",
     scope: Optional[str] = DEFAULT_SCOPE,
-    *,
-    carefold_home: Optional[Path] = None,
 ) -> bool:
     """Checks whether the specified content-addressed file exists on disk."""
     try:
-        home = _resolve_home(yarvelle_home, carefold_home)
+        home = _resolve_home(yarvelle_home)
         path = resolve_cas_path(home, user_id, profile_id, sha256_hash, scope=scope)
         return path.is_file()
     except ValueError:
@@ -176,15 +169,13 @@ def store_cas_file(
     profile_id: Optional[str] = None,
     sha256_hash: Optional[str] = None,
     scope: Optional[str] = DEFAULT_SCOPE,
-    *,
-    carefold_home: Optional[Path] = None,
 ) -> Tuple[Path, str, bool]:
     """Stores content in canonical CAS layout with per-profile, per-scope deduplication.
 
     Returns:
         Tuple of (canonical_path, sha256_digest, is_deduplicated).
     """
-    home = _resolve_home(yarvelle_home, carefold_home)
+    home = _resolve_home(yarvelle_home)
     if sha256_hash is None:
         computed_hash = hashlib.sha256(content).hexdigest().lower()
     else:
@@ -239,11 +230,9 @@ def read_cas_file(
     profile_id: Optional[str] = None,
     sha256_hash: str = "",
     scope: Optional[str] = DEFAULT_SCOPE,
-    *,
-    carefold_home: Optional[Path] = None,
 ) -> bytes:
     """Reads content from CAS storage, raising FileNotFoundError if missing."""
-    home = _resolve_home(yarvelle_home, carefold_home)
+    home = _resolve_home(yarvelle_home)
     canonical_path = resolve_cas_path(home, user_id, profile_id, sha256_hash, scope=scope)
     if not canonical_path.is_file():
         raise FileNotFoundError(f"CAS file '{sha256_hash}' not found at {canonical_path}")

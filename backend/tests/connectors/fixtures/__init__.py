@@ -9,7 +9,7 @@
 #
 # Required Notice: Copyright 2026 Spectrayan (https://spectrayan.com)
 
-"""Test fixtures for carefold-connectors package."""
+"""Test fixtures for pack connector packages."""
 
 from .dummy_connector import DummyClinicalConnector
 

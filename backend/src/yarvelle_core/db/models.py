@@ -2124,7 +2124,7 @@ class Credential(Base):
     aad_binding: Mapped[Optional[str]] = mapped_column(
         String(255),
         nullable=True,
-        doc="Cryptographic Additional Authenticated Data binding string (e.g. carefold:p:{profile_id}:c:{connection_id})",
+        doc="Cryptographic Additional Authenticated Data binding string (e.g. <app>:p:{profile_id}:c:{connection_id})",
     )
     expires_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True),

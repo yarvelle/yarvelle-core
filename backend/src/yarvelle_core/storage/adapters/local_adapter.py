@@ -9,7 +9,7 @@
 #
 # Required Notice: Copyright 2026 Spectrayan (https://spectrayan.com)
 
-"""Local filesystem adapter implementing StoragePort under ~/.carefold/uploads."""
+"""Local filesystem adapter implementing StoragePort under ~/.yarvelle/uploads."""
 
 from __future__ import annotations
 

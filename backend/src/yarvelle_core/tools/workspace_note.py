@@ -112,7 +112,7 @@ async def execute_workspace_note(params: Dict[str, Any], context: Any) -> ToolRe
 
         target_path.write_text(frontmatter, encoding="utf-8")
 
-        # Also persist into relational database (carefold.db -> notes table) when not in an isolated test tmp_path
+        # Also persist into relational database (yarvelle_core.db -> notes table) when not in an isolated test tmp_path
         is_isolated_test_workspace = bool(
             ws_root
             and not (Path(ws_root) / "backend").is_dir()

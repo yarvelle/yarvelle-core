@@ -16,6 +16,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Union
 
+from yarvelle_core import identity
 from yarvelle_core.auth.ports import (
     AuthPort,
     PaginatedUsers,
@@ -29,7 +30,7 @@ from yarvelle_core.auth.ports import (
 
 DEFAULT_STEWARD_USER: UserProfile = UserProfile(
     id="00000000-0000-0000-0000-000000000001",
-    email="steward@carefold.local",
+    email=f"steward@{identity.local_domain()}",
     username="steward",
     full_name="Care Steward",
     role="admin",

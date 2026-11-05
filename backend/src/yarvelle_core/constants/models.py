@@ -18,6 +18,7 @@ timeouts, and temperature settings.
 from __future__ import annotations
 
 from typing import Dict, List, Tuple
+from yarvelle_core import identity
 
 # ============================================================================
 # 1. Provider Identifiers & Sets
@@ -113,5 +114,5 @@ ENV_GOOGLE_API_KEYS: Tuple[str, ...] = ("GOOGLE_API_KEY", "GEMINI_API_KEY")
 ENV_ANTHROPIC_API_KEYS: Tuple[str, ...] = ("ANTHROPIC_API_KEY",)
 ENV_OPENAI_API_KEYS: Tuple[str, ...] = ("OPENAI_API_KEY",)
 ENV_CUSTOM_API_KEYS: Tuple[str, ...] = ("CUSTOM_API_KEY", "OPENAI_API_KEY")
-ENV_OLLAMA_URLS: Tuple[str, ...] = ("OLLAMA_URL", "OLLAMA_BASE_URL", "CAREFOLD_OLLAMA_URL")
+ENV_OLLAMA_URLS: Tuple[str, ...] = ("OLLAMA_URL", "OLLAMA_BASE_URL", identity.env_name("OLLAMA_URL"))
 ENV_CUSTOM_URLS: Tuple[str, ...] = ("CUSTOM_BASE_URL", "OPENAI_BASE_URL")

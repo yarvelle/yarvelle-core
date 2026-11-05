@@ -19,6 +19,7 @@ from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from yarvelle_core import identity
 from yarvelle_core.auth.adapters.disabled_adapter import DisabledAuthAdapter
 from yarvelle_core.auth.adapters.oidc_adapter import OidcAuthAdapter
 from yarvelle_core.auth.adapters.sql_adapter import SqlAuthAdapter
@@ -26,7 +27,7 @@ from yarvelle_core.auth.ports import AuthPort
 
 logger = logging.getLogger(__name__)
 
-ENV_AUTH_PROVIDER = "CAREFOLD_AUTH_PROVIDER"
+ENV_AUTH_PROVIDER_SUFFIX = "AUTH_PROVIDER"
 DEFAULT_AUTH_PROVIDER = "local"
 
 _CACHED_AUTH_PORT: Optional[AuthPort] = None
@@ -40,7 +41,7 @@ def create_auth_port(
 
     Args:
         provider_name: Optional provider ('disabled', 'local', 'oidc').
-                       Defaults to CAREFOLD_AUTH_PROVIDER or 'disabled'.
+                       Defaults to <PREFIX>_AUTH_PROVIDER or 'disabled'.
         session_factory: Optional SQLAlchemy sessionmaker for SQL-backed adapters.
 
     Returns:
@@ -51,7 +52,7 @@ def create_auth_port(
     """
     raw_provider = provider_name
     if raw_provider is None:
-        raw_provider = os.getenv(ENV_AUTH_PROVIDER)
+        raw_provider = identity.getenv(ENV_AUTH_PROVIDER_SUFFIX)
     if raw_provider is None:
         try:
             from yarvelle_core.config import settings

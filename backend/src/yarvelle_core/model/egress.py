@@ -21,6 +21,8 @@ from __future__ import annotations
 import ipaddress
 import logging
 import os
+
+from yarvelle_core import identity
 from typing import Optional, Set
 import urllib.parse
 
@@ -74,8 +76,8 @@ def _get_configured_allowed_hosts() -> Set[str]:
     """Retrieves additional allowed hosts configured in environment or settings."""
     allowed: Set[str] = set()
 
-    # Environment variable: CAREFOLD_ALLOWED_MODEL_HOSTS (comma-separated)
-    env_hosts = os.getenv("CAREFOLD_ALLOWED_MODEL_HOSTS")
+    # Environment variable: YARVELLE_ALLOWED_MODEL_HOSTS (comma-separated)
+    env_hosts = identity.getenv("ALLOWED_MODEL_HOSTS")
     if env_hosts:
         for host in env_hosts.split(","):
             cleaned = host.strip().lower()
@@ -125,9 +127,9 @@ def validate_model_endpoint(
        - Loopback (127.0.0.1, localhost, ::1), Docker container DNS (ollama, host.docker.internal)
          are permitted by default.
        - Non-loopback/remote addresses (e.g. 192.168.x.x, 10.x.x.x) require explicit allowlisting in
-         CAREFOLD_ALLOWED_MODEL_HOSTS or settings.allowed_model_hosts.
+         YARVELLE_ALLOWED_MODEL_HOSTS or settings.allowed_model_hosts.
     6. Custom provider host rules:
-       - Permitted only if host is in CAREFOLD_ALLOWED_MODEL_HOSTS or loopback, and never targeting metadata IPs.
+       - Permitted only if host is in YARVELLE_ALLOWED_MODEL_HOSTS or loopback, and never targeting metadata IPs.
 
     Args:
         provider: Provider identifier ('ollama', 'google', 'anthropic', 'openai', 'custom').
@@ -227,7 +229,7 @@ def validate_model_endpoint(
             if ip_str not in effective_allowed and host not in effective_allowed:
                 raise ModelEgressBlockedError(
                     f"Egress to private network IP '{ip_str}' is blocked by default. "
-                    f"To permit, add '{ip_str}' to CAREFOLD_ALLOWED_MODEL_HOSTS."
+                    f"To permit, add '{ip_str}' to YARVELLE_ALLOWED_MODEL_HOSTS."
                 )
 
     # 3. Check for metadata domain aliases
@@ -256,7 +258,7 @@ def validate_model_endpoint(
         raise ModelEgressBlockedError(
             f"Ollama endpoint host '{host}' is not permitted. Only loopback (127.0.0.1, localhost, ::1) "
             f"and container hosts (ollama, host.docker.internal) are permitted by default. "
-            f"Add '{host}' to CAREFOLD_ALLOWED_MODEL_HOSTS to allow."
+            f"Add '{host}' to YARVELLE_ALLOWED_MODEL_HOSTS to allow."
         )
 
     # 6. Custom Provider Host Rules
@@ -269,12 +271,12 @@ def validate_model_endpoint(
             # Check for blocked internal or cloud metadata suffixes
             if host.endswith(".internal") or host.endswith(".local") or host == "instance-data":
                 raise ModelEgressBlockedError(
-                    f"Custom provider host '{host}' is an internal domain and not in CAREFOLD_ALLOWED_MODEL_HOSTS."
+                    f"Custom provider host '{host}' is an internal domain and not in YARVELLE_ALLOWED_MODEL_HOSTS."
                 )
             return raw_url
         raise ModelEgressBlockedError(
             f"Custom provider host '{host}' is not permitted. Only loopback is allowed by default for IP targets. "
-            f"Add '{host}' to CAREFOLD_ALLOWED_MODEL_HOSTS to allow."
+            f"Add '{host}' to YARVELLE_ALLOWED_MODEL_HOSTS to allow."
         )
 
     # Any other provider: must be explicitly allowlisted if non-loopback

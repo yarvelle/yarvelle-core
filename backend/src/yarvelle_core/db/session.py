@@ -110,7 +110,7 @@ def resolve_database_url(url: Optional[str] = None) -> str:
     """Resolves the database URL adhering to priority rules:
 
     1. Explicit parameter
-    2. CAREFOLD_DATABASE_URL environment variable
+    2. YARVELLE_DATABASE_URL environment variable
     3. DATABASE_URL environment variable
     4. settings.get_database_url()
     """

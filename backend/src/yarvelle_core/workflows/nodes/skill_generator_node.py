@@ -164,7 +164,7 @@ class SkillGeneratorNode(BaseNode):
         """Assembles prompt enforcing Yarvelle Core operational boundaries."""
         return (
             "You are the Yarvelle Core Skill Generator, a specialized meta-agent.\n"
-            "Your objective is to generate structured, high-quality, safety-compliant healthcare navigation skills.\n"
+            "Your objective is to generate structured, high-quality, safety-compliant, domain-neutral skills.\n"
             "CRITICAL SAFETY CONSTRAINTS:\n"
             "- Generated skills must NEVER diagnose, prescribe, dose, or replace emergency care.\n"
             "- Always include operational boundaries, disclaimers, and verify instructions.\n"
@@ -190,10 +190,10 @@ class SkillGeneratorNode(BaseNode):
             f"## Context & User Inquiry\n{user_query}\n\n"
             f"## Key Checklist & Navigation Steps\n"
             f"1. Clarify user context and specific questions.\n"
-            f"2. Gather plan documents, provider instructions, or notes.\n"
-            f"3. Direct user to appropriate licensed clinicians or insurance administrators for formal determinations.\n\n"
+            f"2. Gather relevant documents, instructions, or notes.\n"
+            f"3. Direct the user to the appropriate qualified professional or official source for formal determinations.\n\n"
             f"## Boundary Disclosure\n"
-            f"This guide is an informational navigation resource and does not provide legally binding coverage decisions.\n"
+            f"This guide is an informational navigation resource and does not provide binding decisions or professional advice.\n"
         )
 
         instructions = (
@@ -202,7 +202,7 @@ class SkillGeneratorNode(BaseNode):
             f"Guidelines:\n"
             f"1. Explain relevant domain concepts clearly without jargon.\n"
             f"2. Reference '{ref_doc_name}' for detailed checklists.\n"
-            f"3. Strictly maintain safety boundaries: never diagnose, prescribe, or alter treatments.\n"
+            f"3. Strictly maintain safety boundaries: give information and organization help, not professional determinations.\n"
         )
 
         return {
@@ -231,40 +231,40 @@ class SkillGeneratorNode(BaseNode):
         if "template" in doc_lower or "log" in doc_lower or "tracker" in doc_lower:
             body = (
                 f"## 1. Purpose & Overview\n"
-                f"This template provides a standardized tracking tool for {clean_stem.lower()} to support productive discussions with your healthcare provider.\n\n"
+                f"This template provides a standardized tracking tool for {clean_stem.lower()} to support productive discussions with the relevant professional.\n\n"
                 f"## 2. Tracking Log Matrix\n\n"
                 f"| Date & Time | Primary Observation / Entry | Severity / Rating (1-10) | Duration / Frequency | Triggers / Contributing Factors | Actions / Interventions Tried | Impact on Daily Function |\n"
                 f"| :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n"
-                f"| *YYYY-MM-DD* | *Detailed description* | *1 - 10* | *e.g., 2 hours* | *Specific triggers noted* | *Rest, lifestyle, or prescribed remedies* | *Impact on work, sleep, or routine* |\n"
+                f"| *YYYY-MM-DD* | *Detailed description* | *1 - 10* | *e.g., 2 hours* | *Specific triggers noted* | *Steps already tried* | *Impact on work, sleep, or routine* |\n"
                 f"| | | | | | | |\n"
                 f"| | | | | | | |\n\n"
-                f"## 3. Key Discussion Points for Your Clinician\n"
+                f"## 3. Key Discussion Points\n"
                 f"- Describe specific patterns or triggers identified during logging.\n"
                 f"- Note which interventions provided relief and which were ineffective.\n"
-                f"- Ask what diagnostic tests, lifestyle modifications, or specialist consultations are recommended.\n"
+                f"- Ask what next steps or further expert input are recommended.\n"
             )
         elif "checklist" in doc_lower or "prep" in doc_lower:
             body = (
-                f"## 1. Pre-Visit Logistics & Documents\n"
-                f"- [ ] Insurance card, photo ID, and form of payment for copays.\n"
-                f"- [ ] Current medication list including exact doses and OTC supplements.\n"
-                f"- [ ] Prior records, lab reports, imaging discs, or referring provider notes.\n\n"
+                f"## 1. Logistics & Documents\n"
+                f"- [ ] Identification and any account or reference numbers needed.\n"
+                f"- [ ] Current list of relevant items, settings, or commitments.\n"
+                f"- [ ] Prior records, reports, or notes from earlier contacts.\n\n"
                 f"## 2. Priority Agendas\n"
-                f"- [ ] Top 1–3 questions or health goals prioritized for this consultation.\n"
+                f"- [ ] Top 1–3 questions or goals prioritized for this meeting.\n"
                 f"- [ ] Timeline of relevant changes or concerns over the past 30–90 days.\n\n"
                 f"## 3. Next Steps & Follow-Up Verification\n"
-                f"- [ ] Clarify required diagnostic orders, referrals, or lab requisitions.\n"
-                f"- [ ] Confirm follow-up visit timeline and clinician contact procedures.\n"
+                f"- [ ] Clarify any required forms, referrals, or approvals.\n"
+                f"- [ ] Confirm the follow-up timeline and contact procedures.\n"
             )
         elif "glossary" in doc_lower or "terms" in doc_lower or "code" in doc_lower or "explanation" in doc_lower or "eob" in doc_lower:
             body = (
                 f"## 1. Key Terminology & Concepts\n"
-                f"- **Core Definition**: Essential understanding of {clean_stem.lower()} within healthcare navigation.\n"
+                f"- **Core Definition**: Essential understanding of {clean_stem.lower()} within this domain.\n"
                 f"- **Operational Context**: How coordinators and operators use this terminology.\n"
                 f"- **User Considerations**: What this means for your plan and responsibilities.\n\n"
-                f"## 2. Questions to Clarify with Provider or Carrier\n"
-                f"1. *How does this apply to my specific situation or insurance policy?*\n"
-                f"2. *Are there formal pre-authorization, in-network, or documentation requirements?*\n"
+                f"## 2. Questions to Clarify with the Responsible Party\n"
+                f"1. *How does this apply to my specific situation?*\n"
+                f"2. *Are there formal approval or documentation requirements?*\n"
             )
         else:
             body = (
@@ -272,10 +272,10 @@ class SkillGeneratorNode(BaseNode):
                 f"{clean_stem} provides structured informational guidance for {skill_title.lower()}.\n\n"
                 f"## 2. Key Action Items & Guidance\n"
                 f"1. Review relevant history and document priorities in writing.\n"
-                f"2. Formulate clear, concise questions for the treating healthcare provider.\n"
-                f"3. Verify insurance coverage, in-network provider tiers, and required authorizations.\n\n"
+                f"2. Formulate clear, concise questions for the relevant professional.\n"
+                f"3. Verify any eligibility, cost, or approval requirements.\n\n"
                 f"## 3. Communication Guide\n"
-                f"Prepare a concise 2-minute summary of your goals for the clinician to ensure all priorities are addressed.\n"
+                f"Prepare a concise 2-minute summary of your goals to ensure all priorities are addressed.\n"
             )
 
         context_section = f"\n## Operational Context & User Inquiry\n{user_query}\n\n" if user_query else "\n"
@@ -292,7 +292,7 @@ class SkillGeneratorNode(BaseNode):
             f"> **INFORMATIONAL AID**: This reference document is an educational and organizational resource. "
             f"It does **NOT** provide authoritative binding determinations or replace professional advice.\n"
             f"> \n"
-            f"> **EMERGENCY WARNING**: If experiencing acute, life-threatening symptoms (e.g. acute chest pain, shortness of breath, sudden weakness/speech impairment, severe trauma), **immediately call 911 or visit the nearest emergency department**.\n"
+            f"> **EMERGENCY WARNING**: In an emergency, **contact your local emergency services immediately**.\n"
         )
 
     def synthesize_reference_doc_content(
@@ -352,7 +352,7 @@ class SkillGeneratorNode(BaseNode):
                 sys_msg = SystemMessage(content=self._build_system_prompt())
                 prompt = (
                     f"Generate a complete, structured reference markdown document named '{clean_doc}' "
-                    f"for the healthcare skill '{skill_id}'.\n"
+                    f"for the skill '{skill_id}'.\n"
                     f"Target Specialist Agent: {target_agent}\n"
                     f"User Inquiry Context: {user_query}\n\n"
                     f"Include structured tables or checklists, action steps, and strict disclaimers."

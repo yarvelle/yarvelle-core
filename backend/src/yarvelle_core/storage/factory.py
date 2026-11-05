@@ -17,6 +17,7 @@ import logging
 import os
 from typing import Optional
 
+from yarvelle_core import identity
 from yarvelle_core.config import Settings, settings as global_settings
 from yarvelle_core.storage.adapters.local_adapter import LocalStorageAdapter
 from yarvelle_core.storage.ports.storage_port import StoragePort
@@ -33,7 +34,7 @@ SUPPORTED_STORAGE_BACKENDS = frozenset({
     STORAGE_BACKEND_GCS,
 })
 
-ENV_STORAGE_BACKEND = "CAREFOLD_STORAGE_BACKEND"
+ENV_STORAGE_BACKEND_SUFFIX = "STORAGE_BACKEND"
 DEFAULT_STORAGE_BACKEND = STORAGE_BACKEND_LOCAL
 
 _CACHED_STORAGE_ADAPTER: Optional[StoragePort] = None
@@ -58,7 +59,7 @@ def create_storage_adapter(
         ValueError: If requested backend is unrecognized.
     """
     cfg = settings or global_settings
-    selected_backend = (backend or os.getenv(ENV_STORAGE_BACKEND, DEFAULT_STORAGE_BACKEND)).lower().strip()
+    selected_backend = (backend or identity.getenv(ENV_STORAGE_BACKEND_SUFFIX, DEFAULT_STORAGE_BACKEND)).lower().strip()
 
     if selected_backend not in SUPPORTED_STORAGE_BACKENDS:
         supported = ", ".join(sorted(SUPPORTED_STORAGE_BACKENDS))

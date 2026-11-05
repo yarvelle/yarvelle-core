@@ -16,6 +16,7 @@ and environment variable keys for workspace resolution.
 """
 
 from __future__ import annotations
+from yarvelle_core import identity
 
 # ============================================================================
 # 1. Directory Names
@@ -105,13 +106,14 @@ ROUTING_PATTERNS_YAML: str = "routing_patterns.yaml"
 # 5. Environment Variable Names
 # ============================================================================
 
-ENV_HOME_DIR: str = "CAREFOLD_HOME"
-CAREFOLD_HOME: str = "CAREFOLD_HOME"
-ENV_WORKSPACE_ROOT: str = "CAREFOLD_WORKSPACE_ROOT"
-ENV_DB_PATH: str = "CAREFOLD_DB_PATH"
-ENV_AUDIT_LOG_PATH: str = "CAREFOLD_AUDIT_LOG_PATH"
-ENV_MEMORY_BACKEND: str = "CAREFOLD_MEMORY_BACKEND"
-ENV_SPECTOR_URL: str = "CAREFOLD_SPECTOR_URL"
-ENV_CATALOG_DB_PATH: str = "CAREFOLD_CATALOG_DB_PATH"
-ENV_DATABASE_URL: str = "CAREFOLD_DATABASE_URL"
+# Names use the configurable prefix from ``identity.env_prefix()`` (default
+# ``YARVELLE``), resolved when this module is imported.
+ENV_HOME_DIR: str = identity.env_name("HOME")
+ENV_WORKSPACE_ROOT: str = identity.env_name("WORKSPACE_ROOT")
+ENV_DB_PATH: str = identity.env_name("DB_PATH")
+ENV_AUDIT_LOG_PATH: str = identity.env_name("AUDIT_LOG_PATH")
+ENV_MEMORY_BACKEND: str = identity.env_name("MEMORY_BACKEND")
+ENV_SPECTOR_URL: str = identity.env_name("SPECTOR_URL")
+ENV_CATALOG_DB_PATH: str = identity.env_name("CATALOG_DB_PATH")
+ENV_DATABASE_URL: str = identity.env_name("DATABASE_URL")
 ENV_DATABASE_URL_FALLBACK: str = "DATABASE_URL"

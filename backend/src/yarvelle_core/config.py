@@ -19,16 +19,19 @@ from typing import List, Optional
 from pydantic import BaseModel, Field, PrivateAttr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from yarvelle_core import identity
+
 
 class BrandConfig(BaseModel):
     """Branding and namespace configuration for product runtime."""
 
     product_name: str = "Yarvelle Core"
     env_prefix: str = "YARVELLE_CORE_"
-    home_dir_name: str = ".yarvelle"
-    db_filename: str = "yarvelle_core.db"
-    oauth_scheme: str = "yarvelle"
-    cookie_prefix: str = "yarvelle_"
+    # Runtime identity defaults come from ``yarvelle_core.identity`` (env vars).
+    home_dir_name: str = Field(default_factory=identity.home_dir_name)
+    db_filename: str = Field(default_factory=identity.db_filename)
+    oauth_scheme: str = Field(default_factory=identity.url_scheme)
+    cookie_prefix: str = Field(default_factory=lambda: f"{identity.app_slug()}_")
     default_agent: str = "assistant"
 
 from yarvelle_core.constants.defaults import DEFAULT_CORS_ORIGINS
@@ -44,7 +47,6 @@ from yarvelle_core.constants.paths import (
     DEFAULT_AUDIT_LOG_FILE,
     DEFAULT_CATALOG_DB,
     DEFAULT_CHECKPOINTS_DB,
-    DEFAULT_HOME_DIR,
     ENV_AUDIT_LOG_PATH,
     ENV_CATALOG_DB_PATH,
     ENV_DB_PATH,
@@ -61,7 +63,7 @@ from yarvelle_core.constants.paths import (
 
 def get_default_workspace_root() -> Path:
     """Finds repository workspace root or defaults to cwd."""
-    # Check CAREFOLD_WORKSPACE_ROOT env var
+    # Check YARVELLE_WORKSPACE_ROOT env var
     env_root = os.getenv(ENV_WORKSPACE_ROOT)
     if env_root and os.path.isdir(env_root):
         return Path(env_root).resolve()
@@ -77,41 +79,42 @@ def get_default_workspace_root() -> Path:
 
 
 def resolve_yarvelle_home() -> Path:
-    """Resolves the canonical Yarvelle Core home storage directory (~/.carefold).
+    """Resolves the canonical Yarvelle Core home storage directory (~/.yarvelle).
 
     Resolution Precedence:
-    1. CAREFOLD_HOME environment variable (or CAREFOLD_HOME_DIR)
-    2. CAREFOLD_WORKSPACE_ROOT environment variable (if explicitly pointing to
-       a .carefold directory or non-repository test sandbox)
-    3. Cross-platform user home default: Path.home() / DEFAULT_HOME_DIR
-       - Linux:   /home/<user>/.carefold
-       - macOS:   /Users/<user>/.carefold
-       - Windows: C:\\Users\\<user>\\.carefold (via %USERPROFILE%)
+    1. YARVELLE_HOME environment variable (or YARVELLE_HOME_DIR)
+    2. YARVELLE_WORKSPACE_ROOT environment variable (if explicitly pointing to
+       a .yarvelle directory or non-repository test sandbox)
+    3. Cross-platform user home default: Path.home() / identity.home_dir_name()
+       - Linux:   /home/<user>/.yarvelle
+       - macOS:   /Users/<user>/.yarvelle
+       - Windows: C:\\Users\\<user>\\.yarvelle (via %USERPROFILE%)
 
     Returns:
         Path: Absolute resolved filesystem path to the Yarvelle Core home directory.
     """
-    # 1. Primary override: CAREFOLD_HOME or CAREFOLD_HOME_DIR
-    env_home = os.getenv("YARVELLE_HOME") or os.getenv("CAREFOLD_HOME") or os.getenv("YARVELLE_HOME_DIR")
+    # 1. Primary override: YARVELLE_HOME or YARVELLE_HOME_DIR
+    env_home = identity.getenv("HOME") or identity.getenv("HOME_DIR")
     if env_home and env_home.strip():
         return Path(env_home.strip()).expanduser().resolve()
 
-    # 2. Secondary override: CAREFOLD_WORKSPACE_ROOT
-    env_ws = os.getenv("CAREFOLD_WORKSPACE_ROOT")
+    # 2. Secondary override: YARVELLE_WORKSPACE_ROOT
+    env_ws = identity.getenv("WORKSPACE_ROOT")
     if env_ws and env_ws.strip():
         ws_path = Path(env_ws.strip()).expanduser().resolve()
-        # If explicitly pointed at a .carefold folder
-        if ws_path.name == DEFAULT_HOME_DIR:
+        # If explicitly pointed at a .yarvelle folder
+        home_dir_name = identity.home_dir_name()
+        if ws_path.name == home_dir_name:
             return ws_path
-        # If containing a .carefold subfolder
-        if (ws_path / DEFAULT_HOME_DIR).is_dir():
-            return (ws_path / DEFAULT_HOME_DIR).resolve()
+        # If containing a .yarvelle subfolder
+        if (ws_path / home_dir_name).is_dir():
+            return (ws_path / home_dir_name).resolve()
         # If pointing to an isolated sandbox/test path (does not contain repository agents/skills)
         if not (ws_path / AGENTS_DIR).is_dir() and not (ws_path / "backend").is_dir():
             return ws_path
 
     # 3. Default: cross-platform user home directory
-    return (Path.home() / DEFAULT_HOME_DIR).resolve()
+    return (Path.home() / identity.home_dir_name()).resolve()
 
 
 def get_default_ollama_url() -> str:
@@ -186,7 +189,7 @@ class Settings(BaseSettings):
     # Relational Database configuration (R1)
     database_url: Optional[str] = Field(
         default=None,
-        description="Database URL supporting SQLite and PostgreSQL (CAREFOLD_DATABASE_URL or DATABASE_URL)",
+        description="Database URL supporting SQLite and PostgreSQL (YARVELLE_DATABASE_URL or DATABASE_URL)",
     )
 
     # Memory and Catalog abstraction configuration (R2)
@@ -211,7 +214,7 @@ class Settings(BaseSettings):
     def _resolve_database_url(self) -> "Settings":
         """Initializes database_url if not explicitly set."""
         if not self.database_url:
-            env_cf = os.getenv("YARVELLE_DATABASE_URL") or os.getenv("CAREFOLD_DATABASE_URL")
+            env_cf = identity.getenv("DATABASE_URL")
             if env_cf and env_cf.strip():
                 self.database_url = env_cf.strip()
             else:
@@ -223,16 +226,16 @@ class Settings(BaseSettings):
         return self
 
     def get_home_dir(self) -> Path:
-        """Returns the resolved root home storage directory (~/.carefold)."""
+        """Returns the resolved root home storage directory (~/.yarvelle)."""
         return self.home_dir
 
     def get_uploads_dir(self) -> Path:
-        """Returns the uploads directory (~/.carefold/uploads) managed via StoragePort."""
+        """Returns the uploads directory (~/.yarvelle/uploads) managed via StoragePort."""
         return self.home_dir / UPLOADS_DIR
 
     def get_database_url(self) -> str:
         """Resolves active database URL, honoring environment overrides or home_dir."""
-        env_cf = os.getenv("YARVELLE_DATABASE_URL") or os.getenv("CAREFOLD_DATABASE_URL")
+        env_cf = identity.getenv("DATABASE_URL")
         if env_cf and env_cf.strip():
             return env_cf.strip()
         env_db = os.getenv("DATABASE_URL")
@@ -242,7 +245,7 @@ class Settings(BaseSettings):
         # Otherwise, dynamically evaluate against self.home_dir to support test isolation.
         if (
             self.database_url
-            and not self.database_url.endswith("/workspace/carefold.db")
+            and not self.database_url.endswith("/workspace/yarvelle_core.db")
             and not self.database_url.endswith(f"/workspace/{self.db_filename}")
             and not (self.database_url.startswith("sqlite+aiosqlite:///") and (self.database_url.endswith(f"/{SQL_DB_FILENAME}") or self.database_url.endswith(f"/{self.db_filename}")))
         ):

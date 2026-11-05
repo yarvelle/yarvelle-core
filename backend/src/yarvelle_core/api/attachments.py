@@ -12,7 +12,7 @@
 """Attachments management, upload, download streaming, and deletion REST endpoints.
 
 Decouples physical storage through hexagonal StoragePort and persists document
-records, storage keys, and cryptographic SHA-256 hashes in carefold.db.
+records, storage keys, and cryptographic SHA-256 hashes in yarvelle_core.db.
 """
 
 from __future__ import annotations
@@ -95,7 +95,7 @@ async def upload_attachment(
     db: AsyncSession = Depends(get_db),
     storage: StoragePort = Depends(get_storage_adapter),
 ) -> Dict[str, Any]:
-    """Uploads a document via StoragePort, recording metadata and SHA-256 hash in carefold.db."""
+    """Uploads a document via StoragePort, recording metadata and SHA-256 hash in yarvelle_core.db."""
     if not file or not file.filename:
         raise HTTPException(
             status_code=HTTP_400_BAD_REQUEST,
@@ -183,7 +183,7 @@ async def upload_attachment(
         if ext in (".txt", ".md", ".json", ".csv", ".tsv", ".yaml", ".yml", ".text", ".log", ".rst", ".html", ".htm", ".xml"):
             extracted_text = content.decode("utf-8", errors="replace")
 
-    # 6. Persist Attachment entity in relational database (carefold.db)
+    # 6. Persist Attachment entity in relational database (yarvelle_core.db)
     now = meta.created_at or datetime.now(timezone.utc)
     attachment_id = str(uuid.uuid4())
 
@@ -423,7 +423,7 @@ async def download_attachment(
     owner_id = resolve_owner_user_id(user)
     is_admin = getattr(user, "role", "member") == "admin"
 
-    # 1. Lookup attachment in carefold.db by id, storage_key, or filename
+    # 1. Lookup attachment in yarvelle_core.db by id, storage_key, or filename
     stmt = select(Attachment).where(
         (Attachment.id == attachment_id)
         | (Attachment.storage_key == attachment_id)
@@ -545,7 +545,7 @@ async def delete_attachment(
     owner_id = resolve_owner_user_id(user)
     is_admin = getattr(user, "role", "member") == "admin"
 
-    # 1. Lookup attachment in carefold.db
+    # 1. Lookup attachment in yarvelle_core.db
     stmt = select(Attachment).where(
         (Attachment.id == attachment_id)
         | (Attachment.storage_key == attachment_id)
