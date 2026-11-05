@@ -14,6 +14,10 @@
 The main agent hands work to registered agents through the Deep Agents
 ``task`` tool (see ``yarvelle_core.engine.orchestration``). If it fails and
 the pack has a default agent, the turn is handed to that agent with a notice.
+
+Subagent progress reaches the chat stream as ``task_status`` custom events and
+degraded turns as ``orchestration_notice`` events; subagent tokens are never
+streamed (see ``yarvelle_core.engine.service``).
 """
 
 from __future__ import annotations
@@ -24,12 +28,28 @@ from typing import Any, Dict, Optional
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from yarvelle_core.agents.registry import AgentRegistry
+from yarvelle_core.constants.api import SSE_EVENT_ORCHESTRATION_NOTICE, SSE_EVENT_TASK_STATUS
 from yarvelle_core.engine.orchestration.runtime import MAIN_AGENT_ID, HybridRouter, ToolResolver
 from yarvelle_core.engine.orchestration.task_guard import AuditSink, TaskStatusSink
 from yarvelle_core.schemas.orchestration import PackOrchestrationSpec, RouteSource
 from yarvelle_core.workflows.nodes.base import BaseNode
 
 logger = logging.getLogger(__name__)
+
+
+async def _dispatch(name: str, payload: Dict[str, Any]) -> None:
+    """Sends a custom stream event; a no-op outside a graph run."""
+    try:
+        from langchain_core.callbacks.manager import adispatch_custom_event
+
+        await adispatch_custom_event(name, payload)
+    except RuntimeError:
+        pass  # no parent run (direct node call)
+
+
+async def stream_task_status(payload: Dict[str, Any]) -> None:
+    """Default ``status_sink``: forwards a task status to the chat stream."""
+    await _dispatch(SSE_EVENT_TASK_STATUS, payload)
 
 
 class MainAgentNode(BaseNode):
@@ -54,7 +74,7 @@ class MainAgentNode(BaseNode):
             spec=orchestration,
             default_agent=default_agent,
             audit_sink=audit_sink,
-            status_sink=status_sink,
+            status_sink=status_sink or stream_task_status,
             tool_resolver=tool_resolver,
         )
 
@@ -63,6 +83,8 @@ class MainAgentNode(BaseNode):
         if outcome is None:
             return {"error": "No agent could take this turn.", "next_step": "error"}
         notices = [n.model_dump(mode="json") for n in outcome.notices]
+        for notice in notices:
+            await _dispatch(SSE_EVENT_ORCHESTRATION_NOTICE, notice)
         result: Dict[str, Any] = {
             "route_decision": outcome.decision.model_dump(mode="json", exclude_none=True),
         }
@@ -82,4 +104,4 @@ class MainAgentNode(BaseNode):
         return result
 
 
-__all__ = ["MainAgentNode"]
+__all__ = ["MainAgentNode", "stream_task_status"]

@@ -21,6 +21,7 @@ Provides:
 - generate_agent_proposal, run_propose_phase: Round 1 proposal generation with schema repair.
 - evaluate_deliberation_tool_gate, filter_read_only_tools: Read-only tool execution policy.
 - create_deliberation_subgraph: Compiled LangGraph StateGraph builder.
+- DeliberationNode: Graph node that runs a panel for a ``deliberate`` plan.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from yarvelle_core.workflows.deliberation.auditor import BudgetAuditor, UnitMism
 from yarvelle_core.workflows.deliberation.blackboard import BlackboardManager, DeliberationBlackboard
 from yarvelle_core.workflows.deliberation.doc_critique import run_peer_critiques
 from yarvelle_core.workflows.deliberation.engine import BudgetDecision, DeliberationEngine
+from yarvelle_core.workflows.deliberation.node import DeliberationNode
 from yarvelle_core.workflows.deliberation.gate import (
     ConvergenceDecision,
     ConvergenceGate,
@@ -50,6 +52,7 @@ __all__ = [
     "ConvergenceGate",
     "DeliberationBlackboard",
     "DeliberationEngine",
+    "DeliberationNode",
     "UnitMismatchError",
     "create_deliberation_subgraph",
     "evaluate_convergence_gate",

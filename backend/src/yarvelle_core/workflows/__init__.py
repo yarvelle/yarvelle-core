@@ -17,7 +17,6 @@ AgentState schema following SOLID principles.
 
 from __future__ import annotations
 
-from yarvelle_core.workflows.dispatcher import ExecutionDispatcher
 from yarvelle_core.workflows.nodes.base import BaseNode
 from yarvelle_core.workflows.state import (
     ALLOWED_CLAIM_UNITS,
@@ -41,7 +40,6 @@ __all__ = [
     "AgentState",
     "BaseNode",
     "CritiqueStance",
-    "ExecutionDispatcher",
     "PeerCritique",
     "SLUG_REGEX",
     "StagedAction",

@@ -20,11 +20,16 @@ middleware wraps those calls and enforces, per turn:
 - time: each hand-off is bounded by ``agent_timeout_s`` and by what is left of
   ``turn_timeout_s``;
 - audit: ``task.started`` then exactly one of ``task.completed``,
-  ``task.failed`` or ``task.timed_out`` (strict durability, so a failed audit
-  write stops the turn).
+  ``task.failed``, ``task.timed_out`` or ``task.cancelled`` (strict
+  durability, so a failed audit write stops the turn);
+- call cap: ``SubagentCallCapMiddleware`` stops a subagent at its model-call
+  cap and the hand-off is flagged as truncated.
 
 Refusals, timeouts and subagent errors come back to the main agent as error
-tool messages so it can answer with what it has.
+tool messages so it can answer with what it has; they never fail the turn.
+A user cancel cancels every in-flight hand-off and is re-raised.
+Every hand-off is kept as a ``TaskRun`` so the runtime can turn failures and
+truncation into notices.
 """
 
 from __future__ import annotations
@@ -35,11 +40,12 @@ import inspect
 import json
 import time
 import uuid
+from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Dict, Iterable, Optional, Union
+from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Union
 
-from langchain.agents.middleware import AgentMiddleware
-from langchain_core.messages import ToolMessage
+from langchain.agents.middleware import AgentMiddleware, hook_config
+from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.types import Command
 
 from yarvelle_core.schemas.audit import AuditEvent
@@ -52,6 +58,59 @@ AuditSink = Callable[[AuditEvent], Union[None, Awaitable[None]]]
 
 TaskStatusSink = Callable[[Dict[str, Any]], Union[None, Awaitable[None]]]
 """Receives ``task_status`` stream events (``SSETaskStatusEvent`` payloads)."""
+
+
+DEFAULT_SUBAGENT_MAX_ITERATIONS = 3
+"""Tool rounds a subagent may take when its manifest sets no ``max_iterations``."""
+
+TRUNCATED_TEXT = "Stopped at the model call limit for this task; the answer may be incomplete."
+
+
+@dataclass
+class TaskRun:
+    """One hand-off in the current turn and how it ended."""
+
+    agent_id: str
+    task_id: str
+    state: str = "started"
+    truncated: bool = False
+
+
+_ACTIVE_TASK: ContextVar[Optional[TaskRun]] = ContextVar("yarvelle_active_task", default=None)
+
+
+class SubagentCallCapMiddleware(AgentMiddleware):
+    """Ends a subagent run at its model-call cap and flags the hand-off.
+
+    The cap is ``max_iterations + 1`` model calls (each tool round plus the
+    answer). The subagent's own messages are counted, so the main agent's
+    counters never leak in.
+    """
+
+    def __init__(self, agent_id: str, max_iterations: Optional[int] = None) -> None:
+        super().__init__()
+        self.agent_id = agent_id
+        iterations = max_iterations if isinstance(max_iterations, int) and max_iterations >= 0 else DEFAULT_SUBAGENT_MAX_ITERATIONS
+        self.max_model_calls = iterations + 1
+
+    @property
+    def name(self) -> str:
+        return "yarvelle_subagent_call_cap"
+
+    @hook_config(can_jump_to=["end"])
+    def before_model(self, state: Any, runtime: Any) -> Optional[Dict[str, Any]]:
+        messages = state.get("messages") or [] if isinstance(state, dict) else getattr(state, "messages", [])
+        calls = sum(1 for m in messages if isinstance(m, AIMessage))
+        if calls < self.max_model_calls:
+            return None
+        run = _ACTIVE_TASK.get()
+        if run is not None:
+            run.truncated = True
+        return {"jump_to": "end", "messages": [AIMessage(content=TRUNCATED_TEXT)]}
+
+    @hook_config(can_jump_to=["end"])
+    async def abefore_model(self, state: Any, runtime: Any) -> Optional[Dict[str, Any]]:
+        return self.before_model(state, runtime)
 
 
 class OrchestrationAuditError(RuntimeError):
@@ -86,6 +145,7 @@ async def _emit(sink: Optional[Callable[[Any], Any]], payload: Any) -> None:
 class _TurnBudget:
     started_at: float = field(default_factory=time.monotonic)
     calls: int = 0
+    runs: List[TaskRun] = field(default_factory=list)
 
 
 class TaskGuardMiddleware(AgentMiddleware):
@@ -121,6 +181,11 @@ class TaskGuardMiddleware(AgentMiddleware):
     @property
     def calls_made(self) -> int:
         return self._budget.calls
+
+    @property
+    def runs(self) -> List[TaskRun]:
+        """Hand-offs of the current turn, in the order they were requested."""
+        return list(self._budget.runs)
 
     def reset_turn(self, turn_id: Optional[str] = None) -> None:
         """Starts a new turn budget (call count and turn clock)."""
@@ -180,6 +245,7 @@ class TaskGuardMiddleware(AgentMiddleware):
         task_id = str(call.get("id") or uuid.uuid4().hex)
         input_hash = _sha256(str(args.get("description") or ""))
         audit_agent = agent_id or "unknown"
+        run = TaskRun(agent_id=audit_agent, task_id=task_id)
 
         if agent_id not in self.allowed_agents:
             await self._audit(
@@ -210,12 +276,23 @@ class TaskGuardMiddleware(AgentMiddleware):
             return self._error(task_id, "The turn's time budget is used up. Answer with the results you have.")
 
         self._budget.calls += 1
+        self._budget.runs.append(run)
         await self._audit("task.started", agent_id, task_id, allowed=True, input_hash=input_hash)
         await self._status(agent_id, task_id, "started")
         started = time.monotonic()
+        token = _ACTIVE_TASK.set(run)
         try:
             result = await asyncio.wait_for(handler(request), timeout=timeout)
+        except asyncio.CancelledError:
+            run.state = "cancelled"
+            await self._audit(
+                "task.cancelled", agent_id, task_id, input_hash=input_hash,
+                error_code="task.cancelled", duration_ms=(time.monotonic() - started) * 1000,
+            )
+            await self._status(agent_id, task_id, "cancelled")
+            raise
         except asyncio.TimeoutError:
+            run.state = "timed_out"
             await self._audit(
                 "task.timed_out", agent_id, task_id, input_hash=input_hash,
                 error_code="limit.agent_timeout", duration_ms=(time.monotonic() - started) * 1000,
@@ -225,6 +302,7 @@ class TaskGuardMiddleware(AgentMiddleware):
         except OrchestrationAuditError:
             raise
         except Exception as err:
+            run.state = "failed"
             await self._audit(
                 "task.failed", agent_id, task_id, input_hash=input_hash,
                 error_code="task.error", reason=type(err).__name__,
@@ -232,12 +310,16 @@ class TaskGuardMiddleware(AgentMiddleware):
             )
             await self._status(agent_id, task_id, "failed")
             return self._error(task_id, f"Agent '{agent_id}' failed to answer.")
+        finally:
+            _ACTIVE_TASK.reset(token)
 
+        run.state = "completed"
         await self._audit(
             "task.completed", agent_id, task_id, input_hash=input_hash,
             output_hash=_sha256(_result_text(result)), duration_ms=(time.monotonic() - started) * 1000,
+            details={"truncated": True} if run.truncated else None,
         )
-        await self._status(agent_id, task_id, "completed")
+        await self._status(agent_id, task_id, "completed", "truncated" if run.truncated else None)
         return result
 
     def wrap_tool_call(self, request: Any, handler: Callable[[Any], Any]) -> Any:
@@ -250,9 +332,13 @@ class TaskGuardMiddleware(AgentMiddleware):
 
 
 __all__ = [
+    "DEFAULT_SUBAGENT_MAX_ITERATIONS",
     "TASK_TOOL_NAME",
+    "TRUNCATED_TEXT",
     "AuditSink",
     "OrchestrationAuditError",
+    "SubagentCallCapMiddleware",
     "TaskGuardMiddleware",
+    "TaskRun",
     "TaskStatusSink",
 ]

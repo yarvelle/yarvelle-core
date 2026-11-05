@@ -226,7 +226,7 @@ class RouteDecision(_Strict):
 
 NoticeCode = Literal["model_unavailable", "main_agent_failed", "partial_failure", "truncated"]
 
-TaskState = Literal["started", "completed", "failed", "timed_out"]
+TaskState = Literal["started", "completed", "failed", "timed_out", "cancelled"]
 
 
 class SSETaskStatusEvent(_Strict):

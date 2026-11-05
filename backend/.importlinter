@@ -31,7 +31,7 @@ ignore_imports =
     yarvelle_core.engine.service -> yarvelle_core.workflows.nodes.base
     yarvelle_core.engine.service -> yarvelle_core.workflows.state
     yarvelle_core.engine.builder -> yarvelle_core.workflows.state
-    yarvelle_core.engine.builder -> yarvelle_core.workflows.dispatcher
+    yarvelle_core.engine.builder -> yarvelle_core.workflows.deliberation.node
     yarvelle_core.engine.builder -> yarvelle_core.workflows.nodes
     yarvelle_core.engine.graph -> yarvelle_core.workflows.nodes.tool_node
     yarvelle_core.engine.graph -> yarvelle_core.workflows.nodes.agent_node

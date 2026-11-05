@@ -43,7 +43,9 @@ from yarvelle_core.engine.orchestration.task_guard import (
     TASK_TOOL_NAME,
     AuditSink,
     OrchestrationAuditError,
+    SubagentCallCapMiddleware,
     TaskGuardMiddleware,
+    TaskRun,
     TaskStatusSink,
     _emit,
 )
@@ -85,6 +87,35 @@ class TurnOutcome:
     messages: List[BaseMessage] = field(default_factory=list)
     notices: List[SSEOrchestrationNoticeEvent] = field(default_factory=list)
     tasks_started: int = 0
+    tasks: List[TaskRun] = field(default_factory=list)
+
+
+def task_notices(turn_id: str, runs: Sequence[TaskRun]) -> List[SSEOrchestrationNoticeEvent]:
+    """Notices for hand-offs that failed, timed out or hit their call cap."""
+    notices: List[SSEOrchestrationNoticeEvent] = []
+    missing = sorted({r.agent_id for r in runs if r.state in ("failed", "timed_out")})
+    if missing:
+        count = len(missing)
+        notices.append(
+            SSEOrchestrationNoticeEvent(
+                turn_id=turn_id,
+                code="partial_failure",
+                message=f"{count} agent{'s' if count > 1 else ''} did not answer, so this reply may be incomplete.",
+                agent_ids=missing,
+            )
+        )
+    truncated = sorted({r.agent_id for r in runs if r.truncated})
+    if truncated:
+        count = len(truncated)
+        notices.append(
+            SSEOrchestrationNoticeEvent(
+                turn_id=turn_id,
+                code="truncated",
+                message=f"{count} agent{'s' if count > 1 else ''} stopped at the call limit, so this reply may be incomplete.",
+                agent_ids=truncated,
+            )
+        )
+    return notices
 
 
 def _subagent_specs(
@@ -105,6 +136,9 @@ def _subagent_specs(
         spec = dict(spec)
         spec["tools"] = tools
         spec.setdefault("model", model)
+        manifest = registry.get(spec["name"])
+        cap = SubagentCallCapMiddleware(spec["name"], getattr(manifest, "max_iterations", None))
+        spec["middleware"] = [*list(spec.get("middleware") or []), cap]
         specs.append(spec)
     return specs
 
@@ -280,7 +314,9 @@ class HybridRouter:
             if fallback is None:
                 raise
             await self.audit_route(fallback, turn_id, thread_id)
-            outcome = TurnOutcome(decision=fallback, turn_id=turn_id, tasks_started=guard.calls_made)
+            outcome = TurnOutcome(
+                decision=fallback, turn_id=turn_id, tasks_started=guard.calls_made, tasks=guard.runs,
+            )
             notice = self.notice_for(fallback, turn_id)
             if notice is not None:
                 outcome.notices.append(notice)
@@ -292,7 +328,9 @@ class HybridRouter:
             decision=decision,
             turn_id=turn_id,
             messages=new_messages,
+            notices=task_notices(turn_id, guard.runs),
             tasks_started=guard.calls_made,
+            tasks=guard.runs,
         )
 
 
@@ -312,4 +350,5 @@ __all__ = [
     "TurnOutcome",
     "build_main_agent",
     "final_answer",
+    "task_notices",
 ]
