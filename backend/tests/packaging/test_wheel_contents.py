@@ -74,7 +74,14 @@ def test_wheel_contains_all_content_and_entry_points(tmp_path: Path):
         assert "yarvelle_core/testing/orch_eval/provider_backend.py" in names
         assert "yarvelle_core/testing/orch_eval/report.py" in names
         assert "yarvelle_core/testing/orch_eval/baseline.py" in names
-        leaked = [n for n in names if n.startswith("evals/") or "/evals/orchestration/" in n or n.endswith("smoke-single-turn.yaml")]
+        assert "yarvelle_core/testing/orch_eval/cassette.py" in names
+        leaked = [
+            n for n in names
+            if n.startswith("evals/")
+            or "/evals/orchestration/" in n
+            or n.endswith("smoke-single-turn.yaml")
+            or "evals/orchestration/cassettes/" in n
+        ]
         assert not leaked, f"Built wheel contains local-only eval files: {leaked}"
 
         # Inspect entry_points.txt in .dist-info

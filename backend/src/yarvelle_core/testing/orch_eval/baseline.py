@@ -16,7 +16,8 @@ A baseline is a saved ``results.json``. Comparing a new run against it flags:
 * any hard-rule failure in the new run;
 * a drop of 10 or more points on one scenario score;
 * a drop of 5 or more points on the suite score;
-* p95 latency up 25% or more (when the baseline p95 is > 0);
+* p95 latency up 25% or more (paid runs only by default, or when
+  ``check_latency`` is set; fake/replay/ollama skip this);
 * cost up 20% or more (when the baseline cost is > 0).
 
 Regressions make the compare exit non-zero. Improvements are listed so a
@@ -157,9 +158,19 @@ def compare_runs(
     current: Mapping[str, Any],
     baseline: Mapping[str, Any],
     thresholds: Optional[Thresholds] = None,
+    *,
+    check_latency: Optional[bool] = None,
 ) -> CompareResult:
-    """Compares two enriched results documents."""
+    """Compares two enriched results documents.
+
+    ``check_latency`` defaults to True only for the paid ``provider`` backend.
+    Free backends (fake, replay, ollama) skip the p95 latency rule unless a
+    caller passes ``check_latency=True``.
+    """
     thr = thresholds or Thresholds()
+    backend_name = str((current.get("backend") or {}).get("backend") or "")
+    if check_latency is None:
+        check_latency = backend_name == "provider"
     cur_agg = current.get("aggregates") or compute_aggregates(current)
     base_agg = baseline.get("aggregates") or compute_aggregates(baseline)
     result = CompareResult(
@@ -234,28 +245,29 @@ def compare_runs(
             )
         )
 
-    base_p95 = (base_agg.get("latency_ms") or {}).get("p95")
-    cur_p95 = (cur_agg.get("latency_ms") or {}).get("p95")
-    if base_p95 is not None and cur_p95 is not None and float(base_p95) > 0:
-        rise = (float(cur_p95) - float(base_p95)) / float(base_p95)
-        if rise >= thr.latency_p95_rise:
-            result.regressions.append(
-                DiffItem(
-                    kind="latency_p95",
-                    detail=f"p95 latency rose {rise * 100:.1f}%",
-                    baseline=float(base_p95),
-                    current=float(cur_p95),
+    if check_latency:
+        base_p95 = (base_agg.get("latency_ms") or {}).get("p95")
+        cur_p95 = (cur_agg.get("latency_ms") or {}).get("p95")
+        if base_p95 is not None and cur_p95 is not None and float(base_p95) > 0:
+            rise = (float(cur_p95) - float(base_p95)) / float(base_p95)
+            if rise >= thr.latency_p95_rise:
+                result.regressions.append(
+                    DiffItem(
+                        kind="latency_p95",
+                        detail=f"p95 latency rose {rise * 100:.1f}%",
+                        baseline=float(base_p95),
+                        current=float(cur_p95),
+                    )
                 )
-            )
-        elif rise <= -thr.latency_p95_rise:
-            result.improvements.append(
-                DiffItem(
-                    kind="latency_p95",
-                    detail=f"p95 latency fell {-rise * 100:.1f}%",
-                    baseline=float(base_p95),
-                    current=float(cur_p95),
+            elif rise <= -thr.latency_p95_rise:
+                result.improvements.append(
+                    DiffItem(
+                        kind="latency_p95",
+                        detail=f"p95 latency fell {-rise * 100:.1f}%",
+                        baseline=float(base_p95),
+                        current=float(cur_p95),
+                    )
                 )
-            )
 
     base_cost = float(base_agg.get("cost_usd") or 0.0)
     cur_cost = float(cur_agg.get("cost_usd") or 0.0)

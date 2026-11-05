@@ -287,6 +287,8 @@ class ScenarioRunner:
             result.error = f"scenario wants pack {scenario.pack!r}, loaded pack is {self.pack.id!r}"
             result.skipped_turns = len(scenario.turns)
             return result
+        if hasattr(self.backend, "begin_scenario"):
+            self.backend.begin_scenario(pack_id=self.pack.id, scenario_id=scenario.id)
         if hasattr(self.backend, "set_agents"):
             self.backend.set_agents(self.pack.agent_ids)
         spec = self._spec(scenario)
@@ -322,6 +324,8 @@ class ScenarioRunner:
             if trace.error and turn.expect.error_matches is None and not turn.expect.cancelled:
                 result.skipped_turns = len(scenario.turns) - number
                 break
+        if hasattr(self.backend, "flush"):
+            self.backend.flush()
         return result
 
     async def _run_turn(

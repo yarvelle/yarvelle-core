@@ -26,13 +26,16 @@ test:
     pnpm --dir frontend test
 
 # Run the local-only orchestration evals (refuses to run on CI)
-# backend=fake|ollama|provider  max_usd=N (required for provider)
-eval-orch backend="fake" max_usd="0" scenario="":
+# backend=fake|replay|ollama|provider  max_usd=N (required for provider)
+# record=1 writes cassettes for ollama/provider; cassette=PATH overrides the root
+eval-orch backend="fake" max_usd="0" scenario="" record="0" cassette="":
     #!/usr/bin/env bash
     set -euo pipefail
     extra=()
     if [[ -n "{{scenario}}" ]]; then extra+=(--scenario "{{scenario}}"); fi
     if [[ "{{backend}}" == "provider" ]]; then extra+=(--max-usd "{{max_usd}}"); fi
+    if [[ "{{record}}" == "1" ]]; then extra+=(--record); fi
+    if [[ -n "{{cassette}}" ]]; then extra+=(--cassette "{{cassette}}"); fi
     YARVELLE_EVAL=1 PYTHONPATH=backend/src uv run --project backend python -m yarvelle_core.testing.orch_eval run --backend "{{backend}}" "${extra[@]}" backend/evals/orchestration/scenarios
 
 # Run all linters (Python, TypeScript, tokens, import boundaries, license headers)
