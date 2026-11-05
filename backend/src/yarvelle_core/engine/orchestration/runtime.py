@@ -27,6 +27,8 @@ no filesystem tools. Hidden agents are never offered.
 
 from __future__ import annotations
 
+import asyncio
+
 import logging
 import uuid
 from dataclasses import dataclass, field
@@ -568,6 +570,13 @@ class HybridRouter:
             )
             result = await agent.ainvoke({"messages": list(state.get("messages") or [])})
         except OrchestrationAuditError:
+            raise
+        except asyncio.CancelledError:
+            # Persist hand-offs that already started, then let cancel propagate.
+            await store_turn_tasks(
+                self.task_sink,
+                build_turn_tasks(records, guard.runs, titles, turn_id=turn_id, thread_id=thread_id),
+            )
             raise
         except Exception as err:
             logger.warning("Main agent failed: %s", type(err).__name__)

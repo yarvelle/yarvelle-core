@@ -1014,6 +1014,12 @@ class OrchestratorNode(BaseNode):
                 return self._no_route_error("no model is configured")
         elif self.main_agent_enabled:
             # The main agent hands work to registered agents through the task tool.
+            # Commit the route into state here, before the long-running main_agent
+            # node, so a user cancel mid-hand-off still leaves route_decision and
+            # current_agent on the checkpoint (the main_agent node may not finish).
+            route_decision = RouteDecision(source=RouteSource.MAIN_AGENT).model_dump(
+                mode="json", exclude_none=True
+            )
             out: Dict[str, Any] = {
                 "current_agent": MAIN_AGENT_ID,
                 "routed_subgraph": MAIN_AGENT_ID,
@@ -1021,6 +1027,7 @@ class OrchestratorNode(BaseNode):
                 "orchestrator_reasoning": "Main agent coordinates this turn.",
                 "orchestrator_instructions": "",
                 "next_step": MAIN_AGENT_ID,
+                "route_decision": route_decision,
             }
             if rejected is not None:
                 out["explicit_agent"] = None

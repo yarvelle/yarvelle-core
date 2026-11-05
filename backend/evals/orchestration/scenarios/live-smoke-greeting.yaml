@@ -1,0 +1,17 @@
+# Live-backend smoke: greeting should stay on the main agent with no hand-off.
+# Expectations stay loose so a real model can vary wording without failing.
+schema: 1
+id: live-smoke-greeting
+title: Greeting stays on the main agent
+tags: [smoke, live]
+pack: eval-neutral
+backends: [ollama, provider]
+samples: {ollama: 1, provider: 1}
+turns:
+  - user: "Hi there!"
+    expect:
+      route: main_agent
+      agents_forbidden: [internal-auditor]
+      max_task_calls: 1
+      answer:
+        must_not_mention: ["internal-auditor", "Response from"]

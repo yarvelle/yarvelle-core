@@ -134,6 +134,7 @@ def test_node_refused_pick_goes_to_the_main_agent(registry: AgentRegistry) -> No
     result = asyncio.run(node.execute(_turn(explicit_agent="secret-helper")))
     assert sink.kinds() == ["route.rejected"]
     assert result["next_step"] == MAIN_AGENT_ID and result["explicit_agent"] is None
+    assert result["route_decision"] == {"source": "main_agent"}
 
 
 def test_node_keeps_visible_picks_and_the_orchestrator(registry: AgentRegistry) -> None:

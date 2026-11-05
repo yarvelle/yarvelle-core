@@ -68,6 +68,10 @@ def test_wheel_contains_all_content_and_entry_points(tmp_path: Path):
         # scenarios under backend/evals never do.
         assert "yarvelle_core/testing/orch_eval/__init__.py" in names
         assert "yarvelle_core/testing/orch_eval/guard.py" in names
+        assert "yarvelle_core/testing/orch_eval/cost.py" in names
+        assert "yarvelle_core/testing/orch_eval/cost.yaml" in names
+        assert "yarvelle_core/testing/orch_eval/ollama_backend.py" in names
+        assert "yarvelle_core/testing/orch_eval/provider_backend.py" in names
         leaked = [n for n in names if n.startswith("evals/") or "/evals/orchestration/" in n or n.endswith("smoke-single-turn.yaml")]
         assert not leaked, f"Built wheel contains local-only eval files: {leaked}"
 

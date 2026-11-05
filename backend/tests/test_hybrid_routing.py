@@ -354,6 +354,8 @@ def test_orchestrator_node_hands_model_turns_to_main_agent(registry: AgentRegist
     node = OrchestratorNode(model=model, registry=registry, orchestration=_spec(), main_agent_enabled=True)
     result = asyncio.run(node.execute(_turn("plan a weekend")))
     assert result["next_step"] == "main-agent"
+    assert result["route_decision"] == {"source": "main_agent"}
+    assert result["current_agent"] == "main-agent"
     assert model.calls == 0
 
 

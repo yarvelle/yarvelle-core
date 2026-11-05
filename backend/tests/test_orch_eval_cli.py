@@ -169,3 +169,22 @@ def test_import_does_not_load_provider_sdks():
         [sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=120, check=False
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_run_provider_refuses_without_max_usd(local_env, capsys):
+    local_env.setenv("YARVELLE_EVAL", "1")
+    local_env.delenv("OPENAI_API_KEY", raising=False)
+    code = main(["run", "--backend", "provider", "--scenario", "live-smoke-greeting", str(SCENARIOS_DIR)])
+    assert code == 2
+    assert "--max-usd" in capsys.readouterr().err
+
+
+def test_run_estimate_provider_no_network(local_env, capsys):
+    local_env.setenv("YARVELLE_EVAL", "1")
+    code = main([
+        "run", "--backend", "provider", "--estimate", "--max-usd", "1",
+        "--scenario", "live-smoke-greeting", str(SCENARIOS_DIR),
+    ])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert '"usd"' in out
