@@ -48,8 +48,19 @@ class OllamaStatus:
     def has(self, name: str) -> bool:
         if name in self.models:
             return True
-        # Accept "qwen3:8b" when tags list "qwen3:8b" or exact match only.
-        return any(m == name or m.startswith(name + "-") for m in self.models)
+        # Accept "glm-4.7-flash" when tags list "glm-4.7-flash:latest", and the
+        # reverse; also keep the prior prefix match for quantized variants.
+        aliases = {name}
+        if name.endswith(":latest"):
+            aliases.add(name[: -len(":latest")])
+        else:
+            aliases.add(f"{name}:latest")
+        for m in self.models:
+            if m in aliases or m == name or m.startswith(name + "-"):
+                return True
+            if m.endswith(":latest") and m[: -len(":latest")] in aliases:
+                return True
+        return False
 
 
 def probe_ollama(base_url: str = DEFAULT_OLLAMA_BASE_URL, timeout_s: float = 2.0) -> OllamaStatus:

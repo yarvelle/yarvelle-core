@@ -199,7 +199,37 @@ class FaultInjectingFakeModel(BaseChatModel):
             self.cancelled.append(role)
             raise
 
+    def _invoke_config(self, run_manager: Any) -> Dict[str, Any]:
+        """Rebuild a runnable config so role tags/metadata reach the inner model."""
+        if run_manager is None:
+            return {}
+        config: Dict[str, Any] = {}
+        tags = list(getattr(run_manager, "tags", None) or [])
+        meta = dict(getattr(run_manager, "metadata", None) or {})
+        if tags:
+            config["tags"] = tags
+        if meta:
+            config["metadata"] = meta
+        return config
+
     async def _call_inner(self, messages: List[BaseMessage], run_manager: Any) -> BaseMessage:
+        # Prefer ainvoke so a bind_tools RunnableBinding forwards its tools.
+        # Calling ``_agenerate`` on the bound runnable drops tool kwargs, and
+        # live Ollama subjects then answer in prose instead of emitting
+        # ``tool_calls`` (so hand-off scenarios never see a task start).
+        config = self._invoke_config(run_manager)
+        if hasattr(self.inner, "ainvoke"):
+            result = await self.inner.ainvoke(messages, config=config or None)
+            if isinstance(result, BaseMessage):
+                return result
+            generations = getattr(result, "generations", None)
+            if generations:
+                first = generations[0]
+                if isinstance(first, list):
+                    first = first[0]
+                message = getattr(first, "message", None)
+                if isinstance(message, BaseMessage):
+                    return message
         if hasattr(self.inner, "_agenerate"):
             result = await self.inner._agenerate(messages, run_manager=run_manager)
             return result.generations[0].message

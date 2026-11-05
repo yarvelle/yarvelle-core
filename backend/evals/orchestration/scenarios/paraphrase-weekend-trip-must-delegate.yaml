@@ -1,0 +1,63 @@
+# Strict live paraphrase: every wording must hand work to the trip and budget
+# specialists (non-empty agent set), and later turns must match turn 1 exactly.
+# Soft smoke paraphrase-weekend-trip allows an empty set; this one does not.
+schema: 1
+id: paraphrase-weekend-trip-must-delegate
+title: Paraphrased trip requests must keep the same non-empty agent set
+tags: [paraphrase, metamorphic, live, must-delegate]
+pack: eval-neutral
+backends: [fake, ollama, replay]
+samples: {fake: 1, ollama: 1}
+limits:
+  agent_timeout_s: 60
+  turn_timeout_s: 180
+turns:
+  - user: "Plan a weekend in Austin for two, under 600 dollars. Use the trip and budget specialists."
+    expect:
+      route: main_agent
+      agents_all_of: [trip-organizer, budget-planner]
+      agents_forbidden: [internal-auditor, writing-coach, escalation-desk]
+      min_task_calls: 2
+      max_task_calls: 3
+      notices: []
+      answer:
+        must_not_mention: ["internal-auditor"]
+    fake:
+      main:
+        - task: [trip-organizer, budget-planner]
+        - answer: "Austin plan: two nights on South Congress, all within $600."
+      agents:
+        trip-organizer: ["Two nights on South Congress, barbecue on Saturday."]
+        budget-planner: ["Lodging 380, food 150, transport 70: total 600."]
+  - user: "Could you put together a two-person Austin weekend that stays under six hundred? Hand it to the trip and budget specialists again."
+    expect:
+      route: main_agent
+      agents_all_of: [trip-organizer, budget-planner]
+      same_agents_as_turn: {turn: 1, mode: equal}
+      agents_forbidden: [internal-auditor]
+      min_task_calls: 2
+      max_task_calls: 3
+      notices: []
+    fake:
+      main:
+        - task: [trip-organizer, budget-planner]
+        - answer: "Same Austin weekend under $600: South Congress stay, Saturday barbecue."
+      agents:
+        trip-organizer: ["South Congress stay, Saturday barbecue."]
+        budget-planner: ["Still about 600 total."]
+  - user: "We need an Austin weekend for a couple, budget capped at 600. Route it through the trip organizer and budget planner."
+    expect:
+      route: main_agent
+      agents_all_of: [trip-organizer, budget-planner]
+      same_agents_as_turn: {turn: 1, mode: equal}
+      agents_forbidden: [internal-auditor]
+      min_task_calls: 2
+      max_task_calls: 3
+      notices: []
+    fake:
+      main:
+        - task: [trip-organizer, budget-planner]
+        - answer: "Couple's Austin weekend, capped at $600, ready to book."
+      agents:
+        trip-organizer: ["Couple's Austin weekend outline."]
+        budget-planner: ["Capped at 600."]

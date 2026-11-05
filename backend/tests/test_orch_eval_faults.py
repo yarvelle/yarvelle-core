@@ -184,3 +184,32 @@ def test_bind_tools_accepts_non_chat_model_binding():
     bound = wrapped.bind_tools([])
     assert isinstance(bound, FaultInjectingFakeModel)
     assert not hasattr(bound.inner, "_llm_type")  # binding, not a chat model
+
+
+def test_bind_tools_preserves_tool_calls_from_binding():
+    """bind_tools wrappers must keep tool_calls when the inner is a RunnableBinding."""
+    from langchain_core.runnables import RunnableLambda
+
+    class _Providerish:
+        def bind_tools(self, tools, **kwargs):
+            def _run(messages):
+                return AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "task",
+                            "id": "t1",
+                            "args": {"agent_id": "trip-organizer", "instruction": "plan"},
+                        }
+                    ],
+                )
+
+            return RunnableLambda(_run)
+
+    wrapped = FaultInjectingFakeModel(inner=_Providerish())  # type: ignore[arg-type]
+    bound = wrapped.bind_tools([])
+    bound.set_turn(1, FaultPlan())
+    result = asyncio.run(bound._agenerate([HumanMessage(content="hi")]))
+    msg = result.generations[0].message
+    assert msg.tool_calls and msg.tool_calls[0]["name"] == "task"
+    assert msg.tool_calls[0]["args"]["agent_id"] == "trip-organizer"

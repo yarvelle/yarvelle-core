@@ -13,8 +13,10 @@
 
 from __future__ import annotations
 
-# Subject model under test (tool-calling, 8B class). Exact Ollama tag.
-DEFAULT_OLLAMA_SUBJECT_MODEL = "qwen3:8b"
+# Subject model under test (tool-calling). Exact Ollama tag.
+# glm-4.7-flash delegates via the task tool more reliably than qwen3:8b
+# on the live hybrid main agent; pass --model qwen3:8b to select qwen.
+DEFAULT_OLLAMA_SUBJECT_MODEL = "glm-4.7-flash:latest"
 
 # Separate-family judge model (8B class). Exact Ollama tag.
 DEFAULT_OLLAMA_JUDGE_MODEL = "llama3.1:8b"
