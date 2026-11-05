@@ -74,6 +74,19 @@ class TaskRun:
     task_id: str
     state: str = "started"
     truncated: bool = False
+    lc_agent_name: Optional[str] = None
+    """Agent name the subagent run reported (``lc_agent_name`` run metadata)."""
+
+
+def _run_agent_name() -> Optional[str]:
+    """``lc_agent_name`` of the agent run that is executing right now."""
+    try:
+        from langgraph.config import get_config
+
+        name = (get_config().get("metadata") or {}).get("lc_agent_name")
+    except Exception:
+        return None
+    return str(name) if name else None
 
 
 _ACTIVE_TASK: ContextVar[Optional[TaskRun]] = ContextVar("yarvelle_active_task", default=None)
@@ -101,9 +114,11 @@ class SubagentCallCapMiddleware(AgentMiddleware):
     def before_model(self, state: Any, runtime: Any) -> Optional[Dict[str, Any]]:
         messages = state.get("messages") or [] if isinstance(state, dict) else getattr(state, "messages", [])
         calls = sum(1 for m in messages if isinstance(m, AIMessage))
+        run = _ACTIVE_TASK.get()
+        if run is not None and run.lc_agent_name is None:
+            run.lc_agent_name = _run_agent_name()
         if calls < self.max_model_calls:
             return None
-        run = _ACTIVE_TASK.get()
         if run is not None:
             run.truncated = True
         return {"jump_to": "end", "messages": [AIMessage(content=TRUNCATED_TEXT)]}
@@ -162,8 +177,10 @@ class TaskGuardMiddleware(AgentMiddleware):
         turn_id: Optional[str] = None,
         parent_task_id: Optional[str] = None,
         thread_id: Optional[str] = None,
+        agent_titles: Optional[Dict[str, str]] = None,
     ) -> None:
         super().__init__()
+        self.agent_titles = dict(agent_titles or {})
         self.allowed_agents = frozenset(allowed_agents)
         self.limits = limits or OrchestrationLimits()
         self.agent_timeouts = dict(agent_timeouts or {})
@@ -192,6 +209,10 @@ class TaskGuardMiddleware(AgentMiddleware):
         self._budget = _TurnBudget()
         if turn_id:
             self.turn_id = turn_id
+
+    def _title(self, agent_id: str) -> str:
+        """User-facing name for an agent; error texts never carry raw ids of known agents."""
+        return self.agent_titles.get(agent_id) or agent_id
 
     def _timeout_for(self, agent_id: str) -> float:
         per_agent = min(self.agent_timeouts.get(agent_id, self.limits.agent_timeout_s), self.limits.agent_timeout_s)
@@ -298,7 +319,7 @@ class TaskGuardMiddleware(AgentMiddleware):
                 error_code="limit.agent_timeout", duration_ms=(time.monotonic() - started) * 1000,
             )
             await self._status(agent_id, task_id, "timed_out", f"no answer within {timeout:g}s")
-            return self._error(task_id, f"Agent '{agent_id}' did not answer within {timeout:g}s.")
+            return self._error(task_id, f"{self._title(agent_id)} did not answer within {timeout:g}s.")
         except OrchestrationAuditError:
             raise
         except Exception as err:
@@ -309,7 +330,7 @@ class TaskGuardMiddleware(AgentMiddleware):
                 duration_ms=(time.monotonic() - started) * 1000,
             )
             await self._status(agent_id, task_id, "failed")
-            return self._error(task_id, f"Agent '{agent_id}' failed to answer.")
+            return self._error(task_id, f"{self._title(agent_id)} failed to answer.")
         finally:
             _ACTIVE_TASK.reset(token)
 

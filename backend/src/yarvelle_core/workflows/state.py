@@ -169,6 +169,7 @@ class AgentState(TypedDict, total=False):
     guardrail_flags: List[str]
     route_decision: Optional[Dict[str, Any]]
     orchestration_notices: List[Dict[str, Any]]
+    provenance: List[Dict[str, Any]]
 
     # Phase 1 Cognitive Memory Recall fields (Phase3, R3)
     recalled_memories: List[Dict[str, Any]]

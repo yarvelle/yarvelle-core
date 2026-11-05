@@ -56,6 +56,8 @@ from yarvelle_core.schemas.orchestration import (
     RouteDecision,
     RouteSource,
     SSEOrchestrationNoticeEvent,
+    SynthesisSpec,
+    TaskProvenance,
 )
 
 logger = logging.getLogger(__name__)
@@ -66,8 +68,17 @@ MAIN_AGENT_PROMPT = (
     "You coordinate a team of specialist agents. Answer directly when no "
     "specialist is needed. Otherwise hand each part of the request to the best "
     "matching agent with the task tool, then combine their answers into one "
-    "reply. Use only the listed agents."
+    "reply. Use only the listed agents. If an agent fails, times out or stops "
+    "early, say in the reply which part is missing. Refer to agents by their "
+    "titles, never by their ids."
 )
+
+_TERMINAL_EVENTS = {
+    "task.completed": "completed",
+    "task.failed": "failed",
+    "task.timed_out": "timed_out",
+    "task.cancelled": "cancelled",
+}
 
 ToolResolver = Callable[[str, List[str]], List[Any]]
 """Maps (agent_id, declared tool names) to runnable tools for that subagent."""
@@ -88,6 +99,90 @@ class TurnOutcome:
     notices: List[SSEOrchestrationNoticeEvent] = field(default_factory=list)
     tasks_started: int = 0
     tasks: List[TaskRun] = field(default_factory=list)
+    provenance: List[TaskProvenance] = field(default_factory=list)
+
+
+def compose_main_prompt(base: Optional[str] = None, synthesis: Optional[SynthesisSpec] = None) -> str:
+    """Main agent system prompt: the base prompt plus the pack's synthesis instructions."""
+    prompt = base or MAIN_AGENT_PROMPT
+    extra = (synthesis.instructions if synthesis is not None else "").strip()
+    if not extra:
+        return prompt
+    return f"{prompt}\n\nHow to compose the reply:\n{extra}"
+
+
+def build_provenance(
+    runs: Sequence[TaskRun],
+    audit_records: Sequence[AuditEvent],
+    titles: Mapping[str, str],
+) -> List[TaskProvenance]:
+    """One entry per hand-off, in request order, from the turn's audit records.
+
+    The terminal ``task.*`` record decides the state and carries the output
+    hash; the run supplies the truncation flag and the reporting agent name.
+    """
+    terminal: Dict[str, AuditEvent] = {}
+    for record in audit_records:
+        if record.task_id and record.event in _TERMINAL_EVENTS:
+            terminal[str(record.task_id)] = record
+    out: List[TaskProvenance] = []
+    for run in runs:
+        record = terminal.get(run.task_id)
+        state = _TERMINAL_EVENTS[record.event] if record is not None else run.state
+        out.append(
+            TaskProvenance(
+                task_id=run.task_id,
+                agent_id=run.agent_id,
+                agent_title=titles.get(run.agent_id) or run.agent_id,
+                state=state,  # type: ignore[arg-type]
+                truncated=run.truncated,
+                output_hash=getattr(record, "output_hash", None) if record is not None else None,
+                verified=run.lc_agent_name == run.agent_id,
+            )
+        )
+    return out
+
+
+def _join(titles: Sequence[str]) -> str:
+    if len(titles) <= 2:
+        return " and ".join(titles)
+    return ", ".join(titles[:-1]) + f" and {titles[-1]}"
+
+
+_GAP_STATES = ("failed", "timed_out", "cancelled")
+
+
+def gap_statement(provenance: Sequence[TaskProvenance]) -> Optional[str]:
+    """Plain sentence naming agents that did not answer or stopped early."""
+    missing = list(dict.fromkeys(p.agent_title for p in provenance if p.state in _GAP_STATES))
+    truncated = list(dict.fromkeys(p.agent_title for p in provenance if p.truncated and p.agent_title not in missing))
+    parts: List[str] = []
+    if missing:
+        parts.append(f"{_join(missing)} did not answer, so that part is missing from this reply.")
+    if truncated:
+        parts.append(f"{_join(truncated)} stopped early at the call limit, so that part may be incomplete.")
+    return " ".join(parts) or None
+
+
+def state_gaps(messages: List[BaseMessage], provenance: Sequence[TaskProvenance]) -> List[BaseMessage]:
+    """Makes sure the final answer names every missing or truncated agent.
+
+    The main agent is asked to do this itself; when its answer does not name
+    an affected agent, the gap sentence is appended to that answer.
+    """
+    statement = gap_statement(provenance)
+    if statement is None:
+        return messages
+    answer = final_answer(messages)
+    if answer is None:
+        return [*messages, AIMessage(content=statement)]
+    text = answer.content if isinstance(answer.content, str) else str(answer.content)
+    affected = {p.agent_title for p in provenance if p.truncated or p.state in _GAP_STATES}
+    if all(title.lower() in text.lower() for title in affected):
+        return messages
+    content = f"{text.rstrip()}\n\n{statement}" if text.strip() else statement
+    updated = answer.model_copy(update={"content": content})
+    return [updated if m is answer else m for m in messages]
 
 
 def task_notices(turn_id: str, runs: Sequence[TaskRun]) -> List[SSEOrchestrationNoticeEvent]:
@@ -170,7 +265,7 @@ def build_main_agent(
     return create_agent(
         model,
         tools=[],
-        system_prompt=system_prompt or MAIN_AGENT_PROMPT,
+        system_prompt=system_prompt or compose_main_prompt(),
         middleware=middleware,
         checkpointer=checkpointer,
         name=MAIN_AGENT_ID,
@@ -198,7 +293,7 @@ class HybridRouter:
         self.default_agent = (spec.default_agent if spec is not None else None) or default_agent
         self.audit_sink = audit_sink
         self.status_sink = status_sink
-        self.system_prompt = system_prompt
+        self.system_prompt = compose_main_prompt(system_prompt, spec.synthesis if spec is not None else None)
         self.tool_resolver = tool_resolver
 
     @property
@@ -257,6 +352,14 @@ class HybridRouter:
         except Exception as err:
             raise OrchestrationAuditError(f"could not record {event}") from err
 
+    def _agent_titles(self) -> Dict[str, str]:
+        out: Dict[str, str] = {}
+        for manifest in self.registry.get_delegatable_agents(exclude=""):
+            title = getattr(manifest, "title", None)
+            if isinstance(title, str) and title.strip():
+                out[manifest.id] = title.strip()
+        return out
+
     def _agent_timeouts(self) -> Dict[str, float]:
         out: Dict[str, float] = {}
         for manifest in self.registry.get_delegatable_agents(exclude=""):
@@ -291,11 +394,20 @@ class HybridRouter:
             return outcome
 
         assert self.model is not None
+        records: List[AuditEvent] = []
+        downstream = self.audit_sink
+
+        async def _recording_sink(record: AuditEvent) -> None:
+            await _emit(downstream, record)  # strict: a failed write stops the turn first
+            records.append(record)
+
+        titles = self._agent_titles()
         guard = TaskGuardMiddleware(
             allowed_agents=[a.id for a in self.registry.get_delegatable_agents(exclude="")],
             limits=self.limits,
             agent_timeouts=self._agent_timeouts(),
-            audit_sink=self.audit_sink,
+            agent_titles=titles,
+            audit_sink=_recording_sink,
             status_sink=self.status_sink,
             turn_id=turn_id,
             thread_id=thread_id,
@@ -316,6 +428,7 @@ class HybridRouter:
             await self.audit_route(fallback, turn_id, thread_id)
             outcome = TurnOutcome(
                 decision=fallback, turn_id=turn_id, tasks_started=guard.calls_made, tasks=guard.runs,
+                provenance=build_provenance(guard.runs, records, titles),
             )
             notice = self.notice_for(fallback, turn_id)
             if notice is not None:
@@ -324,10 +437,12 @@ class HybridRouter:
 
         before = len(state.get("messages") or [])
         new_messages = list(result.get("messages") or [])[before:]
+        provenance = build_provenance(guard.runs, records, titles)
         return TurnOutcome(
             decision=decision,
             turn_id=turn_id,
-            messages=new_messages,
+            messages=state_gaps(new_messages, provenance),
+            provenance=provenance,
             notices=task_notices(turn_id, guard.runs),
             tasks_started=guard.calls_made,
             tasks=guard.runs,
@@ -349,6 +464,10 @@ __all__ = [
     "ToolResolver",
     "TurnOutcome",
     "build_main_agent",
+    "build_provenance",
+    "compose_main_prompt",
     "final_answer",
+    "gap_statement",
+    "state_gaps",
     "task_notices",
 ]

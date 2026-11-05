@@ -213,6 +213,9 @@
         },
         "limits": {
           "$ref": "#/$defs/OrchestrationLimits"
+        },
+        "synthesis": {
+          "$ref": "#/$defs/SynthesisSpec"
         }
       },
       "required": [
@@ -546,6 +549,21 @@
         "id"
       ],
       "title": "ScopeDefinitionSpec",
+      "type": "object"
+    },
+    "SynthesisSpec": {
+      "additionalProperties": false,
+      "description": "How the main agent composes its reply (``orchestration.synthesis``).",
+      "properties": {
+        "instructions": {
+          "default": "",
+          "description": "Extra guidance appended to the main agent's system prompt for composing the reply.",
+          "maxLength": 4000,
+          "title": "Instructions",
+          "type": "string"
+        }
+      },
+      "title": "SynthesisSpec",
       "type": "object"
     }
   },

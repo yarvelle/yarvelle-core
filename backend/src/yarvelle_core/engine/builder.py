@@ -189,6 +189,20 @@ class GraphBuilder:
         self.include_deliberation = enabled
         return self
 
+    def _agent_titles(self) -> Dict[str, str]:
+        """Registry titles by agent id, for user-facing agent names."""
+        if self.registry is None:
+            return {}
+        out: Dict[str, str] = {}
+        try:
+            for manifest in self.registry.list_agents():
+                title = getattr(manifest, "title", None)
+                if isinstance(title, str) and title.strip():
+                    out[manifest.id] = title.strip()
+        except Exception:
+            return {}
+        return out
+
     def with_response_synthesizer(self, enabled: bool = True) -> GraphBuilder:
         """Enable or disable response synthesizer node."""
         self.include_synthesizer = enabled
@@ -436,7 +450,7 @@ class GraphBuilder:
         synthesizer_node = (
             self._custom_nodes.get("response_synthesizer")
             or self._custom_nodes.get("synthesizer")
-            or (ResponseSynthesizerNode(model=self.model) if self.include_synthesizer else None)
+            or (ResponseSynthesizerNode(model=self.model, agent_titles=self._agent_titles()) if self.include_synthesizer else None)
         )
 
         # Helper for defensive node invocation with optional store injection
