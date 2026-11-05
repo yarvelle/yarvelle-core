@@ -54,6 +54,7 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Checkpoint Encryption: checkpoint-encryption.md
   - Architecture Decision Records:
       - ADR Overview: adr/README.md
       - 0000 - ADR Template: adr/0000-template.md

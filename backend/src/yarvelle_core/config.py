@@ -186,6 +186,14 @@ class Settings(BaseSettings):
     # SQLite checkpointer database path
     db_path: Optional[Path] = None
 
+    # Checkpoint encryption at rest (opt-in). The key is derived from the vault KEK.
+    # checkpoint_plaintext_reads keeps legacy plaintext rows readable during migration;
+    # turn it off once 'checkpoints encrypt' has run. Bump checkpoint_key_version to
+    # rotate (older versions stay readable; 'checkpoints encrypt' re-encrypts them).
+    checkpoint_encryption: bool = False
+    checkpoint_plaintext_reads: bool = True
+    checkpoint_key_version: int = Field(default=1, ge=1)
+
     # Relational Database configuration (R1)
     database_url: Optional[str] = Field(
         default=None,
