@@ -142,6 +142,12 @@ class TurnExpectation(_Strict):
     deliberation: Optional[bool] = None
     model_calls_before_route: Optional[int] = Field(default=None, ge=0)
     budget: Optional[BudgetExpectation] = None
+    cancelled: Optional[bool] = None
+    error_matches: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        description="Substring or /regex/ the turn's error must match.",
+    )
 
     @model_validator(mode="after")
     def _check(self) -> "TurnExpectation":
@@ -234,10 +240,64 @@ class Turn(_Strict):
     expect: TurnExpectation = Field(default_factory=TurnExpectation)
     judge: Optional[JudgeSpec] = None
     fake: Optional[FakeScript] = None
+    restart_before: bool = False
+    cancel_after_ms: Optional[int] = Field(default=None, gt=0)
 
 
 class ScenarioLimits(_Strict):
     max_agents: Optional[int] = Field(default=None, ge=1)
+    agent_timeout_s: Optional[float] = Field(default=None, gt=0)
+    turn_timeout_s: Optional[float] = Field(default=None, gt=0)
+
+
+FaultMode = Literal[
+    "timeout",
+    "error",
+    "truncate",
+    "slow",
+    "empty",
+    "garbage",
+    "inject",
+    "audit_error",
+]
+
+
+class FaultSpec(_Strict):
+    """One injected fault for a turn.
+
+    ``agent`` is an agent id, ``main``, or ``*`` (every subagent). Omit it for
+    a turn-level cancel (``cancel_after_ms``). ``after_calls`` skips the first
+    N-1 calls to that role so a mid-turn failure can be scripted.
+    """
+
+    turn: int = Field(..., ge=1)
+    agent: Optional[str] = Field(default=None, pattern=r"^(main|\*|[a-z0-9][a-z0-9_-]{0,63})$")
+    mode: Optional[FaultMode] = None
+    delay_s: Optional[float] = Field(default=None, gt=0)
+    cancel_after_ms: Optional[int] = Field(default=None, gt=0)
+    after_calls: int = Field(default=1, ge=1)
+    tool: Optional[str] = Field(default=None, pattern=r"^[a-z][a-z0-9_]{0,63}$")
+    message: Optional[str] = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def _one_kind(self) -> "FaultSpec":
+        if self.cancel_after_ms is not None:
+            if self.mode is not None or self.agent not in (None, "*"):
+                raise ValueError("cancel_after_ms stands alone (optional agent '*' only)")
+            return self
+        if self.mode is None:
+            raise ValueError("a fault needs a mode, or cancel_after_ms")
+        if self.mode == "audit_error":
+            if self.agent not in (None, "*", "main"):
+                raise ValueError("audit_error applies to the turn, not one agent")
+            return self
+        if self.agent is None:
+            raise ValueError(f"fault mode {self.mode!r} needs an agent (id, 'main', or '*')")
+        if self.mode == "slow" and self.delay_s is None:
+            raise ValueError("mode 'slow' needs delay_s")
+        if self.mode == "truncate" and self.tool is None:
+            raise ValueError("mode 'truncate' needs tool (the no-op tool to keep calling)")
+        return self
 
 
 class Scenario(_Strict):
@@ -252,6 +312,8 @@ class Scenario(_Strict):
     samples: dict[BackendName, int] = Field(default_factory=dict)
     limits: Optional[ScenarioLimits] = None
     routing: RoutingMode = "hybrid"
+    faults: list[FaultSpec] = Field(default_factory=list)
+    encrypt_checkpoints: bool = False
     turns: list[Turn] = Field(..., min_length=1)
 
     model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
@@ -274,7 +336,14 @@ class Scenario(_Strict):
                 )
             if turn.fake is not None and "fake" not in self.backends:
                 raise ValueError(f"turn {index}: has a 'fake' script but 'fake' is not a listed backend")
+        for fault in self.faults:
+            if fault.turn > len(self.turns):
+                raise ValueError(f"fault targets turn {fault.turn}, but the scenario has {len(self.turns)} turn(s)")
         return self
+
+    def faults_for(self, turn: int) -> list[FaultSpec]:
+        """Faults that apply to 1-based turn number ``turn``."""
+        return [f for f in self.faults if f.turn == turn]
 
     def samples_for(self, backend: BackendName) -> int:
         """Number of runs for ``backend``: one for scripted backends, three otherwise."""
