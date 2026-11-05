@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -26,6 +27,7 @@ from yarvelle_core.testing.orch_eval.guard import CI_ENV_VARS, EXIT_CI_REFUSED, 
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 SCENARIOS_DIR = BACKEND_DIR / "evals" / "orchestration" / "scenarios"
+PACK_DIR = BACKEND_DIR / "evals" / "orchestration" / "pack"
 
 
 @pytest.fixture
@@ -47,7 +49,7 @@ def test_help_works_locally_without_opt_in(local_env, capsys):
     assert "usage: yarvelle-core eval orchestration" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("argv", [[], ["--help"], ["lint", "x"]])
+@pytest.mark.parametrize("argv", [[], ["--help"], ["lint", "x"], ["run", "x"]])
 def test_refuses_everything_on_ci(local_env, capsys, argv):
     local_env.setenv("YARVELLE_EVAL", "1")
     local_env.setenv("GITHUB_ACTIONS", "true")
@@ -68,6 +70,68 @@ def test_lint_invalid(local_env, capsys, tmp_path: Path):
     (tmp_path / "bad.yaml").write_text("schema: 1\nid: x\n", encoding="utf-8")
     assert main(["lint", str(tmp_path)]) == 1
     assert "Scenario error" in capsys.readouterr().err
+
+
+def test_lint_checks_agent_ids_against_pack(local_env, capsys, tmp_path: Path):
+    local_env.setenv("YARVELLE_EVAL", "1")
+    (tmp_path / "s.yaml").write_text(
+        "schema: 1\nid: s\ntitle: t\npack: eval-neutral\nbackends: [fake]\n"
+        "turns:\n  - user: hi\n    expect: {agents_exactly: [no-such-agent]}\n",
+        encoding="utf-8",
+    )
+    assert main(["lint", "--pack", str(PACK_DIR), str(tmp_path)]) == 1
+    assert "no-such-agent" in capsys.readouterr().err
+
+
+def test_lint_reports_missing_pack(local_env, capsys, tmp_path: Path):
+    local_env.setenv("YARVELLE_EVAL", "1")
+    (tmp_path / "s.yaml").write_text(
+        "schema: 1\nid: s\ntitle: t\npack: nowhere\nbackends: [fake]\nturns:\n  - user: hi\n",
+        encoding="utf-8",
+    )
+    assert main(["lint", str(tmp_path)]) == 1
+    assert "pass --pack" in capsys.readouterr().err
+
+
+def test_run_requires_opt_in(local_env):
+    assert main(["run", str(SCENARIOS_DIR)]) == EXIT_NOT_OPTED_IN
+
+
+def test_run_fake_scenarios_pass_and_print_json(local_env, capsys, tmp_path: Path):
+    local_env.setenv("YARVELLE_EVAL", "1")
+    out_file = tmp_path / "result.json"
+    assert main(["run", str(SCENARIOS_DIR), "--scenario", "smoke-single-turn", "--out", str(out_file)]) == 0
+    printed = json.loads(capsys.readouterr().out)
+    assert printed == json.loads(out_file.read_text(encoding="utf-8"))
+    assert printed["passed"] is True
+    assert printed["backend"]["backend"] == "fake"
+    assert printed["totals"] == {"scenarios": 1, "passed": 1, "failed": 0}
+    assert printed["scenarios"][0]["id"] == "smoke-single-turn"
+
+
+def test_run_exits_1_on_broken_invariant(local_env, capsys, tmp_path: Path):
+    local_env.setenv("YARVELLE_EVAL", "1")
+    (tmp_path / "s.yaml").write_text(
+        "schema: 1\nid: broken\ntitle: t\npack: eval-neutral\nbackends: [fake]\nturns:\n"
+        "  - user: hi\n    expect: {agents_exactly: [writing-coach]}\n"
+        "    fake: {main: [{answer: Hello there}]}\n",
+        encoding="utf-8",
+    )
+    assert main(["run", "--pack", str(PACK_DIR), str(tmp_path)]) == 1
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["passed"] is False
+    assert "agents_exactly" in captured.err
+
+
+def test_run_unknown_scenario_id(local_env, capsys):
+    local_env.setenv("YARVELLE_EVAL", "1")
+    assert main(["run", str(SCENARIOS_DIR), "--scenario", "nope"]) == 1
+    assert "nope" in capsys.readouterr().err
+
+
+def test_run_only_offers_free_fake_backend(local_env, capsys):
+    local_env.setenv("YARVELLE_EVAL", "1")
+    assert main(["run", "--backend", "provider", str(SCENARIOS_DIR)]) == 2
 
 
 def test_lint_empty_dir(local_env, tmp_path: Path):
@@ -91,7 +155,9 @@ def test_core_cli_rejects_unknown_eval_harness(local_env, capsys, argv):
 def test_import_does_not_load_provider_sdks():
     code = (
         "import sys, yarvelle_core.testing.orch_eval, yarvelle_core.testing.orch_eval.backends, "
-        "yarvelle_core.testing.orch_eval.cli\n"
+        "yarvelle_core.testing.orch_eval.cli, yarvelle_core.testing.orch_eval.fake, "
+        "yarvelle_core.testing.orch_eval.driver, yarvelle_core.testing.orch_eval.checks, "
+        "yarvelle_core.testing.orch_eval.pack, yarvelle_core.testing.orch_eval.lint\n"
         "bad = [m for m in ('langchain_openai', 'langchain_anthropic', 'langchain_google_genai', "
         "'langchain_ollama', 'openai', 'anthropic') if m in sys.modules]\n"
         "print(','.join(bad))\n"
