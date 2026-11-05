@@ -66,6 +66,16 @@ The fake backend replays the `fake:` script of each turn: main-agent steps
 (`task`, `answer`, `error` or `route`) and per-agent replies (text,
 `{error: ...}` or `{tool: name}`).
 
+Faults, restarts and cancel:
+
+- top-level `faults:` injects timeout, error, truncate, slow, empty, garbage,
+  inject or audit_error on a turn (and `cancel_after_ms` for a user cancel);
+- `restart_before: true` on a turn rebuilds the graph on the same checkpointer
+  so the thread resumes mid-conversation;
+- `encrypt_checkpoints: true` seals every checkpoint blob for that scenario;
+- `expect.cancelled` and `expect.error_matches` cover cancel and hard failures.
+
+
 A scenario's `routing` picks the graph it runs on:
 
 - `hybrid` (the default): the pack's fixed routes, then the main agent, then

@@ -368,6 +368,27 @@ def check_budget(trace: TurnTrace, expect: TurnExpectation, usd: float) -> List[
     return out
 
 
+def check_cancelled(trace: TurnTrace, expect: TurnExpectation) -> List[CheckResult]:
+    if expect.cancelled is None:
+        return []
+    if expect.cancelled and not trace.cancelled:
+        return [_fail("cancelled", "expected the turn to be cancelled")]
+    if not expect.cancelled and trace.cancelled:
+        return [_fail("cancelled", "turn was cancelled unexpectedly")]
+    return [_ok("cancelled", "yes" if trace.cancelled else "no")]
+
+
+def check_error_matches(trace: TurnTrace, expect: TurnExpectation) -> List[CheckResult]:
+    if expect.error_matches is None:
+        return []
+    err = trace.error or ""
+    if not err:
+        return [_fail("error_matches", f"expected error matching {expect.error_matches!r}, got none")]
+    if text_matches(expect.error_matches, err):
+        return [_ok("error_matches", err[:120])]
+    return [_fail("error_matches", f"expected {expect.error_matches!r}, got {err[:160]!r}")]
+
+
 def check_turn(
     trace: TurnTrace,
     turn: Turn,
@@ -377,7 +398,20 @@ def check_turn(
 ) -> List[CheckResult]:
     """Runs every invariant and every expectation set on ``turn``."""
     expect = turn.expect
-    results = check_invariants(trace, pack)
+    results: List[CheckResult] = []
+    # Cancelled / expected-error turns skip the usual "finished with a reply" invariants.
+    if expect.cancelled:
+        results.append(_ok("turn_completed", "cancelled") if trace.cancelled else _fail("turn_completed", "expected cancel"))
+        results.append(_ok("answer_present", "cancelled turn"))
+    elif expect.error_matches is not None:
+        results.extend(check_error_matches(trace, expect))
+        results.append(_ok("answer_present", "error turn"))
+    else:
+        results.extend(check_invariants(trace, pack))
+    if expect.cancelled is not None and not expect.cancelled:
+        results.extend(check_cancelled(trace, expect))
+    elif expect.cancelled:
+        results.extend(check_cancelled(trace, expect))
     results += check_hidden_pick_refused(trace, turn, pack)
     results += check_guardrail_flag(trace, turn)
     results.append(check_route(trace, expect))
@@ -386,7 +420,8 @@ def check_turn(
     results += check_continuity(trace, expect, previous)
     results += check_task_states(trace, expect)
     results += check_notices(trace, expect)
-    results += check_answer(trace, expect, pack)
+    if not expect.cancelled and expect.error_matches is None:
+        results += check_answer(trace, expect, pack)
     results += check_provenance(trace, expect, pack)
     results += check_deliberation(trace, expect)
     results += check_model_calls_before_route(trace, expect)
@@ -403,8 +438,10 @@ __all__ = [
     "check_agents",
     "check_answer",
     "check_budget",
+    "check_cancelled",
     "check_continuity",
     "check_deliberation",
+    "check_error_matches",
     "check_guardrail_flag",
     "check_hidden_pick_refused",
     "check_invariants",
