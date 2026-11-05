@@ -614,8 +614,8 @@ def test_orchestrator_route_removes_hardcoded_domain_keywords():
         assert identifier not in source, f"Found hardcoded domain identifier '{identifier}' in OrchestratorNode._route!"
 
 
-def test_orchestrator_route_mode_deliberate_and_parallel():
-    """Verify OrchestratorNode._route produces DELIBERATE and PARALLEL execution plans."""
+def test_orchestrator_route_mode_deliberate_and_no_keyword_fan_out():
+    """_route builds DELIBERATE plans from structured config only; prompt words never fan out."""
     node = OrchestratorNode(model=None)
     state = {
         "deliberation_config": {"panel_id": "panel_alpha"},
@@ -644,14 +644,15 @@ def test_orchestrator_route_mode_deliberate_and_parallel():
     assert plan_delib.deliberation_config is not None
     assert plan_delib.target_agents == ["specialist_a", "specialist_b"]
 
-    plan_parallel = node._route(
-        target_agent="specialist_a",
-        prompt_text="Please coordinate between both specialists",
-        state={},
-        candidates=[candidate_a, candidate_b],
-    )
-    assert plan_parallel.mode == ExecutionMode.PARALLEL
-    assert plan_parallel.target_agents == ["specialist_a", "specialist_b"]
+    for prompt in ("Please coordinate between both specialists", "Please deliberate on this"):
+        plan_words = node._route(
+            target_agent="specialist_a",
+            prompt_text=prompt,
+            state={},
+            candidates=[candidate_a, candidate_b],
+        )
+        assert plan_words.mode == ExecutionMode.SINGLE
+        assert plan_words.target_agents == ["specialist_a"]
 
     plan_single = node._route(
         target_agent="specialist_a",
