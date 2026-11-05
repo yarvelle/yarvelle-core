@@ -49,6 +49,9 @@ class TurnTrace:
     status_events: List[Dict[str, Any]] = field(default_factory=list)
     notices: List[Dict[str, Any]] = field(default_factory=list)
     provenance: List[Dict[str, Any]] = field(default_factory=list)
+    guardrail_flags: List[str] = field(default_factory=list)
+    route_events: List[str] = field(default_factory=list)
+    turn_tasks: List[Dict[str, Any]] = field(default_factory=list)
     answer: str = ""
     nodes: List[str] = field(default_factory=list)
     model_calls: int = 0

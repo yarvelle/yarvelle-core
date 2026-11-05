@@ -50,6 +50,12 @@ def lint_against_pack(scenario: Scenario, pack: EvalPack) -> List[str]:
                 problems.append(f"{where}: {what} names hidden agent(s) {bad}; hidden agents never answer")
 
         expect = turn.expect
+        flag = turn.input.guardrail_flag if turn.input is not None else None
+        if flag is not None:
+            if flag not in pack.flag_words:
+                problems.append(f"{where}: guardrail_flag {flag!r} is not listed under the pack's guardrail_flags")
+            elif flag not in pack.flags_for(turn.user):
+                problems.append(f"{where}: the user text does not raise guardrail_flag {flag!r} (words: {pack.flag_words[flag]})")
         if turn.explicit_agent is not None:
             unknown([turn.explicit_agent], "explicit_agent")
             not_hidden([turn.explicit_agent], "explicit_agent")

@@ -93,7 +93,12 @@ def test_invariants_flag_cap_hidden_errors_and_script():
 
 
 def test_invariants_pass_on_clean_turn():
-    trace = _trace(agents=["trip-organizer"], tasks=[_task("trip-organizer", "completed")])
+    trace = _trace(
+        agents=["trip-organizer"],
+        tasks=[_task("trip-organizer", "completed")],
+        route_events=["route.main_agent"],
+        turn_tasks=[{"task_id": "t-trip-organizer", "state": "completed"}],
+    )
     assert all(r.status == "pass" for r in check_invariants(trace, PACK))
 
 

@@ -16,6 +16,10 @@ the normal agent layout (``agents/<id>/agent.yaml`` plus a persona). It is
 loaded through the real :class:`AgentRegistry`, so a pack that the runtime
 would reject fails here too. Tools listed under ``offline_tools`` are
 replaced by local no-op tools that return a fixed string.
+
+``guardrail_flags`` maps a flag name to the words that raise it. The harness
+turns it into a safety policy whose ``check_flags`` the input guardrail calls,
+so flag-triggered fixed routes run from the user's text, as in production.
 """
 
 from __future__ import annotations
@@ -23,11 +27,12 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Sequence, Union
+from typing import Any, Dict, List, Literal, Mapping, Optional, Sequence, Union
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from yarvelle_core.engine.safety_policy import NeutralSafetyPolicy
 from yarvelle_core.schemas.orchestration import GuardrailFlagTrigger, PackOrchestrationSpec
 
 PACK_FILE = "pack.yaml"
@@ -51,6 +56,24 @@ class _PackFile(BaseModel):
         default_factory=dict,
         description="Agent id -> tool names served by local no-op tools.",
     )
+    guardrail_flags: Dict[str, List[str]] = Field(
+        default_factory=dict,
+        description="Flag name -> words that raise it (case-insensitive, whole words).",
+    )
+
+
+class KeywordFlagPolicy(NeutralSafetyPolicy):
+    """Harness safety policy: refuses nothing and raises flags on listed words."""
+
+    def __init__(self, words: Mapping[str, Sequence[str]]) -> None:
+        self._patterns = {
+            flag: [re.compile(rf"(?<!\w){re.escape(w)}(?!\w)", re.IGNORECASE) for w in ws]
+            for flag, ws in words.items()
+        }
+
+    def check_flags(self, text: Optional[str], ctx: Any = None) -> List[str]:
+        body = text or ""
+        return [flag for flag, patterns in self._patterns.items() if any(p.search(body) for p in patterns)]
 
 
 @dataclass(frozen=True)
@@ -70,6 +93,15 @@ class EvalPack:
     spec: PackOrchestrationSpec
     registry: Any
     agents: Dict[str, PackAgent] = field(default_factory=dict)
+    flag_words: Dict[str, List[str]] = field(default_factory=dict)
+
+    def safety_policy(self) -> KeywordFlagPolicy:
+        """The input guardrail policy for this pack (raises ``guardrail_flags``)."""
+        return KeywordFlagPolicy(self.flag_words)
+
+    def flags_for(self, text: str) -> List[str]:
+        """Flags the pack's policy raises for ``text``."""
+        return self.safety_policy().check_flags(text)
 
     @property
     def agent_ids(self) -> List[str]:
@@ -151,11 +183,30 @@ def load_eval_pack(path: Union[str, Path]) -> EvalPack:
     }
     missing = [a for a in parsed.orchestration.referenced_agent_ids() if a not in agents]
     unknown_tools = [a for a in parsed.offline_tools if a not in agents]
+    bad_flags = [f for f in parsed.guardrail_flags if not re.match(r"^[a-z0-9_-]{1,64}$", f)]
+    empty_flags = [f for f, words in parsed.guardrail_flags.items() if not [w for w in words if w.strip()]]
+    route_flags = [
+        r.when.flag for r in parsed.orchestration.fixed_routes if isinstance(r.when, GuardrailFlagTrigger)
+    ]
+    undeclared = [f for f in route_flags if f not in parsed.guardrail_flags]
+    if bad_flags:
+        raise EvalPackError(f"{pack_file}: invalid guardrail flag name(s) {bad_flags}")
+    if empty_flags:
+        raise EvalPackError(f"{pack_file}: guardrail flag(s) {empty_flags} list no words")
+    if undeclared:
+        raise EvalPackError(f"{pack_file}: fixed routes use flag(s) {undeclared} not listed under guardrail_flags")
     if missing:
         raise EvalPackError(f"{pack_file}: orchestration names unknown agent(s) {missing}")
     if unknown_tools:
         raise EvalPackError(f"{pack_file}: offline_tools names unknown agent(s) {unknown_tools}")
-    return EvalPack(id=parsed.id, root=root, spec=parsed.orchestration, registry=registry, agents=agents)
+    return EvalPack(
+        id=parsed.id,
+        root=root,
+        spec=parsed.orchestration,
+        registry=registry,
+        agents=agents,
+        flag_words={f: [w.strip() for w in words if w.strip()] for f, words in parsed.guardrail_flags.items()},
+    )
 
 
 def find_pack_dir(start: Union[str, Path], pack_id: str) -> Optional[Path]:
@@ -181,4 +232,4 @@ def find_pack_dir(start: Union[str, Path], pack_id: str) -> Optional[Path]:
     return None
 
 
-__all__ = ["EvalPack", "EvalPackError", "PackAgent", "find_pack_dir", "load_eval_pack"]
+__all__ = ["EvalPack", "EvalPackError", "KeywordFlagPolicy", "PackAgent", "find_pack_dir", "load_eval_pack"]

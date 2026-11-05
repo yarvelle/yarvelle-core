@@ -125,9 +125,52 @@ def check_invariants(trace: TurnTrace, pack: PackView) -> List[CheckResult]:
         if trace.subagent_token_leaks
         else _ok("no_subagent_tokens")
     )
+    out.append(check_route_audited(trace))
+    out.append(check_turn_tasks_recorded(trace))
     if trace.script_problems:
         out.append(_fail("fake_script", "; ".join(trace.script_problems)))
     return out
+
+
+_ROUTE_EVENT_FOR = {
+    "user_selected": "route.user_selected",
+    "fixed_route": "route.fixed",
+    "default_agent": "route.default",
+    "main_agent": "route.main_agent",
+}
+
+
+def check_route_audited(trace: TurnTrace) -> CheckResult:
+    """The turn's route has a matching ``route.*`` audit record, written last."""
+    if trace.route is None:
+        return _skip("route_audited", "the turn has no route decision")
+    want = _ROUTE_EVENT_FOR.get(trace.route.partition(":")[0])
+    if not trace.route_events:
+        return _fail("route_audited", f"no route.* audit record; expected {want}")
+    if trace.route_events[-1] != want:
+        return _fail("route_audited", f"expected {want} last, got {trace.route_events}")
+    return _ok("route_audited", ", ".join(trace.route_events))
+
+
+def check_turn_tasks_recorded(trace: TurnTrace) -> CheckResult:
+    """Every hand-off in the audit log has one stored turn task with the same final state."""
+    audited = {t.task_id: t.final_state for t in [*trace.tasks, *trace.rejected_tasks]}
+    stored = {str(r.get("task_id")): str(r.get("state")) for r in trace.turn_tasks}
+    if len(stored) != len(trace.turn_tasks):
+        return _fail("turn_tasks_recorded", "duplicate task ids in the stored turn tasks")
+    if stored != audited:
+        return _fail("turn_tasks_recorded", f"stored {stored}, audit log {audited}")
+    return _ok("turn_tasks_recorded", f"{len(stored)} hand-off(s)")
+
+
+def check_guardrail_flag(trace: TurnTrace, turn: Turn) -> List[CheckResult]:
+    """The input guardrail raised the flag the turn expects, from the user's text."""
+    flag = turn.input.guardrail_flag if turn.input is not None else None
+    if flag is None:
+        return []
+    if flag in trace.guardrail_flags:
+        return [_ok("guardrail_flag", flag)]
+    return [_fail("guardrail_flag", f"expected {flag!r} raised, got {trace.guardrail_flags}")]
 
 
 # ---------------------------------------------------------------- expectations
@@ -322,6 +365,7 @@ def check_turn(
     """Runs every invariant and every expectation set on ``turn``."""
     expect = turn.expect
     results = check_invariants(trace, pack)
+    results += check_guardrail_flag(trace, turn)
     results.append(check_route(trace, expect))
     results += check_agents(trace, expect)
     results += check_task_calls(trace, expect)
@@ -347,14 +391,17 @@ __all__ = [
     "check_budget",
     "check_continuity",
     "check_deliberation",
+    "check_guardrail_flag",
     "check_invariants",
     "check_model_calls_before_route",
     "check_notices",
     "check_provenance",
     "check_route",
+    "check_route_audited",
     "check_task_calls",
     "check_task_states",
     "check_turn",
+    "check_turn_tasks_recorded",
     "leaked_ids",
     "text_matches",
 ]

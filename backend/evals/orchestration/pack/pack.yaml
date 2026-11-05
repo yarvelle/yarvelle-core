@@ -20,3 +20,7 @@ orchestration:
       description: Uploaded documents go to the document extractor.
 offline_tools:
   document-extractor: [lookup_notes]
+# Words that make the harness input guardrail raise a flag. Fixed routes on a
+# flag fire only when the user's text raises it.
+guardrail_flags:
+  urgent: [urgent, stranded, stuck]

@@ -56,6 +56,7 @@ def write_pack(root: Path, pack_id: str = "eval-test") -> Path:
                 {"route_id": "urgent", "when": {"kind": "guardrail_flag", "flag": "urgent"}, "agent_id": "escalation-desk"}
             ],
         },
+        "guardrail_flags": {"urgent": ["urgent"]},
     }
     (root / "pack.yaml").write_text(yaml.safe_dump(pack), encoding="utf-8")
     return root
@@ -113,7 +114,7 @@ def test_multi_turn_main_route_on_one_thread(pack: EvalPack):
 
 def test_fixed_route_then_routing_resumes(pack: EvalPack):
     urgent = {
-        "user": "Help now.",
+        "user": "Urgent: help now.",
         "input": {"guardrail_flag": "urgent"},
         "expect": {"route": "fixed_route:urgent", "agents_exactly": ["escalation-desk"], "model_calls_before_route": 0},
         "fake": {"agents": {"escalation-desk": ["Call the front desk now."]}},
