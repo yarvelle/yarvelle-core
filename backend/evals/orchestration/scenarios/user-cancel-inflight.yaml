@@ -1,0 +1,28 @@
+# Slow hand-offs, then the user cancels; every started task ends cancelled.
+schema: 1
+id: user-cancel-inflight
+title: User cancel stops in-flight hand-offs cleanly
+tags: [fault, cancel]
+pack: eval-neutral
+backends: [fake]
+limits: {agent_timeout_s: 30, turn_timeout_s: 60}
+faults:
+  - turn: 1
+    agent: "*"
+    mode: slow
+    delay_s: 8
+  - turn: 1
+    cancel_after_ms: 250
+turns:
+  - user: "Plan a trip and a budget for next month."
+    expect:
+      cancelled: true
+      agents_all_of: [trip-organizer, budget-planner]
+      task_states: {trip-organizer: cancelled, budget-planner: cancelled}
+    fake:
+      main:
+        - task: [trip-organizer, budget-planner]
+        - answer: "never"
+      agents:
+        trip-organizer: ["Coast weekend."]
+        budget-planner: ["About 400."]

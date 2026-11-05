@@ -1,0 +1,23 @@
+# Truncation injected by keeping the agent on a no-op tool until the call cap.
+schema: 1
+id: fault-truncate-hand-off
+title: An injected tool loop hits the hand-off call cap
+tags: [fault, truncate]
+pack: eval-neutral
+backends: [fake]
+faults:
+  - turn: 1
+    agent: document-extractor
+    mode: truncate
+    tool: lookup_notes
+turns:
+  - user: "Find the due date in my saved notes."
+    expect:
+      route: main_agent
+      agents_exactly: [document-extractor]
+      notices: [truncated]
+    fake:
+      main:
+        - task: [document-extractor]
+        - answer: "I could not finish reading the notes."
+      agents: {}

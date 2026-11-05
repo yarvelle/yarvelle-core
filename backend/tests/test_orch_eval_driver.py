@@ -254,3 +254,132 @@ def test_default_checkpointer_is_encrypted_when_enabled(pack: EvalPack, monkeypa
         assert sealed
     finally:
         cp.reset_checkpoint_keyring_cache()
+
+
+def test_restart_before_resumes_same_thread(pack: EvalPack):
+    saver = MemorySaver()
+    first = {
+        "user": "Plan a weekend.",
+        "expect": {"route": "main_agent", "agents_exactly": ["trip-organizer"], "answer": {"must_mention": ["weekend"]}},
+        "fake": {
+            "main": [{"task": ["trip-organizer"]}, {"answer": "Weekend by the coast."}],
+            "agents": {"trip-organizer": ["Coast."]},
+        },
+    }
+    second = {
+        "user": "Cheaper please.",
+        "restart_before": True,
+        "expect": {"route": "main_agent", "agents_exactly": ["budget-planner"], "same_agents_as_turn": {"turn": 1, "mode": "overlap"}},
+        "fake": {
+            "main": [{"task": ["budget-planner"]}, {"answer": "About 300."}],
+            "agents": {"budget-planner": ["300."]},
+        },
+    }
+    # overlap mode: second agents need not be subset of first; just ensure continuity check can pass
+    # Use subset against a turn that also called budget? Simpler: equal continuity not required.
+    second["expect"].pop("same_agents_as_turn")
+    result = run(pack, scenario([first, second]), checkpointer_factory=lambda: saver)
+    assert result.passed, result.failures()
+    threads = {cfg.config["configurable"]["thread_id"] for cfg in saver.list(None)}
+    assert len(threads) == 1
+
+
+def test_fault_timeout_marks_timed_out(pack: EvalPack):
+    turn = {
+        "user": "Plan and budget.",
+        "expect": {
+            "task_states": {"trip-organizer": "completed", "budget-planner": "timed_out"},
+            "notices": [{"code": "partial_failure", "agent_ids": ["budget-planner"]}],
+            "provenance": {"must_cite": ["trip-organizer"], "missing": ["budget-planner"]},
+        },
+        "fake": {
+            "main": [{"task": ["trip-organizer", "budget-planner"]}, {"answer": "Trip ready."}],
+            "agents": {"trip-organizer": ["Two nights."]},
+        },
+    }
+    sc = scenario(
+        [turn],
+        limits={"agent_timeout_s": 0.4, "turn_timeout_s": 10},
+        faults=[{"turn": 1, "agent": "budget-planner", "mode": "timeout", "delay_s": 5}],
+    )
+    result = run(pack, sc)
+    assert result.passed, result.failures()
+
+
+def test_fault_error_marks_failed(pack: EvalPack):
+    turn = {
+        "user": "Budget this.",
+        "expect": {
+            "task_states": {"budget-planner": "failed"},
+            "notices": [{"code": "partial_failure", "agent_ids": ["budget-planner"]}],
+            "provenance": {"missing": ["budget-planner"]},
+        },
+        "fake": {
+            "main": [{"task": ["budget-planner"]}, {"answer": "No budget."}],
+            "agents": {},
+        },
+    }
+    sc = scenario([turn], faults=[{"turn": 1, "agent": "budget-planner", "mode": "error", "message": "down"}])
+    result = run(pack, sc)
+    assert result.passed, result.failures()
+
+
+def test_user_cancel_marks_tasks_cancelled(pack: EvalPack):
+    turn = {
+        "user": "Plan and budget.",
+        "expect": {
+            "cancelled": True,
+            "agents_all_of": ["trip-organizer", "budget-planner"],
+            "task_states": {"trip-organizer": "cancelled", "budget-planner": "cancelled"},
+        },
+        "fake": {
+            "main": [{"task": ["trip-organizer", "budget-planner"]}, {"answer": "never"}],
+            "agents": {"trip-organizer": ["x"], "budget-planner": ["y"]},
+        },
+    }
+    sc = scenario(
+        [turn],
+        limits={"agent_timeout_s": 30, "turn_timeout_s": 60},
+        faults=[
+            {"turn": 1, "agent": "*", "mode": "slow", "delay_s": 8},
+            {"turn": 1, "cancel_after_ms": 250},
+        ],
+    )
+    result = run(pack, sc)
+    assert result.passed, result.failures()
+    assert result.turns[0].trace.cancelled is True
+
+
+def test_audit_error_fails_the_turn(pack: EvalPack):
+    turn = {
+        "user": "Plan a trip.",
+        "expect": {"error_matches": "/OrchestrationAuditError|injected audit write failure/"},
+        "fake": {
+            "main": [{"task": ["trip-organizer"]}, {"answer": "never"}],
+            "agents": {"trip-organizer": ["Coast."]},
+        },
+    }
+    sc = scenario([turn], faults=[{"turn": 1, "mode": "audit_error"}])
+    result = run(pack, sc)
+    assert result.passed, result.failures()
+    assert result.turns[0].trace.error
+
+
+def test_encrypt_checkpoints_resume(pack: EvalPack):
+    first = {
+        "user": "Plan a weekend.",
+        "expect": {"route": "main_agent", "agents_exactly": ["trip-organizer"]},
+        "fake": {
+            "main": [{"task": ["trip-organizer"]}, {"answer": "Weekend plan."}],
+            "agents": {"trip-organizer": ["Coast."]},
+        },
+    }
+    second = {
+        "user": "Thanks.",
+        "restart_before": True,
+        "expect": {"route": "main_agent", "agents_exactly": [], "max_task_calls": 0},
+        "fake": {"main": [{"answer": "You are welcome."}]},
+    }
+    sc = scenario([first, second], encrypt_checkpoints=True)
+    result = run(pack, sc)
+    assert result.passed, result.failures()

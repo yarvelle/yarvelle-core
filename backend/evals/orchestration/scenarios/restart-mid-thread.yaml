@@ -1,0 +1,37 @@
+# After the first turn, rebuild the graph on the same checkpointer and keep going.
+schema: 1
+id: restart-mid-thread
+title: Resume a thread after rebuilding the graph
+tags: [restart, multi-turn]
+pack: eval-neutral
+backends: [fake]
+turns:
+  - user: "Plan a weekend in Austin under 600 dollars."
+    expect:
+      route: main_agent
+      agents_exactly: [trip-organizer, budget-planner]
+      provenance:
+        must_cite: [trip-organizer, budget-planner]
+      answer:
+        must_mention: ["Austin"]
+    fake:
+      main:
+        - task: [trip-organizer, budget-planner]
+        - answer: "Austin plan within 600: hotel first."
+      agents:
+        trip-organizer: ["Two nights downtown."]
+        budget-planner: ["About 600 total."]
+  - user: "Make it cheaper."
+    restart_before: true
+    expect:
+      route: main_agent
+      agents_exactly: [budget-planner]
+      same_agents_as_turn: {turn: 1, mode: subset}
+      answer:
+        must_mention: ["500"]
+    fake:
+      main:
+        - task: [budget-planner]
+        - answer: "One stop out brings it to about 500."
+      agents:
+        budget-planner: ["Total 500."]

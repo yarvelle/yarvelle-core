@@ -101,6 +101,17 @@ def lint_against_pack(scenario: Scenario, pack: EvalPack) -> List[str]:
                         problems.append(f"{where}: a fake 'route' step needs routing 'classifier' or 'builtin'")
             unknown(list(turn.fake.agents), "fake agents")
             not_hidden(list(turn.fake.agents), "fake agents")
+
+    for fault in scenario.faults:
+        where = f"fault turn {fault.turn}"
+        if fault.agent and fault.agent not in ("main", "*"):
+            if fault.agent not in known:
+                problems.append(f"{where}: agent {fault.agent!r} is not in pack {pack.id!r}")
+            elif fault.agent in hidden and fault.mode not in ("inject",):
+                # inject may target a visible agent whose reply mentions the hidden one
+                pass
+        if fault.mode == "truncate" and fault.tool is None:
+            problems.append(f"{where}: truncate fault needs a tool name")
     return problems
 
 

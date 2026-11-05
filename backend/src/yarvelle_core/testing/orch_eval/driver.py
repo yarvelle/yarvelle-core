@@ -22,6 +22,11 @@ agent pick (or none) and the turn's attachments. The graph itself clears the
 previous turn's routing state, raises guardrail flags from the user's text
 (through the pack's flag words) and writes the route audit records, so the
 scenarios check the runtime's own behaviour.
+
+Faults declared on the scenario wrap the backend model for that turn. A turn
+with ``restart_before`` rebuilds the graph on the same checkpointer (and can
+exercise encrypted checkpoints). ``cancel_after_ms`` cancels the turn task
+after the delay once hand-offs have started.
 """
 
 from __future__ import annotations
@@ -32,6 +37,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from yarvelle_core.testing.orch_eval.checks import CheckResult, PackView, check_turn
+from yarvelle_core.testing.orch_eval.faults import FaultInjectingFakeModel, FaultPlan
 from yarvelle_core.testing.orch_eval.pack import EvalPack
 from yarvelle_core.testing.orch_eval.schema import Scenario, Turn
 from yarvelle_core.testing.orch_eval.trace import TaskRecord, TurnTrace
@@ -98,8 +104,12 @@ class ScenarioResult:
 class _AuditCapture:
     def __init__(self) -> None:
         self.events: List[Any] = []
+        self.fail_next: bool = False
 
     async def __call__(self, event: Any) -> None:
+        if self.fail_next:
+            self.fail_next = False
+            raise RuntimeError("injected audit write failure")
         self.events.append(event)
 
 
@@ -196,18 +206,23 @@ class ScenarioRunner:
         self.backend = backend
         self._checkpointer_factory = checkpointer_factory
 
-    def _checkpointer(self) -> Any:
+    def _checkpointer(self, *, encrypt: bool = False) -> Any:
         if self._checkpointer_factory is not None:
             return self._checkpointer_factory()
+        import os
+
         from langgraph.checkpoint.memory import MemorySaver
 
         from yarvelle_core.vault.checkpoints import (
+            CheckpointKeyring,
+            EncryptedCheckpointSerializer,
             EncryptionPreservingSaverMixin,
             checkpoint_encryption_enabled,
             checkpoint_serializer,
         )
 
-        if not checkpoint_encryption_enabled():
+        use_encrypt = encrypt or checkpoint_encryption_enabled()
+        if not use_encrypt:
             return MemorySaver()
 
         # Same serializer production savers use, so scenarios exercise encrypted
@@ -215,12 +230,27 @@ class ScenarioRunner:
         class _EncryptedMemorySaver(EncryptionPreservingSaverMixin, MemorySaver):
             pass
 
+        if encrypt and not checkpoint_encryption_enabled():
+            # Scenario asked for encryption without flipping process settings:
+            # use an ephemeral keyring so the run stays self-contained.
+            keyring = CheckpointKeyring.from_kek(os.urandom(32))
+            serde = EncryptedCheckpointSerializer(keyring, allow_plaintext_reads=False)
+            return _EncryptedMemorySaver(serde=serde)
         return _EncryptedMemorySaver(serde=checkpoint_serializer())
 
     def _spec(self, scenario: Scenario) -> Any:
         spec = self.pack.spec
-        if scenario.limits is not None and scenario.limits.max_agents is not None:
-            limits = spec.limits.model_copy(update={"max_agents": scenario.limits.max_agents})
+        if scenario.limits is None:
+            return spec
+        updates = {}
+        if scenario.limits.max_agents is not None:
+            updates["max_agents"] = scenario.limits.max_agents
+        if scenario.limits.agent_timeout_s is not None:
+            updates["agent_timeout_s"] = scenario.limits.agent_timeout_s
+        if scenario.limits.turn_timeout_s is not None:
+            updates["turn_timeout_s"] = scenario.limits.turn_timeout_s
+        if updates:
+            limits = spec.limits.model_copy(update=updates)
             spec = spec.model_copy(update={"limits": limits})
         return spec
 
@@ -231,8 +261,23 @@ class ScenarioRunner:
             max_agents=int(spec.limits.max_agents),
         )
 
-    async def run(self, scenario: Scenario) -> ScenarioResult:
+    def _build_graph(self, scenario: Scenario, spec: Any, model: Any, audit: Any, turn_tasks: Any, checkpointer: Any) -> Any:
         from yarvelle_core.engine.builder import GraphBuilder
+
+        return GraphBuilder(
+            model=model,
+            registry=self.pack.registry,
+            # "builtin" runs without pack routes; the pack default still applies.
+            orchestration=None if scenario.routing == "builtin" else spec,
+            default_agent=spec.default_agent,
+            include_main_agent=scenario.routing == "hybrid",
+            orchestration_audit_sink=audit,
+            turn_task_sink=turn_tasks,
+            safety_policy=self.pack.safety_policy(),
+            checkpointer=checkpointer,
+        ).build()
+
+    async def run(self, scenario: Scenario) -> ScenarioResult:
         from yarvelle_core.testing.orch_eval.backends import Role
 
         result = ScenarioResult(scenario_id=scenario.id, title=scenario.title, backend=self.backend.name)
@@ -246,30 +291,33 @@ class ScenarioRunner:
         view = self._view(spec)
         audit = _AuditCapture()
         turn_tasks = _TurnTaskCapture()
-        checkpointer = self._checkpointer()
-        graph = GraphBuilder(
-            model=self.backend.model_for(Role(kind="main")),
-            registry=self.pack.registry,
-            # "builtin" runs without pack routes; the pack default still applies.
-            orchestration=None if scenario.routing == "builtin" else spec,
-            default_agent=spec.default_agent,
-            include_main_agent=scenario.routing == "hybrid",
-            orchestration_audit_sink=audit,
-            turn_task_sink=turn_tasks,
-            safety_policy=self.pack.safety_policy(),
-            checkpointer=checkpointer,
-        ).build()
+        checkpointer = self._checkpointer(encrypt=scenario.encrypt_checkpoints)
+        base_model = self.backend.model_for(Role(kind="main"))
+        fault_model = FaultInjectingFakeModel(inner=base_model)
+        fault_model.set_agents(self.pack.agent_ids)
+        graph = self._build_graph(scenario, spec, fault_model, audit, turn_tasks, checkpointer)
         thread_id = f"orch-eval-{scenario.id}-{uuid.uuid4().hex[:8]}"
         config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 60}
 
         traces: List[TurnTrace] = []
         for number, turn in enumerate(scenario.turns, start=1):
-            trace = await self._run_turn(graph, config, thread_id, number, turn, audit, turn_tasks)
+            if turn.restart_before:
+                # New graph, same checkpointer and thread: resume mid-conversation.
+                graph = self._build_graph(scenario, spec, fault_model, audit, turn_tasks, checkpointer)
+            plan = FaultPlan.from_specs(scenario.faults_for(number))
+            cancel_ms = turn.cancel_after_ms if turn.cancel_after_ms is not None else plan.cancel_after_ms
+            fault_model.set_turn(number, plan)
+            if plan.audit_error:
+                audit.fail_next = True
+            trace = await self._run_turn(
+                graph, config, thread_id, number, turn, audit, turn_tasks, cancel_after_ms=cancel_ms
+            )
             cost = self.backend.cost_per_mtok.cost_usd(trace.input_tokens, trace.output_tokens)
             checks = check_turn(trace, turn, view, previous=traces, usd=cost)
             traces.append(trace)
             result.turns.append(TurnResult(trace=trace, checks=checks))
-            if trace.error:
+            # Expected cancels and expected errors are not run-stopping failures.
+            if trace.error and turn.expect.error_matches is None and not turn.expect.cancelled:
                 result.skipped_turns = len(scenario.turns) - number
                 break
         return result
@@ -283,7 +331,11 @@ class ScenarioRunner:
         turn: Turn,
         audit: _AuditCapture,
         turn_tasks: _TurnTaskCapture,
+        *,
+        cancel_after_ms: Optional[int] = None,
     ) -> TurnTrace:
+        import asyncio
+
         from langchain_core.messages import HumanMessage
 
         from yarvelle_core.engine.service import is_subagent_token
@@ -308,7 +360,9 @@ class ScenarioRunner:
         stream_notices: List[Dict[str, Any]] = []
         agent_ids = set(self.pack.agent_ids)
         started = time.perf_counter()
-        try:
+
+        async def _consume() -> None:
+            nonlocal routed
             async for event in graph.astream_events(state_in, config=config, version="v2"):
                 kind = event.get("event")
                 meta = event.get("metadata") or {}
@@ -342,8 +396,49 @@ class ScenarioRunner:
                     who = meta.get("lc_agent_name")
                     if text and who in agent_ids and who != MAIN_AGENT_ID and node == "main_agent" and not is_subagent_token(meta):
                         trace.subagent_token_leaks.append(f"{who}: {text[:60]}")
+
+        try:
+            if cancel_after_ms is None:
+                await _consume()
+            else:
+                task = asyncio.create_task(_consume())
+
+                async def _cancel_when_ready() -> None:
+                    deadline = time.perf_counter() + (cancel_after_ms / 1000.0)
+                    while time.perf_counter() < deadline:
+                        if any(e.get("state") == "started" for e in trace.status_events):
+                            await asyncio.sleep(0.05)
+                            break
+                        await asyncio.sleep(0.01)
+                    if not task.done():
+                        task.cancel()
+
+                watchdog = asyncio.create_task(_cancel_when_ready())
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    trace.cancelled = True
+                finally:
+                    watchdog.cancel()
+                    try:
+                        await watchdog
+                    except asyncio.CancelledError:
+                        pass
+                    if not task.done():
+                        task.cancel()
+                        try:
+                            await task
+                        except (asyncio.CancelledError, Exception):
+                            pass
+                    if task.cancelled() or trace.cancelled:
+                        trace.cancelled = True
+        except asyncio.CancelledError:
+            trace.cancelled = True
         except Exception as err:  # the trace records the failure; checks report it
-            trace.error = f"{type(err).__name__}: {err}"
+            if type(err).__name__ == "CancelledError" or "CancelledError" in type(err).__name__:
+                trace.cancelled = True
+            else:
+                trace.error = f"{type(err).__name__}: {err}"
         trace.latency_ms = (time.perf_counter() - started) * 1000
 
         after = await graph.aget_state(config)
@@ -357,11 +452,17 @@ class ScenarioRunner:
         trace.route_events = [
             str(e.event) for e in turn_audit if str(getattr(e, "event", "")).startswith(ROUTE_EVENT_PREFIX)
         ]
+        # A cancel can land before the checkpoint commits the decision; recover
+        # the route label from the audit trail when the state is empty.
+        if trace.route is None and "route.main_agent" in trace.route_events:
+            trace.route = "main_agent"
+        elif trace.route is None and "route.user_selected" in trace.route_events:
+            trace.route = "user_selected"
         trace.turn_tasks = [r.model_dump(mode="json") for r in turn_tasks.rows[tasks_start:]]
         records = _tasks_from_audit(turn_audit)
         trace.tasks = [t for t in records if "started" in t.states]
         trace.rejected_tasks = [t for t in records if "started" not in t.states]
-        if trace.route == "main_agent":
+        if trace.route == "main_agent" or (trace.cancelled and trace.tasks):
             trace.agents = _unique([t.agent_id for t in trace.tasks])
         elif "agent" in trace.nodes and trace.route_agent:
             trace.agents = [str(trace.route_agent)]

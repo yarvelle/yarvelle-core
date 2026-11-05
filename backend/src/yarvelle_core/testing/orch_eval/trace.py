@@ -61,6 +61,7 @@ class TurnTrace:
     latency_ms: float = 0.0
     subagent_token_leaks: List[str] = field(default_factory=list)
     script_problems: List[str] = field(default_factory=list)
+    cancelled: bool = False
     error: Optional[str] = None
 
     @property
