@@ -6,8 +6,11 @@ id: paraphrase-weekend-trip
 title: Paraphrased trip requests keep the same agent set
 tags: [paraphrase, metamorphic, multi-turn]
 pack: eval-neutral
-backends: [fake, ollama]
+backends: [fake, ollama, replay]
 samples: {fake: 1, ollama: 1}
+limits:
+  agent_timeout_s: 60
+  turn_timeout_s: 180
 turns:
   - user: "Plan a weekend in Austin for two, under 600 dollars."
     expect:

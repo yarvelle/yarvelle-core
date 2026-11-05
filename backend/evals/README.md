@@ -2,7 +2,10 @@
 
 Multi-agent, multi-turn conversations used to evaluate the orchestration
 runtime against a scripted fake model, a local Ollama model or a metered
-provider. These evals never run on CI.
+provider.
+The default Ollama subject is `glm-4.7-flash:latest`; pass
+`--model qwen3:8b` (or another installed tag) to select a different subject.
+The judge stays on a separate family (`llama3.1:8b` by default). These evals never run on CI.
 
 Layout:
 
