@@ -427,7 +427,8 @@ def check_turn(
     results += check_model_calls_before_route(trace, expect)
     results += check_budget(trace, expect, usd)
     if turn.judge is not None:
-        results.append(_skip(f"judge:{turn.judge.rubric}", "judge scoring is not available yet"))
+        # Soft placeholder; the driver replaces this when --judge is on.
+        results.append(_skip(f"judge:{turn.judge.rubric}", "judge not enabled for this run"))
     return results
 
 

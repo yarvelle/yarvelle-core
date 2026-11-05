@@ -28,7 +28,9 @@ Commands:
   write cassettes, or ``--backend replay`` to play them back with no model
   calls. Exits 1 when any check fails, 2 on a baseline regression;
 * ``baseline save``: remember a run as the baseline for its backend+model;
-* ``compare``: diff a run against a baseline without re-running scenarios.
+* ``compare``: diff a run against a baseline without re-running scenarios;
+* ``calibrate``: score the labelled judge cases and report agreement
+  (human labels vs judge; $0 on Ollama).
 """
 
 from __future__ import annotations
@@ -122,6 +124,36 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip writing the report directory (still prints JSON to stdout)",
     )
+    run.add_argument(
+        "--judge",
+        action="store_true",
+        help="Score turns that declare a judge rubric (report-only by default)",
+    )
+    run.add_argument(
+        "--judge-gate",
+        action="store_true",
+        help=(
+            "Fail turns whose median judge score is below min_score; requires "
+            "measured agreement >= 0.8 (see calibrate)"
+        ),
+    )
+    run.add_argument(
+        "--judge-samples",
+        type=int,
+        default=None,
+        help="Judge samples per turn (default 3; majority / median)",
+    )
+    run.add_argument(
+        "--judge-agreement",
+        type=float,
+        default=None,
+        help="Override measured judge agreement (0-1) used with --judge-gate",
+    )
+    run.add_argument(
+        "--allow-self-judge",
+        action="store_true",
+        help="Allow judge model id to match the subject (discouraged)",
+    )
 
     baseline = sub.add_parser("baseline", help="Manage saved baselines under the evals output root")
     baseline_sub = baseline.add_subparsers(dest="baseline_command")
@@ -138,6 +170,52 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Apply the p95 latency +25%% regression rule even on free backends",
     )
+    calibrate = sub.add_parser(
+        "calibrate",
+        help="Measure LLM judge agreement against labelled human fixtures ($0 on Ollama)",
+    )
+    calibrate.add_argument(
+        "--backend",
+        default="ollama",
+        choices=("ollama", "replay", "provider"),
+        help="Judge backend (default ollama; provider needs --max-usd)",
+    )
+    calibrate.add_argument("--judge-model", help="Judge model override")
+    calibrate.add_argument("--model", help="Ignored alias; use --judge-model")
+    calibrate.add_argument("--provider", default=None, help="Paid provider id")
+    calibrate.add_argument("--key-file", help="Provider API key file (never logged)")
+    calibrate.add_argument("--base-url", help="Ollama or OpenAI-compatible base URL")
+    calibrate.add_argument("--seed", type=int, default=None, help="Sampling seed")
+    calibrate.add_argument("--max-usd", type=float, default=0.0, help="Spend ceiling for provider")
+    calibrate.add_argument(
+        "--samples",
+        type=int,
+        default=None,
+        help="Judge samples per case (default 3)",
+    )
+    calibrate.add_argument(
+        "--calibration-dir",
+        help="Directory of human_label YAML fixtures (default: committed calibration/)",
+    )
+    calibrate.add_argument(
+        "--out-dir",
+        help="Where to store the agreement JSON (default: ~/.yarvelle-evals/calibration)",
+    )
+    calibrate.add_argument(
+        "--record",
+        action="store_true",
+        help="Record judge exchanges to cassettes while calibrating",
+    )
+    calibrate.add_argument(
+        "--cassette",
+        help="Cassette root for --record or --backend replay",
+    )
+    calibrate.add_argument(
+        "--allow-self-judge",
+        action="store_true",
+        help="Allow judge == subject (not used during calibrate; kept for symmetry)",
+    )
+
     return parser
 
 
@@ -242,6 +320,89 @@ def _wrap_recording(inner_factory: Any, args: argparse.Namespace, *, backend_lab
         )
 
     return factory
+
+
+
+def _resolved_models(backend_name: str, args: argparse.Namespace) -> tuple[str, str]:
+    """Subject and judge model ids for the chosen backend."""
+    from yarvelle_core.testing.orch_eval.defaults import (
+        DEFAULT_OLLAMA_JUDGE_MODEL,
+        DEFAULT_OLLAMA_SUBJECT_MODEL,
+        DEFAULT_PROVIDER_JUDGE_MODEL,
+        DEFAULT_PROVIDER_SUBJECT_MODEL,
+    )
+
+    if backend_name in ("ollama", "replay"):
+        subject = args.model or DEFAULT_OLLAMA_SUBJECT_MODEL
+        judge = args.judge_model or DEFAULT_OLLAMA_JUDGE_MODEL
+    elif backend_name == "provider":
+        subject = args.model or DEFAULT_PROVIDER_SUBJECT_MODEL
+        judge = args.judge_model or DEFAULT_PROVIDER_JUDGE_MODEL
+    else:
+        subject = args.model or "scripted"
+        judge = args.judge_model or "scripted-judge"
+    return subject, judge
+
+
+def _judge_options(args: argparse.Namespace, backend_name: str) -> Any:
+    """Build JudgeRunOptions from CLI flags; None when judging is off."""
+    from yarvelle_core.testing.orch_eval.calibration import resolve_stored_agreement
+    from yarvelle_core.testing.orch_eval.driver import JudgeRunOptions
+    from yarvelle_core.testing.orch_eval.judge import (
+        DEFAULT_JUDGE_SAMPLES,
+        MIN_AGREEMENT_FOR_GATE,
+        SameModelJudgeError,
+        assert_distinct_models,
+        can_enable_gate,
+    )
+    from yarvelle_core.testing.orch_eval.report import default_out_root
+
+    enabled = bool(getattr(args, "judge", False) or getattr(args, "judge_gate", False))
+    if not enabled:
+        return None
+    if backend_name == "fake":
+        print(
+            "warning: --judge is ignored on the fake backend "
+            "(use ollama, replay, or provider)",
+            file=sys.stderr,
+        )
+        return None
+    subject, judge = _resolved_models(backend_name, args)
+    allow = bool(getattr(args, "allow_self_judge", False))
+    try:
+        assert_distinct_models(subject, judge, allow_self_judge=allow)
+    except SameModelJudgeError as err:
+        print(str(err), file=sys.stderr)
+        raise SystemExit(2) from err
+    samples = getattr(args, "judge_samples", None)
+    if samples is None:
+        samples = DEFAULT_JUDGE_SAMPLES
+    agreement = resolve_stored_agreement(
+        judge,
+        backend=backend_name if backend_name != "replay" else "ollama",
+        root=(Path(args.out_dir).expanduser() / "calibration")
+        if getattr(args, "out_dir", None)
+        else (default_out_root() / "calibration"),
+        explicit=getattr(args, "judge_agreement", None),
+    )
+    gate = bool(getattr(args, "judge_gate", False))
+    if gate and not can_enable_gate(agreement):
+        print(
+            f"judge-gate refused: measured agreement is {agreement!r}; "
+            f"need >= {MIN_AGREEMENT_FOR_GATE}. Run `calibrate` first or pass "
+            f"--judge-agreement.",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+    return JudgeRunOptions(
+        enabled=True,
+        gate=gate,
+        samples=int(samples),
+        agreement=agreement,
+        allow_self_judge=allow,
+        subject_model=subject,
+        judge_model=judge,
+    )
 
 
 def _backend_factory(name: str, args: argparse.Namespace) -> Any:
@@ -405,11 +566,20 @@ def _run(args: argparse.Namespace) -> int:
         print(str(err), file=sys.stderr)
         return 2
     results: List[Any] = []
+    judge_opts = _judge_options(args, args.backend)
     try:
         for pack_id in sorted({s.pack for _p, s in selected}):
             group = [s for _p, s in selected if s.pack == pack_id]
             results.extend(
-                asyncio.run(run_scenarios(group, packs[pack_id], factory, samples=samples))
+                asyncio.run(
+                    run_scenarios(
+                        group,
+                        packs[pack_id],
+                        factory,
+                        samples=samples,
+                        judge=judge_opts,
+                    )
+                )
             )
     except OllamaUnavailableError as err:
         print(f"skip: {err}", file=sys.stderr)
@@ -443,6 +613,16 @@ def _run(args: argparse.Namespace) -> int:
     }
     if describe_backend is not None and hasattr(describe_backend, "meter"):
         document["spend"] = describe_backend.meter.snapshot()
+    if judge_opts is not None:
+        document["judge"] = {
+            "enabled": True,
+            "gate": judge_opts.gate,
+            "samples": judge_opts.samples,
+            "agreement": judge_opts.agreement,
+            "subject_model": judge_opts.subject_model,
+            "judge_model": judge_opts.judge_model,
+            "allow_self_judge": judge_opts.allow_self_judge,
+        }
 
     from yarvelle_core.testing.orch_eval.baseline import (
         EXIT_REGRESSION,
@@ -538,6 +718,197 @@ def _baseline_cmd(args: argparse.Namespace) -> int:
     return 0
 
 
+
+def _calibrate_cmd(args: argparse.Namespace) -> int:
+    """Score labelled fixtures with the judge and report agreement ($0 on Ollama)."""
+    from yarvelle_core.testing.orch_eval.calibration import (
+        default_calibration_dir,
+        load_calibration_dir,
+        save_agreement_report,
+    )
+    from yarvelle_core.testing.orch_eval.defaults import (
+        DEFAULT_OLLAMA_JUDGE_MODEL,
+        DEFAULT_PROVIDER_JUDGE_MODEL,
+    )
+    from yarvelle_core.testing.orch_eval.judge import DEFAULT_JUDGE_SAMPLES, MIN_AGREEMENT_FOR_GATE
+    from yarvelle_core.testing.orch_eval.ollama_backend import OllamaUnavailableError
+    from yarvelle_core.testing.orch_eval.report import default_out_root
+
+    backend_name = args.backend
+    if backend_name == "provider" and float(args.max_usd or 0) <= 0:
+        print("calibrate on provider requires --max-usd > 0", file=sys.stderr)
+        return 2
+    cal_dir = (
+        Path(args.calibration_dir).expanduser()
+        if args.calibration_dir
+        else default_calibration_dir()
+    )
+    try:
+        cases = load_calibration_dir(cal_dir)
+    except (OSError, ValueError, FileNotFoundError) as err:
+        print(f"calibrate error: {err}", file=sys.stderr)
+        return 1
+    if backend_name == "ollama":
+        judge_model = args.judge_model or DEFAULT_OLLAMA_JUDGE_MODEL
+    elif backend_name == "provider":
+        judge_model = args.judge_model or DEFAULT_PROVIDER_JUDGE_MODEL
+    else:
+        judge_model = args.judge_model or DEFAULT_OLLAMA_JUDGE_MODEL
+    # Keep subject distinct from the judge for backend construction.
+    if args.model is None:
+        args.model = "qwen3:8b" if backend_name != "provider" else "gpt-4o-mini"
+    # For calibrate recordings, key cassettes by the judge model (not the subject).
+    from yarvelle_core.testing.orch_eval.cassette import CassetteBackend
+    from yarvelle_core.testing.orch_eval.defaults import (
+        DEFAULT_OLLAMA_BASE_URL,
+        DEFAULT_SEED,
+    )
+
+    samples = args.samples if args.samples is not None else DEFAULT_JUDGE_SAMPLES
+    try:
+        if backend_name == "ollama":
+            from yarvelle_core.testing.orch_eval.ollama_backend import OllamaBackend
+
+            inner = OllamaBackend(
+                subject_model=args.model,
+                judge_model=judge_model,
+                base_url=args.base_url or DEFAULT_OLLAMA_BASE_URL,
+                seed=DEFAULT_SEED if args.seed is None else args.seed,
+                require_ready=True,
+            )
+            source_backend = "ollama"
+        elif backend_name == "provider":
+            from yarvelle_core.testing.orch_eval.provider_backend import ProviderBackend
+            from yarvelle_core.testing.orch_eval.defaults import DEFAULT_PROVIDER
+
+            inner = ProviderBackend(
+                max_usd=args.max_usd,
+                provider=args.provider or DEFAULT_PROVIDER,
+                subject_model=args.model,
+                judge_model=judge_model,
+                key_file=args.key_file,
+                base_url=args.base_url,
+                seed=DEFAULT_SEED if args.seed is None else args.seed,
+            )
+            source_backend = "provider"
+        elif backend_name == "replay":
+            inner = None
+            source_backend = "ollama"
+        else:
+            print(f"unsupported calibrate backend {backend_name!r}", file=sys.stderr)
+            return 2
+
+        if getattr(args, "record", False) or backend_name == "replay":
+            root = _cassette_root(args)
+            mode = "record" if getattr(args, "record", False) else "replay"
+            backend = CassetteBackend(
+                cassette_root=root,
+                mode=mode,
+                inner=inner,
+                backend_label=source_backend,
+                model_label=judge_model,
+            )
+        else:
+            backend = inner
+    except OllamaUnavailableError as err:
+        print(f"skip: {err}", file=sys.stderr)
+        return 0
+    except Exception as err:
+        print(f"calibrate backend error: {err}", file=sys.stderr)
+        return 1
+
+    from yarvelle_core.testing.orch_eval.backends import Role
+    from yarvelle_core.testing.orch_eval.calibration import (
+        AgreementReport,
+        CaseAgreement,
+        cohen_kappa,
+        verdict_matches,
+    )
+    from yarvelle_core.testing.orch_eval.judge import score_turn
+    from datetime import datetime, timezone
+
+    rows = []
+    try:
+        for case in cases:
+            if hasattr(backend, "begin_scenario"):
+                backend.begin_scenario(pack_id="calibration", scenario_id=case.id)
+            model = backend.model_for(Role(kind="judge"))
+            result = score_turn(
+                model,
+                rubric=case.rubric,
+                criteria=case.criteria,
+                min_score=4,
+                user=case.user,
+                answer=case.answer,
+                trace_summary=case.trace_summary,
+                conversation=case.conversation,
+                samples=samples,
+            )
+            agreed = verdict_matches(
+                case.label.verdict, result.verdict, unsure=result.unsure
+            )
+            rows.append(
+                CaseAgreement(
+                    case_id=case.id,
+                    label_verdict=case.label.verdict,
+                    label_score=case.label.score,
+                    judge_verdict=result.verdict,
+                    judge_score=result.score,
+                    agreed=agreed,
+                    unsure=result.unsure,
+                    judge=result.to_dict(),
+                )
+            )
+            if hasattr(backend, "flush"):
+                backend.flush()
+    except OllamaUnavailableError as err:
+        print(f"skip: {err}", file=sys.stderr)
+        return 0
+    except Exception as err:
+        print(f"calibrate failed: {err}", file=sys.stderr)
+        return 1
+    if hasattr(backend, "flush"):
+        backend.flush()
+    n = len(rows)
+    n_agree = sum(1 for r in rows if r.agreed)
+    agreement = (n_agree / n) if n else 0.0
+    label_v = [r.label_verdict for r in rows]
+    pred_v = ["unsure" if r.unsure else r.judge_verdict for r in rows]
+    report = AgreementReport(
+        judge_model=judge_model,
+        backend=backend_name,
+        samples=samples,
+        cases=rows,
+        agreement=agreement,
+        cohen_kappa=cohen_kappa(label_v, pred_v),
+        n=n,
+        n_agree=n_agree,
+        meets_gate_threshold=agreement >= MIN_AGREEMENT_FOR_GATE,
+        measured_at=datetime.now(timezone.utc).isoformat(),
+    )
+    from yarvelle_core.testing.orch_eval.calibration import calibration_store_path
+
+    if args.out_dir:
+        saved = save_agreement_report(
+            report,
+            Path(args.out_dir).expanduser()
+            / f"{backend_name}-{judge_model.replace(':', '-')}.json",
+        )
+    else:
+        saved = save_agreement_report(
+            report,
+            calibration_store_path(judge_model, backend=backend_name),
+        )
+    print(json.dumps(report.to_dict(), indent=2))
+    print(
+        f"agreement: {report.agreement:.1%} ({report.n_agree}/{report.n})  "
+        f"kappa={report.cohen_kappa:.3f}  gate_ok={report.meets_gate_threshold}",
+        file=sys.stderr,
+    )
+    print(f"saved: {saved}", file=sys.stderr)
+    return 0 if report.n else 1
+
+
 def _compare_cmd(args: argparse.Namespace) -> int:
     from yarvelle_core.testing.orch_eval.baseline import (
         EXIT_REGRESSION,
@@ -600,6 +971,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return _baseline_cmd(args)
     if args.command == "compare":
         return _compare_cmd(args)
+    if args.command == "calibrate":
+        return _calibrate_cmd(args)
     parser.print_help()
     return 2
 

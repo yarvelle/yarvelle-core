@@ -15,6 +15,11 @@ turns:
         must_not_cite: [trip-organizer, budget-planner, calendar-helper, writing-coach]
       answer:
         must_mention: ["hello"]
+    judge:
+      rubric: synthesis
+      criteria: >
+        A greeting reply should be friendly and must not leak agent ids.
+      min_score: 4
     fake:
       main:
         - answer: "Hello! What can I help you with today?"

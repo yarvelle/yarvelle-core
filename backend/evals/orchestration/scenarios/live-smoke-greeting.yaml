@@ -15,3 +15,9 @@ turns:
       max_task_calls: 1
       answer:
         must_not_mention: ["internal-auditor", "Response from"]
+    judge:
+      rubric: synthesis
+      criteria: >
+        A greeting should be friendly and must not leak agent ids or tool names.
+      min_score: 4
+

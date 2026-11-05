@@ -1,0 +1,24 @@
+# HUMAN LABEL — not model output. Used only to measure judge agreement.
+schema: 1
+id: synth-good-budget
+kind: human_label
+rubric: synthesis
+criteria: >
+  The answer should synthesize the budget update clearly for the user
+  without leaking agent ids or tool names.
+user: "What is left in my grocery budget after that receipt?"
+answer: "You have $310 left for groceries this month after adding the $42.50 receipt."
+conversation:
+  - role: user
+    text: "What is the total on this receipt?"
+  - role: assistant
+    text: "The receipt total is 42.50."
+trace_summary:
+  route: main_agent
+  agents: [budget-planner]
+  notices: []
+  provenance_titles: ["Budget planner"]
+label:
+  score: 5
+  verdict: pass
+  notes: "Clear synthesis of amount and remaining budget; no slug leak."

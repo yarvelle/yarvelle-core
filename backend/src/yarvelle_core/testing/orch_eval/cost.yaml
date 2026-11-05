@@ -23,3 +23,10 @@ models:
   gemini-2.0-flash:
     input_per_mtok: 0.10
     output_per_mtok: 0.40
+  gpt-5-mini:
+    input_per_mtok: 0.25
+    output_per_mtok: 2.00
+  gpt-5-nano:
+    input_per_mtok: 0.05
+    output_per_mtok: 0.40
+

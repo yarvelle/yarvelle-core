@@ -150,6 +150,46 @@ def _task_summary(document: Mapping[str, Any]) -> Dict[str, Any]:
     }
 
 
+
+def _judge_summary(document: Mapping[str, Any]) -> Dict[str, Any]:
+    """Aggregate soft LLM-judge results for the report and baseline."""
+    scores: List[float] = []
+    by_rubric: Dict[str, List[float]] = {}
+    verdicts: Dict[str, int] = {}
+    gated_fails = 0
+    n = 0
+    for turn in _iter_turns(document):
+        judge = turn.get("judge")
+        if not isinstance(judge, Mapping):
+            continue
+        n += 1
+        score = judge.get("score")
+        if isinstance(score, (int, float)):
+            scores.append(float(score))
+            rubric = str(judge.get("rubric") or "?")
+            by_rubric.setdefault(rubric, []).append(float(score))
+        verdict = str(judge.get("verdict") or "unknown")
+        verdicts[verdict] = verdicts.get(verdict, 0) + 1
+        if judge.get("gate_failed"):
+            gated_fails += 1
+    return {
+        "turns_scored": n,
+        "mean_score": (None if not scores else round(statistics.fmean(scores), 3)),
+        "median_score": (
+            None if not scores else round(float(statistics.median(scores)), 3)
+        ),
+        "by_rubric_mean": {
+            k: round(statistics.fmean(v), 3) for k, v in sorted(by_rubric.items())
+        },
+        "verdicts": dict(sorted(verdicts.items())),
+        "gated_failures": gated_fails,
+        "report_only_note": (
+            "Judge scores are report-only unless --judge-gate is on and "
+            "measured agreement is at least 80%."
+        ),
+    }
+
+
 def compute_aggregates(document: Mapping[str, Any]) -> Dict[str, Any]:
     """Derives suite-level numbers used by reports and baseline compare."""
     scenarios = list(document.get("scenarios") or [])
@@ -181,6 +221,7 @@ def compute_aggregates(document: Mapping[str, Any]) -> Dict[str, Any]:
         "cost_usd": cost_usd,
         "routes": _route_summary(document),
         "tasks": _task_summary(document),
+        "judge": _judge_summary(document),
     }
 
 
@@ -241,6 +282,12 @@ def render_markdown(document: Mapping[str, Any]) -> str:
     lines.append(f"| Failed | {totals.get('failed', agg.get('failed_rows'))} |")
     lines.append(f"| Suite score | {suite:.2f} |")
     lines.append(f"| Hard-rule failures | {hard_n} |")
+    judge_agg = agg.get("judge") or {}
+    if judge_agg.get("turns_scored"):
+        lines.append(
+            f"| Judge mean score | {judge_agg.get('mean_score')} "
+            f"({judge_agg.get('turns_scored')} turn(s)) |"
+        )
     lines.append(f"| Latency p50 / p95 (ms) | {lat.get('p50')} / {lat.get('p95')} |")
     lines.append(f"| Cost (USD) | {cost:.6f} |")
     lines.append("")
@@ -280,6 +327,18 @@ def render_markdown(document: Mapping[str, Any]) -> str:
             for f in s.get("failures") or []:
                 lines.append(f"- {f}")
             lines.append("")
+    judge_agg = agg.get("judge") or {}
+    if judge_agg.get("turns_scored"):
+        lines.append("## Judge (report-only by default)")
+        lines.append("")
+        lines.append(
+            f"- Turns scored: {judge_agg.get('turns_scored')} · "
+            f"mean {judge_agg.get('mean_score')} · median {judge_agg.get('median_score')}"
+        )
+        lines.append(f"- Verdicts: {judge_agg.get('verdicts')}")
+        lines.append(f"- Gated failures: {judge_agg.get('gated_failures')}")
+        lines.append(f"- {judge_agg.get('report_only_note')}")
+        lines.append("")
     lines.append("## Per-scenario")
     lines.append("")
     lines.append("| Scenario | Sample | Passed | Turns | Failures |")

@@ -1,0 +1,20 @@
+# HUMAN LABEL — not model output.
+schema: 1
+id: synth-bad-slug-leak
+kind: human_label
+rubric: synthesis
+criteria: >
+  The answer should synthesize findings for the user without leaking
+  internal agent ids.
+user: "Summarize what you found about my budget."
+answer: "budget-planner says groceries are at 290 of 600; writing-coach was not used."
+conversation: []
+trace_summary:
+  route: main_agent
+  agents: [budget-planner]
+  notices: []
+  provenance_titles: ["Budget planner"]
+label:
+  score: 2
+  verdict: fail
+  notes: "Leaks agent ids in the user-facing answer."

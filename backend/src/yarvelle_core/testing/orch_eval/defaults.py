@@ -25,9 +25,11 @@ DEFAULT_TEMPERATURE = 0.0
 
 # Paid provider defaults (only used when --max-usd > 0 and a key is supplied
 # at run time; importing this module never loads a key).
+# Subject and judge must differ; gpt-5-mini is the current cheap OpenAI judge
+# default (structured JSON, distinct from gpt-4o-mini).
 DEFAULT_PROVIDER = "openai"
 DEFAULT_PROVIDER_SUBJECT_MODEL = "gpt-4o-mini"
-DEFAULT_PROVIDER_JUDGE_MODEL = "gpt-4o-mini"
+DEFAULT_PROVIDER_JUDGE_MODEL = "gpt-5-mini"
 
 __all__ = [
     "DEFAULT_OLLAMA_BASE_URL",
