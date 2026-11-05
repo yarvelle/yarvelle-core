@@ -2,12 +2,20 @@
 # Defines supported pairings of core, @yarvelle/ui, and pack_api versions.
 
 matrix:
+  - core: "0.2.0"
+    ui: "0.2.0"
+    pack_api: 1
+    python: ">=3.12"
+    node: ">=20.0.0"
+    status: "active"
+    notes: "Subagent orchestration with hybrid routing, stored hand-offs and strict route audit, opt-in checkpoint encryption, and a local-only eval harness"
+
   - core: "0.1.2"
     ui: "0.1.2"
     pack_api: 1
     python: ">=3.12"
     node: ">=20.0.0"
-    status: "active"
+    status: "supported"
     notes: "Multi-agent blackboard deliberation, dynamic multi-dialect MCP DB toolbox, and pack hook fixes"
 
   - core: "0.1.1"
