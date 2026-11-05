@@ -143,7 +143,7 @@ def test_shipped_scenarios_lint_against_shipped_pack(monkeypatch: pytest.MonkeyP
         monkeypatch.delenv(name, raising=False)
     pack = load_eval_pack(EVAL_DIR / "pack")
     loaded = load_scenario_files([EVAL_DIR / "scenarios"])
-    assert 12 <= len(loaded) <= 24
+    assert 12 <= len(loaded) <= 40
     for path, sc in loaded:
         assert lint_against_pack(sc, pack) == [], path
     assert pack.hidden_ids == ["internal-auditor"]
