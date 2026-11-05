@@ -20,8 +20,10 @@ from pydantic import BaseModel, Field
 SHA256_HEX_PATTERN = r"^[0-9a-f]{64}$"
 
 OrchestrationAuditEventType = Literal[
+    "route.user_selected",
     "route.fixed",
     "route.default",
+    "route.main_agent",
     "task.started",
     "task.completed",
     "task.failed",
@@ -43,8 +45,10 @@ AuditEventType = Literal[
     "boundary_warning",
     "synthesis",
     "scope.cross_read",
+    "route.user_selected",
     "route.fixed",
     "route.default",
+    "route.main_agent",
     "task.started",
     "task.completed",
     "task.failed",

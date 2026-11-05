@@ -14,7 +14,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, Protocol, Sequence, Set, runtime_checkable
+import re
+from typing import Any, Dict, List, Optional, Protocol, Sequence, Set, runtime_checkable
 
 
 @dataclass(frozen=True)
@@ -95,6 +96,27 @@ class SafetyPolicy(Protocol):
         ...
 
 
+_FLAG_PATTERN = re.compile(r"^[a-z0-9_-]{1,64}$")
+
+
+def policy_flags(policy: Any, text: Optional[str], ctx: Optional[SafetyContext] = None) -> List[str]:
+    """Guardrail flags a policy raises for ``text``, deduplicated and in order.
+
+    Flags are non-refusing signals (for example ``urgent``) that pack fixed
+    routes can match. ``check_flags`` is optional: policies without it raise
+    none. Names that are not slugs are dropped.
+    """
+    check = getattr(policy, "check_flags", None)
+    if not callable(check):
+        return []
+    out: List[str] = []
+    for flag in check(text, ctx) or ():
+        name = str(flag).strip().lower()
+        if _FLAG_PATTERN.match(name) and name not in out:
+            out.append(name)
+    return out
+
+
 _DEFAULT_SAFETY_POLICY: Optional[SafetyPolicy] = None
 _DOMAIN_SAFETY_POLICIES: Dict[str, SafetyPolicy] = {}
 
@@ -146,6 +168,9 @@ class NeutralSafetyPolicy:
 
     def get_forbidden_intents(self) -> Set[str]:
         return set()
+
+    def check_flags(self, text: Optional[str], ctx: Optional[SafetyContext] = None) -> List[str]:
+        return []
 
 
 class UnionSafetyPolicy:
@@ -256,6 +281,15 @@ class UnionSafetyPolicy:
             intents.update(p.get_forbidden_intents())
         return intents
 
+    def check_flags(self, text: Optional[str], ctx: Optional[SafetyContext] = None) -> List[str]:
+        """Returns the union of guardrail flags raised by all policies, in order."""
+        flags: List[str] = []
+        for p in self.policies:
+            for flag in policy_flags(p, text, ctx):
+                if flag not in flags:
+                    flags.append(flag)
+        return flags
+
 
 __all__ = [
     "EmergencyDirective",
@@ -265,6 +299,7 @@ __all__ = [
     "SafetyVerdict",
     "UnionSafetyPolicy",
     "get_default_safety_policy",
+    "policy_flags",
     "get_domain_safety_policy",
     "set_default_safety_policy",
     "set_domain_safety_policy",

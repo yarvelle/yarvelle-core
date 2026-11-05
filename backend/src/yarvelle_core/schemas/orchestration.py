@@ -277,6 +277,30 @@ class TaskProvenance(_Strict):
     verified: bool = False
 
 
+class TurnTaskRecord(_Strict):
+    """Stored record of one hand-off in a turn (one ``task`` tool call).
+
+    Built from the turn's ``task.*`` audit records and persisted to the
+    ``turn_tasks`` table. Holds status, timing and content hashes only; the
+    subagent's answer text is never stored here.
+    """
+
+    turn_id: str = Field(..., min_length=1)
+    task_id: str = Field(..., min_length=1)
+    thread_id: Optional[str] = None
+    parent_task_id: Optional[str] = None
+    agent_id: str
+    agent_title: str
+    state: TaskState
+    truncated: bool = False
+    verified: bool = False
+    input_hash: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    output_hash: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    error_code: Optional[str] = Field(default=None, pattern=r"^[a-z0-9_.-]{1,64}$")
+    started_at: Optional[str] = Field(default=None, description="ISO 8601 time of the task.started record.")
+    duration_ms: Optional[int] = Field(default=None, ge=0)
+
+
 class SSEOrchestrationNoticeEvent(_Strict):
     """User-visible notice about a fallback or degraded turn."""
 
@@ -320,4 +344,5 @@ __all__ = [
     "SynthesisSpec",
     "TaskProvenance",
     "TaskState",
+    "TurnTaskRecord",
 ]

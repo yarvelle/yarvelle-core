@@ -30,7 +30,8 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
+import inspect
+from typing import Any, Awaitable, Callable, Dict, List, Mapping, Optional, Sequence, Union
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import ModelCallLimitMiddleware, ToolCallLimitMiddleware
@@ -58,6 +59,7 @@ from yarvelle_core.schemas.orchestration import (
     SSEOrchestrationNoticeEvent,
     SynthesisSpec,
     TaskProvenance,
+    TurnTaskRecord,
 )
 
 logger = logging.getLogger(__name__)
@@ -82,6 +84,9 @@ _TERMINAL_EVENTS = {
 
 ToolResolver = Callable[[str, List[str]], List[Any]]
 """Maps (agent_id, declared tool names) to runnable tools for that subagent."""
+
+TurnTaskSink = Callable[[List[TurnTaskRecord]], Union[None, Awaitable[None]]]
+"""Stores the hand-off records of one turn (``turn_tasks``). A failure stops the turn."""
 
 _NOTICE_TEXT = {
     "model_unavailable": "No model is configured, so the default agent took this turn.",
@@ -141,6 +146,107 @@ def build_provenance(
             )
         )
     return out
+
+
+def build_turn_tasks(
+    audit_records: Sequence[AuditEvent],
+    runs: Sequence[TaskRun],
+    titles: Mapping[str, str],
+    *,
+    turn_id: str,
+    thread_id: Optional[str] = None,
+) -> List[TurnTaskRecord]:
+    """One stored record per hand-off of the turn, in request order.
+
+    Hand-offs refused before they started (policy or limits) are included with
+    their ``task.failed`` record, so the table matches the audit log.
+    """
+    run_by_id = {run.task_id: run for run in runs}
+    order: List[str] = []
+    started: Dict[str, AuditEvent] = {}
+    terminal: Dict[str, AuditEvent] = {}
+    for record in audit_records:
+        task_id = str(record.task_id or "")
+        if not task_id or not record.event.startswith("task."):
+            continue
+        if task_id not in order:
+            order.append(task_id)
+        if record.event == "task.started":
+            started[task_id] = record
+        elif record.event in _TERMINAL_EVENTS:
+            terminal[task_id] = record
+    out: List[TurnTaskRecord] = []
+    for task_id in order:
+        first = started.get(task_id) or terminal[task_id]
+        end = terminal.get(task_id)
+        run = run_by_id.get(task_id)
+        agent_id = run.agent_id if run is not None else str(first.agent_id)
+        out.append(
+            TurnTaskRecord(
+                turn_id=turn_id,
+                task_id=task_id,
+                thread_id=thread_id,
+                parent_task_id=first.parent_task_id,
+                agent_id=agent_id,
+                agent_title=titles.get(agent_id) or agent_id,
+                state=_TERMINAL_EVENTS[end.event] if end is not None else "started",  # type: ignore[arg-type]
+                truncated=run.truncated if run is not None else False,
+                verified=run is not None and run.lc_agent_name == run.agent_id,
+                input_hash=first.input_hash,
+                output_hash=end.output_hash if end is not None else None,
+                error_code=end.error_code if end is not None else None,
+                started_at=started[task_id].ts if task_id in started else None,
+                duration_ms=int(round(end.duration_ms)) if end is not None and end.duration_ms is not None else None,
+            )
+        )
+    return out
+
+
+async def store_turn_tasks(sink: Optional[TurnTaskSink], rows: List[TurnTaskRecord]) -> None:
+    """Sends the turn's hand-off records to ``sink``; a failed write stops the turn."""
+    if sink is None or not rows:
+        return
+    try:
+        result = sink(rows)
+        if inspect.isawaitable(result):
+            await result
+    except Exception as err:
+        raise OrchestrationAuditError("could not store the turn's hand-off records") from err
+
+
+_ROUTE_EVENTS = {
+    RouteSource.USER_SELECTED: "route.user_selected",
+    RouteSource.FIXED_ROUTE: "route.fixed",
+    RouteSource.DEFAULT_AGENT: "route.default",
+    RouteSource.MAIN_AGENT: "route.main_agent",
+}
+
+
+def route_event(decision: RouteDecision, turn_id: str, thread_id: Optional[str] = None) -> AuditEvent:
+    """The ``route.*`` audit record for one routing decision."""
+    return AuditEvent(
+        event=_ROUTE_EVENTS[decision.source],  # type: ignore[arg-type]
+        agent_id=decision.agent_id or MAIN_AGENT_ID,
+        turn_id=turn_id,
+        thread_id=thread_id,
+        details=decision.to_audit_payload(),
+    )
+
+
+async def record_route(
+    sink: Optional[AuditSink],
+    decision: RouteDecision,
+    turn_id: str,
+    thread_id: Optional[str] = None,
+) -> None:
+    """Sends the decision's ``route.*`` record to ``sink``; a failed write stops the turn."""
+    if sink is None:
+        return
+    record = route_event(decision, turn_id, thread_id)
+    try:
+        await _emit(sink, record)
+    except Exception as err:
+        raise OrchestrationAuditError(f"could not record {record.event}") from err
 
 
 def _join(titles: Sequence[str]) -> str:
@@ -286,8 +392,10 @@ class HybridRouter:
         status_sink: Optional[TaskStatusSink] = None,
         system_prompt: Optional[str] = None,
         tool_resolver: Optional[ToolResolver] = None,
+        task_sink: Optional[TurnTaskSink] = None,
     ) -> None:
         self.registry = registry
+        self.task_sink = task_sink
         self.model = model
         self.spec = spec
         self.default_agent = (spec.default_agent if spec is not None else None) or default_agent
@@ -331,26 +439,8 @@ class HybridRouter:
         )
 
     async def audit_route(self, decision: RouteDecision, turn_id: str, thread_id: Optional[str] = None) -> None:
-        """Records ``route.fixed`` / ``route.default`` (strict durability)."""
-        if self.audit_sink is None:
-            return
-        if decision.source == RouteSource.FIXED_ROUTE:
-            event = "route.fixed"
-        elif decision.source == RouteSource.DEFAULT_AGENT:
-            event = "route.default"
-        else:
-            return
-        record = AuditEvent(
-            event=event,  # type: ignore[arg-type]
-            agent_id=decision.agent_id or MAIN_AGENT_ID,
-            turn_id=turn_id,
-            thread_id=thread_id,
-            details=decision.to_audit_payload(),
-        )
-        try:
-            await _emit(self.audit_sink, record)
-        except Exception as err:
-            raise OrchestrationAuditError(f"could not record {event}") from err
+        """Records the ``route.*`` event for a decision (strict durability)."""
+        await record_route(self.audit_sink, decision, turn_id, thread_id)
 
     def _agent_titles(self) -> Dict[str, str]:
         out: Dict[str, str] = {}
@@ -394,6 +484,7 @@ class HybridRouter:
             return outcome
 
         assert self.model is not None
+        await self.audit_route(decision, turn_id, thread_id)
         records: List[AuditEvent] = []
         downstream = self.audit_sink
 
@@ -423,6 +514,10 @@ class HybridRouter:
         except Exception as err:
             logger.warning("Main agent failed: %s", type(err).__name__)
             fallback = self._default_decision("main_agent_failed")
+            await store_turn_tasks(
+                self.task_sink,
+                build_turn_tasks(records, guard.runs, titles, turn_id=turn_id, thread_id=thread_id),
+            )
             if fallback is None:
                 raise
             await self.audit_route(fallback, turn_id, thread_id)
@@ -438,6 +533,10 @@ class HybridRouter:
         before = len(state.get("messages") or [])
         new_messages = list(result.get("messages") or [])[before:]
         provenance = build_provenance(guard.runs, records, titles)
+        await store_turn_tasks(
+            self.task_sink,
+            build_turn_tasks(records, guard.runs, titles, turn_id=turn_id, thread_id=thread_id),
+        )
         return TurnOutcome(
             decision=decision,
             turn_id=turn_id,
@@ -465,7 +564,12 @@ __all__ = [
     "TurnOutcome",
     "build_main_agent",
     "build_provenance",
+    "build_turn_tasks",
+    "store_turn_tasks",
+    "TurnTaskSink",
     "compose_main_prompt",
+    "record_route",
+    "route_event",
     "final_answer",
     "gap_statement",
     "state_gaps",

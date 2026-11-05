@@ -1884,6 +1884,38 @@ class AuditEventRecord(Base, ScopedMixin):
         nullable=True,
         doc="Risk tier classification: read, write_local, write_external, irreversible",
     )
+    turn_id: Mapped[Optional[str]] = mapped_column(
+        String(64),
+        nullable=True,
+        index=True,
+        doc="Conversation turn identifier for orchestration events",
+    )
+    task_id: Mapped[Optional[str]] = mapped_column(
+        String(128),
+        nullable=True,
+        index=True,
+        doc="Hand-off identifier (task tool call id) for task events",
+    )
+    parent_task_id: Mapped[Optional[str]] = mapped_column(
+        String(128),
+        nullable=True,
+        doc="Hand-off that started this one, when nested",
+    )
+    input_hash: Mapped[Optional[str]] = mapped_column(
+        String(64),
+        nullable=True,
+        doc="SHA-256 of the hand-off instructions",
+    )
+    output_hash: Mapped[Optional[str]] = mapped_column(
+        String(64),
+        nullable=True,
+        doc="SHA-256 of the subagent answer",
+    )
+    error_code: Mapped[Optional[str]] = mapped_column(
+        String(64),
+        nullable=True,
+        doc="Stable error code for failed, refused or timed-out hand-offs",
+    )
 
     profile: Mapped[Optional[Profile]] = relationship("Profile")
     actor: Mapped[Optional[User]] = relationship("User")
@@ -3290,6 +3322,41 @@ class EmailDraft(Base, ScopedMixin):
             f"<EmailDraft id={self.id!r} profile_id={self.profile_id!r} "
             f"subject={self.subject!r} status={self.status!r}>"
         )
+
+
+class TurnTask(Base, ScopedMixin):
+    """One subagent hand-off of a conversation turn: status, timing and hashes only."""
+
+    __tablename__ = "turn_tasks"
+    __table_args__ = (
+        UniqueConstraint("turn_id", "task_id", name="uq_turn_tasks_turn_task"),
+        {"comment": "One record per subagent hand-off of a turn; stores status, timing and content hashes, never answer text."},
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+        doc="Unique record identifier (UUID v4 string)",
+    )
+    turn_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True, doc="Conversation turn identifier")
+    task_id: Mapped[str] = mapped_column(String(128), nullable=False, doc="Hand-off identifier (task tool call id)")
+    thread_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True, doc="Conversation thread identifier")
+    parent_task_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, doc="Hand-off that started this one, when nested")
+    agent_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True, doc="Agent the work was handed to")
+    agent_title: Mapped[str] = mapped_column(String(255), nullable=False, doc="Display title of the agent")
+    state: Mapped[str] = mapped_column(String(16), nullable=False, doc="started, completed, failed, timed_out or cancelled")
+    truncated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, doc="Answer was cut at the size limit")
+    verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, doc="The answering run reported the requested agent")
+    input_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, doc="SHA-256 of the hand-off instructions")
+    output_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, doc="SHA-256 of the subagent answer")
+    error_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, doc="Stable error code when the hand-off did not complete")
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, doc="When the hand-off started (UTC)")
+    duration_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, doc="Run time in milliseconds")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, doc="Record creation time (UTC)")
+
+    def __repr__(self) -> str:
+        return f"<TurnTask turn_id={self.turn_id!r} task_id={self.task_id!r} agent_id={self.agent_id!r} state={self.state!r}>"
 
 
 # Register dual-write listeners and synchronize DDL/ORM comments after all models are loaded

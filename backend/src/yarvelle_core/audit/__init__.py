@@ -20,6 +20,8 @@ from yarvelle_core.audit.hash_chain import (
 )
 from yarvelle_core.audit.logger import (
     AuditLogger,
+    AuditWriteError,
+    best_effort_failure_count,
     compute_payload_hash,
     get_recent_audit_events,
     read_recent_audit_events,
@@ -39,4 +41,6 @@ __all__ = [
     "read_recent_audit_events",
     "compute_payload_hash",
     "AuditLogger",
+    "AuditWriteError",
+    "best_effort_failure_count",
 ]

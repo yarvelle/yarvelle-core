@@ -22,6 +22,7 @@ from datetime import date
 from enum import Enum
 import operator
 import re
+import uuid
 from typing import Annotated, Any, Dict, List, Literal, Optional, Sequence, Union
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from typing_extensions import TypedDict
@@ -166,6 +167,8 @@ class AgentState(TypedDict, total=False):
     specialist_outputs: Dict[str, Any]
 
     # Hybrid routing (fixed routes, then the main agent)
+    explicit_agent: Optional[str]
+    turn_id: Optional[str]
     guardrail_flags: List[str]
     route_decision: Optional[Dict[str, Any]]
     orchestration_notices: List[Dict[str, Any]]
@@ -177,6 +180,39 @@ class AgentState(TypedDict, total=False):
 
     # Multi-Agent Blackboard Deliberation State (R1-R3)
     deliberation_state: Optional[Dict[str, Any]]
+
+
+# Routing results that describe one turn only. They are cleared when a turn
+# starts so a previous turn's route, notices or hand-offs never carry over.
+TURN_OUTPUT_DEFAULTS: Dict[str, Any] = {
+    "route_decision": None,
+    "orchestration_notices": [],
+    "provenance": [],
+    "guardrail_flags": [],
+    "routed_subgraph": None,
+    "specialist_outputs": {},
+}
+
+# Caller choices that apply to one turn only. They are cleared when a turn
+# ends, so a later turn is pinned only if its caller asks again.
+TURN_INPUT_FIELDS: tuple[str, ...] = ("explicit_agent", "execution_plan")
+
+
+def turn_start_values(turn_id: Optional[str] = None, explicit_agent: Optional[str] = None) -> Dict[str, Any]:
+    """State updates that start a turn: fresh routing results and a turn id.
+
+    ``current_agent`` restarts at the caller's pick (``explicit_agent``) or
+    empty, so the agent that answered the previous turn does not pin this one.
+    """
+    values = {k: (list(v) if isinstance(v, list) else dict(v) if isinstance(v, dict) else v) for k, v in TURN_OUTPUT_DEFAULTS.items()}
+    values["turn_id"] = turn_id or uuid.uuid4().hex
+    values["current_agent"] = explicit_agent or None
+    return values
+
+
+def turn_end_values() -> Dict[str, Any]:
+    """State updates that end a turn: the caller's one-turn choices are dropped."""
+    return {k: None for k in TURN_INPUT_FIELDS}
 
 
 SLUG_REGEX: re.Pattern[str] = re.compile(r"^[a-z0-9_-]{1,64}$")
@@ -528,7 +564,11 @@ __all__ = [
     "SLUG_REGEX",
     "StagedAction",
     "TypedClaim",
+    "TURN_INPUT_FIELDS",
+    "TURN_OUTPUT_DEFAULTS",
     "create_initial_state",
+    "turn_end_values",
+    "turn_start_values",
     "extract_text_content",
     "get_last_message",
     "get_last_user_message",

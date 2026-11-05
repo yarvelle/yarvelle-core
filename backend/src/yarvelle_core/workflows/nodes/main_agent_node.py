@@ -29,7 +29,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 
 from yarvelle_core.agents.registry import AgentRegistry
 from yarvelle_core.constants.api import SSE_EVENT_ORCHESTRATION_NOTICE, SSE_EVENT_TASK_STATUS
-from yarvelle_core.engine.orchestration.runtime import MAIN_AGENT_ID, HybridRouter, ToolResolver
+from yarvelle_core.engine.orchestration.runtime import MAIN_AGENT_ID, HybridRouter, ToolResolver, TurnTaskSink
 from yarvelle_core.engine.orchestration.task_guard import AuditSink, TaskStatusSink
 from yarvelle_core.schemas.orchestration import PackOrchestrationSpec, RouteSource
 from yarvelle_core.workflows.nodes.base import BaseNode
@@ -65,6 +65,7 @@ class MainAgentNode(BaseNode):
         audit_sink: Optional[AuditSink] = None,
         status_sink: Optional[TaskStatusSink] = None,
         tool_resolver: Optional[ToolResolver] = None,
+        task_sink: Optional[TurnTaskSink] = None,
         name: str = "main_agent",
     ) -> None:
         super().__init__(name=name)
@@ -76,10 +77,11 @@ class MainAgentNode(BaseNode):
             audit_sink=audit_sink,
             status_sink=status_sink or stream_task_status,
             tool_resolver=tool_resolver,
+            task_sink=task_sink,
         )
 
     async def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        outcome = await self.router.run(state, thread_id=state.get("thread_id"))
+        outcome = await self.router.run(state, turn_id=state.get("turn_id"), thread_id=state.get("thread_id"))
         if outcome is None:
             return {"error": "No agent could take this turn.", "next_step": "error"}
         notices = [n.model_dump(mode="json") for n in outcome.notices]
