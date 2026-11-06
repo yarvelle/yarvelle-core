@@ -66,3 +66,19 @@ def test_wheel_metadata_reports_020(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         assert version_members
         body = zf.read(version_members[0]).decode("utf-8")
         assert '__version__ = "0.2.0"' in body
+
+def test_httpx_constraint_keeps_stable_api() -> None:
+    """CI uses --prerelease=allow; httpx must stay on the 0.x line with HTTPStatusError."""
+    import re
+
+    import httpx
+
+    pyproject = tomllib.loads((REPO_ROOT / "backend" / "pyproject.toml").read_text(encoding="utf-8"))
+    deps = pyproject["project"]["dependencies"]
+    httpx_deps = [d for d in deps if d.startswith("httpx")]
+    assert httpx_deps, "httpx must be a direct dependency"
+    spec = httpx_deps[0]
+    assert "<1" in spec, spec
+    assert re.search(r">=\s*0\.27", spec), spec
+    assert hasattr(httpx, "HTTPStatusError")
+    assert not str(httpx.__version__).startswith("1.0.dev")
