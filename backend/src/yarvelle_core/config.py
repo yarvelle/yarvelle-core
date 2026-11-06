@@ -197,7 +197,7 @@ class Settings(BaseSettings):
     # Opt-in at-rest encryption for audit detail bodies and long-term memory payloads.
     # Keys derive from the vault KEK (same pattern as checkpoint encryption). Defaults
     # preserve plaintext. plaintext_reads keeps legacy rows readable during migration;
-    # turn them off after an explicit app-side migration (e.g. Carefold F4).
+    # turn them off after an explicit app-side migration follow-up.
     audit_encryption: bool = False
     audit_plaintext_reads: bool = True
     audit_key_version: int = Field(default=1, ge=1)
