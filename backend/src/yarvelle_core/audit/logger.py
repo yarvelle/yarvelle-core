@@ -25,6 +25,7 @@ import uuid
 import weakref
 
 from yarvelle_core.audit.redaction import redact_audit_event
+from yarvelle_core.vault import field_crypto as field_crypto
 from yarvelle_core.config import settings
 from yarvelle_core.constants.defaults import DEFAULT_AUDIT_LIMIT
 from yarvelle_core.constants.paths import DEFAULT_AUDIT_LOG_FILE, LOGS_DIR
@@ -80,6 +81,49 @@ _best_effort_failures = 0
 def best_effort_failure_count() -> int:
     """How many ``best_effort`` audit writes failed in this process."""
     return _best_effort_failures
+
+
+
+
+def _maybe_seal_audit_detail(
+    detail_redacted: Optional[str],
+    *,
+    record_id: str,
+    profile_id: Optional[str],
+    event_type: str,
+    run_id: Optional[str],
+) -> Optional[str]:
+    """Seal audit detail JSON when audit_encryption is enabled (hash-then-encrypt)."""
+    if not detail_redacted:
+        return detail_redacted
+    if not getattr(settings, "audit_encryption", False):
+        return detail_redacted
+    keyring = field_crypto.get_audit_keyring()
+    aad = field_crypto.build_aad(["audit", profile_id, event_type, record_id, run_id])
+    return field_crypto.seal_text(keyring, detail_redacted, aad)
+
+
+def open_audit_detail(
+    detail_redacted: Optional[str],
+    *,
+    record_id: str,
+    profile_id: Optional[str],
+    event_type: str,
+    run_id: Optional[str],
+) -> Optional[str]:
+    """Open a possibly sealed audit detail field for API / inspection callers."""
+    if not detail_redacted:
+        return detail_redacted
+    if not field_crypto.is_sealed_text(detail_redacted) and not getattr(settings, "audit_encryption", False):
+        return detail_redacted
+    keyring = field_crypto.get_audit_keyring()
+    aad = field_crypto.build_aad(["audit", profile_id, event_type, record_id, run_id])
+    return field_crypto.open_text(
+        keyring,
+        detail_redacted,
+        aad,
+        allow_plaintext=bool(getattr(settings, "audit_plaintext_reads", True)),
+    )
 
 
 async def _persist_to_db(record: AuditEventRecord, db: Optional[Any] = None, session_factory: Optional[Any] = None) -> None:
@@ -277,7 +321,13 @@ async def record_audit(
         decision=str(effective_decision).strip() if effective_decision else None,
         payload_hash=effective_payload_hash,
         external_ref=str(effective_external_ref).strip() if effective_external_ref else None,
-        detail_redacted=detail_redacted,
+        detail_redacted=_maybe_seal_audit_detail(
+            detail_redacted,
+            record_id=record_id,
+            profile_id=str(profile_id).strip() if profile_id else None,
+            event_type=str(event_type),
+            run_id=str(effective_run_id).strip() if effective_run_id else None,
+        ),
         scope=effective_scope,
         pack_id=str(effective_pack_id).strip() if effective_pack_id else None,
         risk_tier=str(effective_risk_tier).strip() if effective_risk_tier else None,

@@ -194,6 +194,17 @@ class Settings(BaseSettings):
     checkpoint_plaintext_reads: bool = True
     checkpoint_key_version: int = Field(default=1, ge=1)
 
+    # Opt-in at-rest encryption for audit detail bodies and long-term memory payloads.
+    # Keys derive from the vault KEK (same pattern as checkpoint encryption). Defaults
+    # preserve plaintext. plaintext_reads keeps legacy rows readable during migration;
+    # turn them off after an explicit app-side migration follow-up.
+    audit_encryption: bool = False
+    audit_plaintext_reads: bool = True
+    audit_key_version: int = Field(default=1, ge=1)
+    memory_encryption: bool = False
+    memory_plaintext_reads: bool = True
+    memory_key_version: int = Field(default=1, ge=1)
+
     # Relational Database configuration (R1)
     database_url: Optional[str] = Field(
         default=None,

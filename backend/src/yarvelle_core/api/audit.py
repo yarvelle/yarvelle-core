@@ -21,7 +21,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from yarvelle_core.api.deps import get_current_user, resolve_owner_user_id
 from yarvelle_core.api.profiles import get_user_profile_access
-from yarvelle_core.audit.logger import get_recent_audit_events
+from yarvelle_core.audit.logger import get_recent_audit_events, open_audit_detail
+from yarvelle_core.vault.field_crypto import (
+    FieldDecryptionError,
+    FieldKeyError,
+    PlaintextFieldError,
+    is_sealed_text,
+)
 from yarvelle_core.auth.ports import UserProfile
 from yarvelle_core.constants.api import ROUTE_AUDIT
 from yarvelle_core.constants.agents import UNKNOWN_AGENT_ID
@@ -32,6 +38,7 @@ from yarvelle_core.constants.defaults import (
 )
 from yarvelle_core.db.models import AuditEventRecord, Profile, ProfileAccess
 from yarvelle_core.db.session import get_db
+from yarvelle_core.config import settings
 from yarvelle_core.schemas.audit import AuditEvent, AuditListResponse
 
 router = APIRouter(tags=["Audit"])
@@ -41,10 +48,22 @@ def _record_to_schema(record: AuditEventRecord, full: bool = False) -> AuditEven
     """Converts a database AuditEventRecord to the API AuditEvent schema."""
     meta: dict[str, Any] = {}
     if record.detail_redacted:
-        try:
-            meta = json.loads(record.detail_redacted)
-        except Exception:
-            meta = {}
+        opened = open_audit_detail(
+            record.detail_redacted,
+            record_id=record.id,
+            profile_id=record.profile_id,
+            event_type=str(record.event),
+            run_id=record.run_id,
+        )
+        if opened:
+            try:
+                meta = json.loads(opened)
+            except json.JSONDecodeError:
+                # Legacy/plaintext malformed JSON stays empty; sealed decrypt failures
+                # raise above and must not be swallowed.
+                if is_sealed_text(record.detail_redacted):
+                    raise
+                meta = {}
 
     agent_id = meta.get("agent_id") or record.principal or UNKNOWN_AGENT_ID
     allowed = meta.get("allowed")
@@ -170,7 +189,8 @@ async def list_audit_events(
         if event:
             query = query.where(AuditEventRecord.event == event)
 
-        if agent_id:
+        encrypting = bool(getattr(settings, "audit_encryption", False))
+        if agent_id and not encrypting:
             query = query.where(
                 or_(
                     AuditEventRecord.detail_redacted.contains(f'"agent_id": "{agent_id}"'),
@@ -178,16 +198,40 @@ async def list_audit_events(
                 )
             )
 
-        # 3. Compute Count and Fetch Ordered Limit
-        count_stmt = select(func.count()).select_from(query.subquery())
-        total_res = await db.execute(count_stmt)
-        total = total_res.scalar_one()
+        # 3. Count + page. When encryption is on and agent_id is requested, agent_id
+        # may live only inside sealed detail JSON, so every scoped row is considered
+        # (no arbitrary fetch cap); exact total is computed after decrypt/filter.
+        if agent_id and encrypting:
+            records_stmt = query.order_by(AuditEventRecord.ts.desc())
+            records_res = await db.execute(records_stmt)
+            candidates = list(records_res.scalars().all())
+            matched: list[AuditEventRecord] = []
+            for r in candidates:
+                if r.principal == agent_id:
+                    matched.append(r)
+                    continue
+                detail = r.detail_redacted or ""
+                if detail and not is_sealed_text(detail):
+                    # Legacy plaintext row: retain prior SQL-equivalent contains check.
+                    if f'"agent_id": "{agent_id}"' in detail:
+                        matched.append(r)
+                    continue
+                schema = _record_to_schema(r, full=False)
+                if schema.agent_id == agent_id:
+                    matched.append(r)
+            total = len(matched)
+            page = matched[:limit]
+            events = [_record_to_schema(r, full=full) for r in page]
+        else:
+            count_stmt = select(func.count()).select_from(query.subquery())
+            total_res = await db.execute(count_stmt)
+            total = total_res.scalar_one()
 
-        records_stmt = query.order_by(AuditEventRecord.ts.desc()).limit(limit)
-        records_res = await db.execute(records_stmt)
-        records = list(records_res.scalars().all())
+            records_stmt = query.order_by(AuditEventRecord.ts.desc()).limit(limit)
+            records_res = await db.execute(records_stmt)
+            records = list(records_res.scalars().all())
 
-        events = [_record_to_schema(r, full=full) for r in records]
+            events = [_record_to_schema(r, full=full) for r in records]
 
         return AuditListResponse(
             total=total,
@@ -196,6 +240,11 @@ async def list_audit_events(
         )
     except HTTPException:
         raise
+    except (FieldDecryptionError, FieldKeyError, PlaintextFieldError) as err:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Audit detail decryption failed",
+        ) from err
     except Exception as err:
         if "no such table" in str(err).lower():
             total, events = await get_recent_audit_events(
