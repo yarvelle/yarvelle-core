@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from yarvelle_core.api.deps import get_current_user, resolve_owner_user_id
 from yarvelle_core.api.profiles import get_user_profile_access
-from yarvelle_core.audit.logger import get_recent_audit_events
+from yarvelle_core.audit.logger import get_recent_audit_events, open_audit_detail
 from yarvelle_core.auth.ports import UserProfile
 from yarvelle_core.constants.api import ROUTE_AUDIT
 from yarvelle_core.constants.agents import UNKNOWN_AGENT_ID
@@ -32,6 +32,7 @@ from yarvelle_core.constants.defaults import (
 )
 from yarvelle_core.db.models import AuditEventRecord, Profile, ProfileAccess
 from yarvelle_core.db.session import get_db
+from yarvelle_core.config import settings
 from yarvelle_core.schemas.audit import AuditEvent, AuditListResponse
 
 router = APIRouter(tags=["Audit"])
@@ -42,7 +43,14 @@ def _record_to_schema(record: AuditEventRecord, full: bool = False) -> AuditEven
     meta: dict[str, Any] = {}
     if record.detail_redacted:
         try:
-            meta = json.loads(record.detail_redacted)
+            opened = open_audit_detail(
+                record.detail_redacted,
+                record_id=record.id,
+                profile_id=record.profile_id,
+                event_type=str(record.event),
+                run_id=record.run_id,
+            )
+            meta = json.loads(opened) if opened else {}
         except Exception:
             meta = {}
 
@@ -170,24 +178,45 @@ async def list_audit_events(
         if event:
             query = query.where(AuditEventRecord.event == event)
 
-        if agent_id:
+        # Agent-id may live inside sealed detail JSON. When audit encryption is on,
+        # filter by principal in SQL then refine in-process after scoped decrypt.
+        encrypting = bool(getattr(settings, "audit_encryption", False))
+        if agent_id and not encrypting:
             query = query.where(
                 or_(
                     AuditEventRecord.detail_redacted.contains(f'"agent_id": "{agent_id}"'),
                     AuditEventRecord.principal == agent_id,
                 )
             )
+        elif agent_id and encrypting:
+            # Keep SQL scoped; principal match is still searchable plaintext.
+            # Detail-based agent_id matches are applied after decrypt below.
+            pass
 
         # 3. Compute Count and Fetch Ordered Limit
-        count_stmt = select(func.count()).select_from(query.subquery())
-        total_res = await db.execute(count_stmt)
-        total = total_res.scalar_one()
+        if agent_id and encrypting:
+            records_stmt = query.order_by(AuditEventRecord.ts.desc()).limit(max(limit * 20, 200))
+            records_res = await db.execute(records_stmt)
+            candidates = list(records_res.scalars().all())
+            records = []
+            for r in candidates:
+                schema = _record_to_schema(r, full=full)
+                if schema.agent_id == agent_id or r.principal == agent_id:
+                    records.append(r)
+                if len(records) >= limit:
+                    break
+            total = len(records)
+            events = [_record_to_schema(r, full=full) for r in records]
+        else:
+            count_stmt = select(func.count()).select_from(query.subquery())
+            total_res = await db.execute(count_stmt)
+            total = total_res.scalar_one()
 
-        records_stmt = query.order_by(AuditEventRecord.ts.desc()).limit(limit)
-        records_res = await db.execute(records_stmt)
-        records = list(records_res.scalars().all())
+            records_stmt = query.order_by(AuditEventRecord.ts.desc()).limit(limit)
+            records_res = await db.execute(records_stmt)
+            records = list(records_res.scalars().all())
 
-        events = [_record_to_schema(r, full=full) for r in records]
+            events = [_record_to_schema(r, full=full) for r in records]
 
         return AuditListResponse(
             total=total,

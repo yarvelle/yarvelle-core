@@ -30,6 +30,8 @@ from yarvelle_core.constants.defaults import (
     SQLITE_JOURNAL_MODE,
 )
 from yarvelle_core.memory.ports.memory_port import MemoryPort, MemoryTier
+from yarvelle_core.config import settings
+from yarvelle_core.vault import field_crypto as field_crypto
 
 
 async def _run_write_with_retry(
@@ -196,6 +198,16 @@ class SqliteMemoryAdapter(MemoryPort):
         else:
             content = f"{key} {value}"
 
+        if getattr(settings, "memory_encryption", False):
+            keyring = field_crypto.get_memory_keyring()
+            aad = field_crypto.build_aad(["memory", namespace, key, tier_val, mem_id])
+            val_str = field_crypto.seal_text(keyring, val_str, aad)
+            meta_str = field_crypto.seal_text(keyring, meta_str, aad + b"|meta")
+            # Encrypted payloads cannot be indexed by FTS; omit plaintext content.
+            fts_content = None
+        else:
+            fts_content = content
+
         async def _do_remember():
             async with self._lock:
                 await conn.execute("""
@@ -209,10 +221,11 @@ class SqliteMemoryAdapter(MemoryPort):
                     updated_at = excluded.updated_at;
                 """, (mem_id, key, namespace, tier_val, val_str, meta_str, now, now))
                 await conn.execute("DELETE FROM memories_fts WHERE id = ?;", (mem_id,))
-                await conn.execute(
-                    "INSERT INTO memories_fts (id, namespace, content) VALUES (?, ?, ?);",
-                    (mem_id, namespace, content),
-                )
+                if fts_content is not None:
+                    await conn.execute(
+                        "INSERT INTO memories_fts (id, namespace, content) VALUES (?, ?, ?);",
+                        (mem_id, namespace, fts_content),
+                    )
                 await conn.commit()
 
         await _run_write_with_retry(_do_remember, conn=conn)
@@ -241,7 +254,8 @@ class SqliteMemoryAdapter(MemoryPort):
 
         async def _do_recall():
             async with self._lock:
-                if sanitized:
+                encrypting = bool(getattr(settings, "memory_encryption", False))
+                if sanitized and not encrypting:
                     sql = """
                     SELECT m.*, (bm25(fts.memories_fts) * -1.0) * m.salience AS score
                     FROM memories_fts fts
@@ -254,6 +268,7 @@ class SqliteMemoryAdapter(MemoryPort):
                     """
                     params = (namespace, sanitized, namespace, tier_val, tier_val, limit)
                 else:
+                    # Namespace-scoped fetch (encrypted path decrypts in-process).
                     sql = """
                     SELECT m.*, m.salience AS score
                     FROM memories m
@@ -262,31 +277,69 @@ class SqliteMemoryAdapter(MemoryPort):
                     ORDER BY m.salience DESC, m.updated_at DESC
                     LIMIT ?;
                     """
-                    params = (namespace, tier_val, tier_val, limit)
+                    # When filtering by query under encryption, over-fetch then score.
+                    fetch_limit = limit if not (sanitized and encrypting) else max(limit * 50, 200)
+                    params = (namespace, tier_val, tier_val, fetch_limit)
 
                 async with conn.execute(sql, params) as cur:
                     rows = await cur.fetchall()
 
                 results: List[Dict[str, Any]] = []
+                keyring = field_crypto.get_memory_keyring() if encrypting else None
+                q_tokens = [t for t in (query or "").lower().split() if t]
                 for r in rows:
-                    val = r["value"]
+                    raw_val = r["value"]
+                    raw_meta = r["metadata"]
+                    if encrypting:
+                        aad = field_crypto.build_aad(
+                            ["memory", r["namespace"], r["key"], r["tier"], r["id"]]
+                        )
+                        raw_val = field_crypto.open_text(
+                            keyring,
+                            raw_val,
+                            aad,
+                            allow_plaintext=bool(getattr(settings, "memory_plaintext_reads", True)),
+                        )
+                        raw_meta = field_crypto.open_text(
+                            keyring,
+                            raw_meta,
+                            aad + b"|meta",
+                            allow_plaintext=bool(getattr(settings, "memory_plaintext_reads", True)),
+                        )
+                    val = raw_val
                     try:
-                        val = json.loads(val)
+                        val = json.loads(raw_val) if isinstance(raw_val, str) else raw_val
                     except Exception:
                         pass
+                    try:
+                        meta_obj = json.loads(raw_meta) if isinstance(raw_meta, str) else (raw_meta or {})
+                    except Exception:
+                        meta_obj = {}
+                    hay = f"{r['key']} {raw_val}".lower()
+                    if q_tokens and encrypting:
+                        if not all(tok in hay for tok in q_tokens):
+                            continue
+                        score = float(r["salience"] or 0.0) * sum(hay.count(tok) for tok in q_tokens)
+                    else:
+                        score = r["score"]
                     results.append({
                         "key": r["key"],
                         "value": val,
                         "tier": r["tier"],
                         "namespace": r["namespace"],
-                        "metadata": json.loads(r["metadata"]),
+                        "metadata": meta_obj,
                         "salience": r["salience"],
                         "access_count": r["access_count"],
                         "created_at": r["created_at"],
                         "updated_at": r["updated_at"],
                         "last_accessed_at": r["last_accessed_at"],
-                        "score": r["score"],
+                        "score": score,
                     })
+                    if len(results) >= limit and encrypting and q_tokens:
+                        break
+                if encrypting and q_tokens:
+                    results.sort(key=lambda item: float(item.get("score") or 0.0), reverse=True)
+                    results = results[:limit]
                 return results
 
         return await _run_write_with_retry(_do_recall, conn=conn)
