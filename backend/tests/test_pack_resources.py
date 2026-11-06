@@ -149,3 +149,70 @@ def test_core_resource_loader_still_loads_disclaimers() -> None:
     data = loader.get_disclaimers()
     assert isinstance(data, dict)
     assert data  # bundled core resources remain available
+
+
+def test_declared_patterns_resource_missing_fails_closed(sample_pack: Path) -> None:
+    loader = ResourceLoader()
+    pack = PackSpec(
+        id="sample",
+        name="Sample",
+        version="0.0.1",
+        domain="sample",
+        requires_core=">=0.2.0",
+        manifest_path=str(sample_pack / "pack.yaml"),
+        provides=PackProvidesSpec(),
+        routing_hints=RoutingHints(
+            domain="sample",
+            description="Sample domain",
+            default_agent="sample-agent",
+            patterns_resource="resources/does-not-exist.yaml",
+        ),
+    )
+    with pytest.raises(PackResourceError):
+        loader.register_pack(pack)
+
+
+def test_optional_auto_patterns_absent_ok(tmp_path: Path) -> None:
+    root = tmp_path / "empty-pack"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "pack.yaml").write_text("id: empty\n", encoding="utf-8")
+    (root / "resources").mkdir()
+    loader = ResourceLoader()
+    pack = PackSpec(
+        id="empty",
+        name="Empty",
+        version="0.0.1",
+        domain="empty",
+        requires_core=">=0.2.0",
+        manifest_path=str(root / "pack.yaml"),
+        provides=PackProvidesSpec(),
+    )
+    resolver = loader.register_pack(pack)
+    assert resolver is not None
+    # Core patterns still available; no pack overlay keys required.
+    patterns = loader.get_routing_patterns()
+    assert "generic" in patterns["dossier_types"]
+
+
+def test_merged_routing_patterns_returns_defensive_copy(sample_pack: Path) -> None:
+    loader = ResourceLoader()
+    pack = PackSpec(
+        id="sample",
+        name="Sample",
+        version="0.0.1",
+        domain="sample",
+        requires_core=">=0.2.0",
+        manifest_path=str(sample_pack / "pack.yaml"),
+        provides=PackProvidesSpec(),
+        routing_hints=RoutingHints(
+            domain="sample",
+            description="Sample domain",
+            default_agent="sample-agent",
+            patterns_resource="resources/routing_patterns.yaml",
+        ),
+    )
+    loader.register_pack(pack)
+    first = loader.get_routing_patterns()
+    first["dossier_types"]["generic"] = ["mutated"]
+    second = loader.get_routing_patterns()
+    assert second["dossier_types"]["generic"] != ["mutated"]

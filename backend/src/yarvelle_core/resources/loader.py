@@ -242,7 +242,12 @@ class ResourceLoader:
         """
         cache_key = "merged_routing_patterns"
         if cache_key in self._cache:
-            return self._cache[cache_key]
+            cached = self._cache[cache_key]
+            return {
+                "routing_rules": list(cached.get("routing_rules") or []),
+                "domain_keywords": dict(cached.get("domain_keywords") or {}),
+                "dossier_types": dict(cached.get("dossier_types") or {}),
+            }
 
         base = dict(self.load_yaml("routing_patterns.yaml"))
         merged = {
@@ -264,7 +269,11 @@ class ResourceLoader:
                 merged["dossier_types"][key] = val
         with self._lock:
             self._cache[cache_key] = merged
-        return merged
+        return {
+            "routing_rules": list(merged["routing_rules"]),
+            "domain_keywords": dict(merged["domain_keywords"]),
+            "dossier_types": dict(merged["dossier_types"]),
+        }
 
     def register_pack(self, pack: "PackSpec", resolver: Optional[PackResourceResolver] = None) -> Optional[PackResourceResolver]:
         """Register a pack's resource root for secure pack-native reads.
@@ -272,6 +281,10 @@ class ResourceLoader:
         Returns the resolver when a filesystem pack root is available; otherwise
         ``None`` (entry-point-only packs without ``manifest_path`` cannot resolve
         files until the caller supplies an explicit resolver).
+
+        Declared ``routing_hints.patterns_resource`` paths fail closed on missing or
+        invalid files. Optional auto-detected ``resources/routing_patterns.yaml`` /
+        ``workflows/routing_patterns.yaml`` may be absent without error.
         """
         if resolver is None:
             root = resolve_pack_root(pack)
@@ -284,26 +297,39 @@ class ResourceLoader:
             resolver = PackResourceResolver(pack.id, root, allowed_prefixes=prefixes)
 
         overlay: Dict[str, Any] = {}
-        rel: Optional[str] = None
         hints = getattr(pack, "routing_hints", None)
+        declared = None
         if hints is not None and getattr(hints, "patterns_resource", None):
-            rel = str(hints.patterns_resource)
+            declared = str(hints.patterns_resource)
+
+        if declared:
+            # Fail closed: declared provenance must resolve and load.
+            try:
+                loaded = resolver.load_yaml(declared)
+            except FileNotFoundError as err:
+                raise PackResourceError(
+                    f"Declared patterns_resource '{declared}' for pack '{pack.id}' was not found"
+                ) from err
+            if not isinstance(loaded, dict):
+                raise PackResourceError(
+                    f"Declared patterns_resource '{declared}' for pack '{pack.id}' must be a mapping"
+                )
+            overlay = loaded
         else:
             for candidate in ("resources/routing_patterns.yaml", "workflows/routing_patterns.yaml"):
                 try:
                     candidate_path = resolver.resolve_path(candidate)
                 except PackResourceError:
                     continue
-                if candidate_path.is_file():
-                    rel = candidate
-                    break
-        if rel:
-            try:
-                loaded = resolver.load_yaml(rel)
+                if not candidate_path.is_file():
+                    continue
+                try:
+                    loaded = resolver.load_yaml(candidate)
+                except FileNotFoundError:
+                    continue
                 if isinstance(loaded, dict):
                     overlay = loaded
-            except FileNotFoundError:
-                overlay = {}
+                    break
 
         with self._lock:
             self._pack_resolvers[pack.id] = resolver
