@@ -22,6 +22,7 @@ from yarvelle_core.engine.safety_policy import SafetyPolicy, set_domain_safety_p
 from yarvelle_core.engine.tool_registry import ToolSpecRegistry
 from yarvelle_core.pack.spec import PackSpec, RouterContribution
 from yarvelle_core.pack.validator import validate_pack_spec
+from yarvelle_core.resources.loader import get_resource_loader
 
 logger = logging.getLogger("yarvelle_core.pack.loader")
 ENTRY_POINT_GROUP = "yarvelle.packs"
@@ -143,6 +144,10 @@ def discover_and_load_packs(
         registry.scoped_models.extend(pack_spec.scoped_models)
 
         registry.packs[pack_spec.id] = pack_spec
+        try:
+            get_resource_loader().register_pack(pack_spec)
+        except Exception as res_err:
+            logger.warning("Pack '%s' resource registration skipped: %s", pack_spec.id, res_err)
         logger.info(
             f"Successfully loaded and registered pack '{pack_spec.id}' v{pack_spec.version} "
             f"with {len(pack_spec.tools)} tools, {len(pack_spec.routers)} routers."

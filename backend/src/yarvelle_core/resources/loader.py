@@ -25,8 +25,18 @@ import logging
 from pathlib import Path
 import re
 import threading
-from typing import Any, Dict, List, NamedTuple, Optional, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple, TYPE_CHECKING
 import yaml
+
+from yarvelle_core.resources.pack_resolver import (
+    PackResourceError,
+    PackResourceResolver,
+    prefixes_for_pack,
+    resolve_pack_root,
+)
+
+if TYPE_CHECKING:
+    from yarvelle_core.pack.spec import PackSpec
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +57,8 @@ class ResourceLoader:
         self._cache: Dict[str, Any] = {}
         self._compiled_refusal_patterns: Optional[List[RefusalPattern]] = None
         self._compiled_disclaimer_clauses: Optional[List[re.Pattern]] = None
+        self._pack_resolvers: Dict[str, PackResourceResolver] = {}
+        self._pack_routing_overlays: Dict[str, Dict[str, Any]] = {}
 
     def load_yaml(self, filename: str) -> Dict[str, Any]:
         """Loads and caches a YAML file from resources directory.
@@ -81,6 +93,8 @@ class ResourceLoader:
             self._cache.clear()
             self._compiled_refusal_patterns = None
             self._compiled_disclaimer_clauses = None
+            # Pack resolver registrations survive cache clears; only overlays rebuild on demand.
+            self._cache.pop("merged_routing_patterns", None)
 
     # =========================================================================
     # 1. Primary Contract Methods
@@ -219,8 +233,105 @@ class ResourceLoader:
         return self.load_yaml("errors.yaml")
 
     def get_routing_patterns(self) -> Dict[str, Any]:
-        """Loads and returns offline routing pattern dictionary from routing_patterns.yaml."""
-        return self.load_yaml("routing_patterns.yaml")
+        """Loads core routing patterns and merges registered pack overlays additively.
+
+        Core keys under ``dossier_types`` (including ``generic``), ``domain_keywords``,
+        and ``routing_rules`` are preserved. Pack overlays may add new dossier type
+        patterns and keywords but cannot replace core safety identity for existing
+        core keys.
+        """
+        cache_key = "merged_routing_patterns"
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        base = dict(self.load_yaml("routing_patterns.yaml"))
+        merged = {
+            "routing_rules": list(base.get("routing_rules") or []),
+            "domain_keywords": dict(base.get("domain_keywords") or {}),
+            "dossier_types": dict(base.get("dossier_types") or {}),
+        }
+        for pack_id, overlay in list(self._pack_routing_overlays.items()):
+            for rule in overlay.get("routing_rules") or []:
+                if rule not in merged["routing_rules"]:
+                    merged["routing_rules"].append(rule)
+            for key, val in (overlay.get("domain_keywords") or {}).items():
+                if key not in merged["domain_keywords"]:
+                    merged["domain_keywords"][key] = val
+            for key, val in (overlay.get("dossier_types") or {}).items():
+                if key in merged["dossier_types"]:
+                    # Preserve core / first-registered identity; do not override.
+                    continue
+                merged["dossier_types"][key] = val
+        with self._lock:
+            self._cache[cache_key] = merged
+        return merged
+
+    def register_pack(self, pack: "PackSpec", resolver: Optional[PackResourceResolver] = None) -> Optional[PackResourceResolver]:
+        """Register a pack's resource root for secure pack-native reads.
+
+        Returns the resolver when a filesystem pack root is available; otherwise
+        ``None`` (entry-point-only packs without ``manifest_path`` cannot resolve
+        files until the caller supplies an explicit resolver).
+        """
+        if resolver is None:
+            root = resolve_pack_root(pack)
+            if root is None:
+                return None
+            prefixes = prefixes_for_pack(
+                getattr(pack, "provides", None),
+                getattr(pack, "routing_hints", None),
+            )
+            resolver = PackResourceResolver(pack.id, root, allowed_prefixes=prefixes)
+
+        overlay: Dict[str, Any] = {}
+        rel: Optional[str] = None
+        hints = getattr(pack, "routing_hints", None)
+        if hints is not None and getattr(hints, "patterns_resource", None):
+            rel = str(hints.patterns_resource)
+        else:
+            for candidate in ("resources/routing_patterns.yaml", "workflows/routing_patterns.yaml"):
+                try:
+                    candidate_path = resolver.resolve_path(candidate)
+                except PackResourceError:
+                    continue
+                if candidate_path.is_file():
+                    rel = candidate
+                    break
+        if rel:
+            try:
+                loaded = resolver.load_yaml(rel)
+                if isinstance(loaded, dict):
+                    overlay = loaded
+            except FileNotFoundError:
+                overlay = {}
+
+        with self._lock:
+            self._pack_resolvers[pack.id] = resolver
+            self._pack_routing_overlays[pack.id] = overlay
+            self._cache.pop("merged_routing_patterns", None)
+        return resolver
+
+    def unregister_pack(self, pack_id: str) -> None:
+        """Drop a previously registered pack resolver and its routing overlay."""
+        with self._lock:
+            self._pack_resolvers.pop(pack_id, None)
+            self._pack_routing_overlays.pop(pack_id, None)
+            self._cache.pop("merged_routing_patterns", None)
+
+    def get_pack_resolver(self, pack_id: str) -> Optional[PackResourceResolver]:
+        return self._pack_resolvers.get(pack_id)
+
+    def load_pack_yaml(self, pack_id: str, relative_path: str) -> Dict[str, Any]:
+        resolver = self._pack_resolvers.get(pack_id)
+        if resolver is None:
+            raise KeyError(f"Pack '{pack_id}' is not registered for resource loading")
+        return resolver.load_yaml(relative_path)
+
+    def get_pack_prompt_text(self, pack_id: str, relative_path: str) -> str:
+        resolver = self._pack_resolvers.get(pack_id)
+        if resolver is None:
+            raise KeyError(f"Pack '{pack_id}' is not registered for resource loading")
+        return resolver.read_text(relative_path)
 
 
 
