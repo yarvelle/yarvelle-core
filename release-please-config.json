@@ -6,8 +6,7 @@
       "package-name": "yarvelle-core",
       "changelog-path": "CHANGELOG.md",
       "version-file": "backend/src/yarvelle_core/version.py",
-      "tag-separator": "-v",
-      "include-component-in-tag": true
+      "include-component-in-tag": false
     }
   },
   "plugins": [
