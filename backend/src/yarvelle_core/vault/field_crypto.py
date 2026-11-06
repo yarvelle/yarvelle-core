@@ -207,7 +207,10 @@ def open_text(
         blob = base64.urlsafe_b64decode(raw.encode("ascii"))
     except Exception as exc:
         raise FieldDecryptionError("Field ciphertext encoding is corrupt.") from exc
-    return open_envelope(keyring, blob, aad).decode("utf-8")
+    try:
+        return open_envelope(keyring, blob, aad).decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise FieldDecryptionError("Field plaintext is not valid UTF-8 (tampered or wrong key).") from exc
 
 
 def build_aad(parts: Iterable[object]) -> bytes:
@@ -215,41 +218,42 @@ def build_aad(parts: Iterable[object]) -> bytes:
     return "|".join("" if p is None else str(p) for p in parts).encode("utf-8")
 
 
-_audit_keyring: Optional[FieldKeyring] = None
-_memory_keyring: Optional[FieldKeyring] = None
+_keyring_cache: Dict[tuple, FieldKeyring] = {}
 
 
 def reset_field_keyring_cache() -> None:
-    global _audit_keyring, _memory_keyring
-    _audit_keyring = None
-    _memory_keyring = None
+    _keyring_cache.clear()
+
+
+def _cache_key(kek: bytes, purpose: str, version: int) -> tuple:
+    return (hashlib.sha256(bytes(kek)).digest(), purpose, int(version))
 
 
 def get_audit_keyring(*, kek: Optional[bytes] = None, version: Optional[int] = None) -> FieldKeyring:
-    global _audit_keyring
-    if _audit_keyring is not None and kek is None:
-        return _audit_keyring
     from yarvelle_core.config import settings
     from yarvelle_core.vault.kek import get_kek
 
     material = kek if kek is not None else get_kek()
     ver = version if version is not None else int(getattr(settings, "audit_key_version", 1))
-    ring = FieldKeyring.from_kek(material, PURPOSE_AUDIT, ver)
-    if kek is None:
-        _audit_keyring = ring
+    key = _cache_key(material, PURPOSE_AUDIT, ver)
+    ring = _keyring_cache.get(key)
+    if ring is None:
+        ring = FieldKeyring.from_kek(material, PURPOSE_AUDIT, ver)
+        if kek is None:
+            _keyring_cache[key] = ring
     return ring
 
 
 def get_memory_keyring(*, kek: Optional[bytes] = None, version: Optional[int] = None) -> FieldKeyring:
-    global _memory_keyring
-    if _memory_keyring is not None and kek is None:
-        return _memory_keyring
     from yarvelle_core.config import settings
     from yarvelle_core.vault.kek import get_kek
 
     material = kek if kek is not None else get_kek()
     ver = version if version is not None else int(getattr(settings, "memory_key_version", 1))
-    ring = FieldKeyring.from_kek(material, PURPOSE_MEMORY, ver)
-    if kek is None:
-        _memory_keyring = ring
+    key = _cache_key(material, PURPOSE_MEMORY, ver)
+    ring = _keyring_cache.get(key)
+    if ring is None:
+        ring = FieldKeyring.from_kek(material, PURPOSE_MEMORY, ver)
+        if kek is None:
+            _keyring_cache[key] = ring
     return ring

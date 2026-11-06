@@ -147,3 +147,70 @@ async def test_audit_logger_seals_detail(
         run_id="run-1",
     )
     assert opened == body
+
+
+def test_keyring_cache_respects_version_change(kek: bytes, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "audit_key_version", 1)
+    monkeypatch.setattr("yarvelle_core.vault.kek.get_kek", lambda: kek)
+    fc.reset_field_keyring_cache()
+    ring1 = fc.get_audit_keyring()
+    monkeypatch.setattr(settings, "audit_key_version", 2)
+    ring2 = fc.get_audit_keyring()
+    assert ring1.active.version == 1
+    assert ring2.active.version == 2
+    assert ring1.active.key_id != ring2.active.key_id
+
+
+def test_open_text_invalid_utf8_is_field_error(kek: bytes) -> None:
+    import base64
+
+    ring = FieldKeyring.from_kek(kek, fc.PURPOSE_AUDIT, 1)
+    aad = fc.build_aad(["audit", "p", "e", "id", None])
+    blob = fc.seal(ring.active, b"\xff\xfe", aad)
+    sealed = fc.TEXT_PREFIX + base64.urlsafe_b64encode(blob).decode("ascii")
+    with pytest.raises(FieldDecryptionError):
+        fc.open_text(ring, sealed, aad, allow_plaintext=False)
+
+
+@pytest.mark.asyncio
+async def test_encrypted_memory_recall_finds_beyond_previous_cap(
+    kek: bytes, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "memory_encryption", True)
+    monkeypatch.setattr(settings, "memory_plaintext_reads", False)
+    monkeypatch.setattr("yarvelle_core.vault.kek.get_kek", lambda: kek)
+    fc.reset_field_keyring_cache()
+
+    db = tmp_path / "mem-large.db"
+    adapter = SqliteMemoryAdapter(db_path=db)
+    ns = "profile:demo:notes"
+    for i in range(250):
+        await adapter.remember(f"noise-{i}", f"unrelated filler {i}", MemoryTier.SEMANTIC, namespace=ns)
+    marker = f"NEEDLE-DEEP-{os.urandom(3).hex()}"
+    await adapter.remember("deep-hit", marker, MemoryTier.SEMANTIC, namespace=ns)
+
+    hits = await adapter.recall("NEEDLE-DEEP", namespace=ns, limit=5)
+    assert hits, "encrypted recall must search all scoped rows, not a capped prefix"
+    assert marker in str(hits[0]["value"])
+    if adapter._conn is not None:
+        await adapter._conn.close()
+        adapter._conn = None
+
+
+def test_open_audit_detail_corrupt_ciphertext_visible(
+    kek: bytes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "audit_encryption", True)
+    monkeypatch.setattr(settings, "audit_plaintext_reads", False)
+    monkeypatch.setattr("yarvelle_core.vault.kek.get_kek", lambda: kek)
+    fc.reset_field_keyring_cache()
+    from yarvelle_core.audit.logger import open_audit_detail
+
+    with pytest.raises(FieldDecryptionError):
+        open_audit_detail(
+            "enc:v1:not-valid-ciphertext",
+            record_id="evt-x",
+            profile_id="prof-1",
+            event_type="tool",
+            run_id="run-1",
+        )

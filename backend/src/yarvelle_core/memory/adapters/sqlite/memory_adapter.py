@@ -267,8 +267,18 @@ class SqliteMemoryAdapter(MemoryPort):
                     LIMIT ?;
                     """
                     params = (namespace, sanitized, namespace, tier_val, tier_val, limit)
+                elif encrypting and sanitized:
+                    # Encrypted payloads cannot use FTS. Load every namespace/tier-scoped
+                    # row (no arbitrary cap), decrypt in-process, then rank.
+                    sql = """
+                    SELECT m.*, m.salience AS score
+                    FROM memories m
+                    WHERE m.namespace = ?
+                      AND (? IS NULL OR m.tier = ?)
+                    ORDER BY m.salience DESC, m.updated_at DESC;
+                    """
+                    params = (namespace, tier_val, tier_val)
                 else:
-                    # Namespace-scoped fetch (encrypted path decrypts in-process).
                     sql = """
                     SELECT m.*, m.salience AS score
                     FROM memories m
@@ -277,16 +287,15 @@ class SqliteMemoryAdapter(MemoryPort):
                     ORDER BY m.salience DESC, m.updated_at DESC
                     LIMIT ?;
                     """
-                    # When filtering by query under encryption, over-fetch then score.
-                    fetch_limit = limit if not (sanitized and encrypting) else max(limit * 50, 200)
-                    params = (namespace, tier_val, tier_val, fetch_limit)
+                    params = (namespace, tier_val, tier_val, limit)
 
                 async with conn.execute(sql, params) as cur:
                     rows = await cur.fetchall()
 
                 results: List[Dict[str, Any]] = []
                 keyring = field_crypto.get_memory_keyring() if encrypting else None
-                q_tokens = [t for t in (query or "").lower().split() if t]
+                # Mirror _sanitize_fts_query tokenization for encrypted lexical match.
+                q_tokens = [t.lower() for t in re.findall(r"[\w\-]+", query or "") if t.strip("-")]
                 for r in rows:
                     raw_val = r["value"]
                     raw_meta = r["metadata"]
@@ -319,7 +328,8 @@ class SqliteMemoryAdapter(MemoryPort):
                     if q_tokens and encrypting:
                         if not all(tok in hay for tok in q_tokens):
                             continue
-                        score = float(r["salience"] or 0.0) * sum(hay.count(tok) for tok in q_tokens)
+                        # Lexical rank approximating FTS salience weighting (no stemming).
+                        score = float(r["salience"] or 0.0) * (1.0 + sum(hay.count(tok) for tok in q_tokens))
                     else:
                         score = r["score"]
                     results.append({
@@ -335,8 +345,6 @@ class SqliteMemoryAdapter(MemoryPort):
                         "last_accessed_at": r["last_accessed_at"],
                         "score": score,
                     })
-                    if len(results) >= limit and encrypting and q_tokens:
-                        break
                 if encrypting and q_tokens:
                     results.sort(key=lambda item: float(item.get("score") or 0.0), reverse=True)
                     results = results[:limit]
