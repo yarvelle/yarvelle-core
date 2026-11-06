@@ -416,6 +416,32 @@
           "description": "Connector manifests directory",
           "title": "Connectors Dir"
         },
+        "resources_dir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "resources/",
+          "description": "Pack-native resource files directory",
+          "title": "Resources Dir"
+        },
+        "workflows_dir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "workflows/",
+          "description": "Pack-native workflow/pattern files directory",
+          "title": "Workflows Dir"
+        },
         "evals": {
           "anyOf": [
             {

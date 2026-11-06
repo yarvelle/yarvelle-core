@@ -175,6 +175,8 @@ class PackProvidesSpec(BaseModel):
     prompts_dir: Optional[str] = Field(default="resources/prompts/", description="Prompt templates directory")
     locales_dir: Optional[str] = Field(default="resources/locales/", description="Locale message bundles directory")
     connectors_dir: Optional[str] = Field(default="connectors/", description="Connector manifests directory")
+    resources_dir: Optional[str] = Field(default="resources/", description="Pack-native resource files directory")
+    workflows_dir: Optional[str] = Field(default="workflows/", description="Pack-native workflow/pattern files directory")
     evals: Optional[str] = Field(default=None, description="Path to evals definition or dataset")
     panels: List[PackPanelSpec] = Field(default_factory=list, description="Declared multi-agent deliberation panels contributed by this pack")
 

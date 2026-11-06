@@ -11,11 +11,8 @@
 
 """Yarvelle Core resources package.
 
-Provides external YAML schemas and ResourceLoader for:
-- disclaimers.yaml
-- refusal_patterns.yaml
-- prompts.yaml
-- errors.yaml
+Provides external YAML schemas, ResourceLoader, and secure pack-native
+resource resolution for domain packs.
 """
 
 from yarvelle_core.resources.loader import (
@@ -23,8 +20,18 @@ from yarvelle_core.resources.loader import (
     ResourceLoader,
     get_resource_loader,
 )
+from yarvelle_core.resources.pack_resolver import (
+    ALLOWED_RESOURCE_EXTENSIONS,
+    DEFAULT_MAX_RESOURCE_BYTES,
+    PackResourceError,
+    PackResourceResolver,
+)
 
 __all__ = [
+    "ALLOWED_RESOURCE_EXTENSIONS",
+    "DEFAULT_MAX_RESOURCE_BYTES",
+    "PackResourceError",
+    "PackResourceResolver",
     "RefusalPattern",
     "ResourceLoader",
     "get_resource_loader",

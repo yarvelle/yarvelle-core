@@ -13,7 +13,9 @@
 
 from __future__ import annotations
 
+import importlib
 import importlib.metadata
+from pathlib import Path
 import logging
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set
 
@@ -22,6 +24,7 @@ from yarvelle_core.engine.safety_policy import SafetyPolicy, set_domain_safety_p
 from yarvelle_core.engine.tool_registry import ToolSpecRegistry
 from yarvelle_core.pack.spec import PackSpec, RouterContribution
 from yarvelle_core.pack.validator import validate_pack_spec
+from yarvelle_core.resources.loader import get_resource_loader
 
 logger = logging.getLogger("yarvelle_core.pack.loader")
 ENTRY_POINT_GROUP = "yarvelle.packs"
@@ -121,6 +124,18 @@ def discover_and_load_packs(
         # Verify semantic invariants
         validate_pack_spec(pack_spec, core_version=core_version)
 
+        # Propagate pack root from the entry-point module's pack.yaml when present.
+        if not getattr(pack_spec, "manifest_path", None):
+            try:
+                mod = importlib.import_module(pack_factory.__module__)
+                mod_file = getattr(mod, "__file__", None)
+                if mod_file:
+                    candidate = Path(mod_file).resolve().parent / "pack.yaml"
+                    if candidate.is_file():
+                        pack_spec = pack_spec.model_copy(update={"manifest_path": str(candidate)})
+            except Exception:
+                pass
+
         # Register tools
         for tool in pack_spec.tools:
             registry.tool_registry.register(tool, pack_id=pack_spec.id)
@@ -143,6 +158,20 @@ def discover_and_load_packs(
         registry.scoped_models.extend(pack_spec.scoped_models)
 
         registry.packs[pack_spec.id] = pack_spec
+        try:
+            get_resource_loader().register_pack(pack_spec)
+        except Exception as res_err:
+            # Missing pack root (no manifest_path) is optional; declared/invalid
+            # resource paths must fail closed as PackLoadError.
+            from yarvelle_core.resources.pack_resolver import PackResourceError
+
+            if isinstance(res_err, PackResourceError):
+                raise PackLoadError(
+                    f"Pack '{pack_spec.id}' resource registration failed: {res_err}"
+                ) from res_err
+            raise PackLoadError(
+                f"Pack '{pack_spec.id}' resource registration failed: {res_err}"
+            ) from res_err
         logger.info(
             f"Successfully loaded and registered pack '{pack_spec.id}' v{pack_spec.version} "
             f"with {len(pack_spec.tools)} tools, {len(pack_spec.routers)} routers."
