@@ -106,8 +106,21 @@ def check_invariants(trace: TurnTrace, pack: PackView) -> List[CheckResult]:
         out.append(_fail("task_call_cap", f"{trace.task_calls} task calls, cap is {pack.max_agents}"))
     else:
         out.append(_ok("task_call_cap", f"{trace.task_calls} of {pack.max_agents}"))
-    ran_hidden = [a for a in trace.agents if a in pack.hidden]
-    out.append(_fail("hidden_agents_not_run", f"hidden agent(s) ran: {ran_hidden}") if ran_hidden else _ok("hidden_agents_not_run"))
+    # Hidden agents run only when routing sends work to them: the agent a pack
+    # fixed route picked for this turn is allowed. A caller's pick or a main
+    # agent hand-off to a hidden agent still fails.
+    routed_to = (
+        str(trace.route_agent)
+        if trace.route_agent and str(trace.route or "").startswith("fixed_route:")
+        else None
+    )
+    ran_hidden = [a for a in trace.agents if a in pack.hidden and a != routed_to]
+    if ran_hidden:
+        out.append(_fail("hidden_agents_not_run", f"hidden agent(s) ran: {ran_hidden}"))
+    elif routed_to and routed_to in pack.hidden and routed_to in trace.agents:
+        out.append(_ok("hidden_agents_not_run", f"{routed_to} reached by {trace.route}"))
+    else:
+        out.append(_ok("hidden_agents_not_run"))
     unknown = [a for a in trace.agents if a not in pack.titles]
     out.append(_fail("known_agents_only", f"unknown agent(s) ran: {unknown}") if unknown else _ok("known_agents_only"))
     bad_titles = [

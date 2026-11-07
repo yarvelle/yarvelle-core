@@ -201,3 +201,22 @@ def test_model_calls_before_route_and_deliberation():
     turn = Turn(user="u", expect=_expect(model_calls_before_route=0, deliberation=False))
     got = _status(check_turn(_trace(model_calls_before_route=1, nodes=["deliberation"]), turn, PACK))
     assert got["model_calls_before_route"] == "fail" and got["deliberation"] == "fail"
+
+
+def test_hidden_agent_reached_by_fixed_route_is_allowed():
+    # #32: a pack fixed route may send work to a hidden agent.
+    trace = _trace(route="fixed_route:audit", route_agent="internal-auditor", agents=["internal-auditor"])
+    got = check_invariants(trace, PACK)
+    status = _status(got)
+    assert status["hidden_agents_not_run"] == "pass"
+    detail = next(r.detail for r in got if r.name == "hidden_agents_not_run")
+    assert "fixed_route:audit" in detail
+
+
+def test_hidden_agent_reached_any_other_way_still_fails():
+    for route in ("main_agent", "user_selected", "default_agent:main_agent_failed", None):
+        trace = _trace(route=route, route_agent="internal-auditor", agents=["internal-auditor"])
+        assert _status(check_invariants(trace, PACK))["hidden_agents_not_run"] == "fail", route
+    # A fixed route to one agent does not excuse a different hidden agent.
+    trace = _trace(route="fixed_route:audit", route_agent="trip-organizer", agents=["trip-organizer", "internal-auditor"])
+    assert _status(check_invariants(trace, PACK))["hidden_agents_not_run"] == "fail"

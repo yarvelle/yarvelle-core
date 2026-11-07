@@ -383,3 +383,27 @@ def test_encrypt_checkpoints_resume(pack: EvalPack):
     sc = scenario([first, second], encrypt_checkpoints=True)
     result = run(pack, sc)
     assert result.passed, result.failures()
+
+
+def test_fixed_route_to_hidden_agent_passes_hidden_check(tmp_path: Path):
+    # #32: the runtime lets a pack fixed route reach a hidden agent; the
+    # hidden-agent invariant must accept it.
+    root = write_pack(tmp_path / "hidden-route")
+    data = yaml.safe_load((root / "pack.yaml").read_text(encoding="utf-8"))
+    data["orchestration"]["fixed_routes"].append(
+        {"route_id": "audit", "when": {"kind": "guardrail_flag", "flag": "audit"}, "agent_id": "internal-auditor"}
+    )
+    data["guardrail_flags"]["audit"] = ["audit"]
+    (root / "pack.yaml").write_text(yaml.safe_dump(data), encoding="utf-8")
+    hidden_pack = load_eval_pack(root)
+    assert "internal-auditor" in hidden_pack.hidden_ids
+    turn = {
+        "user": "Please audit this.",
+        "input": {"guardrail_flag": "audit"},
+        "expect": {"route": "fixed_route:audit", "agents_exactly": ["internal-auditor"]},
+        "fake": {"agents": {"internal-auditor": ["Audit done."]}},
+    }
+    result = run(hidden_pack, scenario([turn]))
+    statuses = {c.name: c.status for c in result.turns[0].checks}
+    assert statuses["hidden_agents_not_run"] == "pass"
+    assert result.passed, result.failures()
