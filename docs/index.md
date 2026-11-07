@@ -30,7 +30,7 @@ flowchart LR
 
 ## Guides
 
-- **[Pack orchestration settings](pack-orchestration.md)**: the `orchestration:` block in `pack.yaml`, including delegation and synthesis instructions for the main agent.
+- **[Pack orchestration settings](pack-orchestration.md)**: the `orchestration:` block in `pack.yaml`, including delegation and synthesis instructions and the per-turn delegation reminder for the main agent.
 
 ---
 

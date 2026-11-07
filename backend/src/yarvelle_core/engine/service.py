@@ -29,6 +29,7 @@ from typing import (
     Any,
     AsyncGenerator,
     AsyncIterator,
+    Callable,
     Dict,
     FrozenSet,
     List,
@@ -346,6 +347,7 @@ class AgentExecutionService:
         default_agent_id: Optional[str] = None,
         orchestration: Optional[Any] = None,
         registry: Optional[Any] = None,
+        main_agent_reminder: Optional[Callable[..., Optional[str]]] = None,
         **kwargs: Any,
     ) -> None:
         """Initialize the execution service with model, graph, checkpointer, and memory settings.
@@ -361,11 +363,14 @@ class AgentExecutionService:
         tool), then the default agent. Without it the built-in graph runs the
         picked (or default) agent directly, as before. ``registry`` is the
         agent catalog used for that routing; it defaults to the workspace's
-        agents directory.
+        agents directory. ``main_agent_reminder`` is an optional pack hook for
+        the main agent's per-turn reminder; it replaces
+        ``orchestration.delegation.reminder``.
         """
         self.model = model
         self.orchestration = orchestration
         self._registry = registry
+        self.main_agent_reminder = main_agent_reminder
         spec_default = getattr(orchestration, "default_agent", None) if orchestration is not None else None
         self.default_agent_id = (default_agent_id or spec_default or "").strip() or None
         self.graph = graph
@@ -731,6 +736,7 @@ class AgentExecutionService:
             default_agent=self.default_agent_id,
             safety_policy=self.safety_policy,
             checkpointer=checkpointer,
+            main_agent_reminder=self.main_agent_reminder,
         )
         if effective_store is not None:
             builder_instance = builder_instance.with_store(effective_store)

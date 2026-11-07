@@ -29,6 +29,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 
 from yarvelle_core.agents.registry import AgentRegistry
 from yarvelle_core.constants.api import SSE_EVENT_ORCHESTRATION_NOTICE, SSE_EVENT_TASK_STATUS
+from yarvelle_core.engine.orchestration.reminder import MainAgentReminder
 from yarvelle_core.engine.orchestration.runtime import MAIN_AGENT_ID, HybridRouter, ToolResolver, TurnTaskSink
 from yarvelle_core.engine.orchestration.task_guard import AuditSink, TaskStatusSink
 from yarvelle_core.schemas.orchestration import PackOrchestrationSpec, RouteSource
@@ -67,6 +68,7 @@ class MainAgentNode(BaseNode):
         tool_resolver: Optional[ToolResolver] = None,
         task_sink: Optional[TurnTaskSink] = None,
         name: str = "main_agent",
+        reminder: Optional[MainAgentReminder] = None,
     ) -> None:
         super().__init__(name=name)
         self.router = HybridRouter(
@@ -78,6 +80,7 @@ class MainAgentNode(BaseNode):
             status_sink=status_sink or stream_task_status,
             tool_resolver=tool_resolver,
             task_sink=task_sink,
+            reminder=reminder,
         )
 
     async def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:

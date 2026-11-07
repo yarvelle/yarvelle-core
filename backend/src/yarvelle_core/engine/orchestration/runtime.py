@@ -41,6 +41,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
 
 from yarvelle_core.agents.registry import AgentRegistry
+from yarvelle_core.engine.orchestration.reminder import MainAgentReminder, main_agent_messages, reminder_from_spec
 from yarvelle_core.engine.orchestration.routing import select_fixed_route
 from yarvelle_core.engine.orchestration.task_guard import (
     TASK_TOOL_NAME,
@@ -464,7 +465,11 @@ class HybridRouter:
         system_prompt: Optional[str] = None,
         tool_resolver: Optional[ToolResolver] = None,
         task_sink: Optional[TurnTaskSink] = None,
+        reminder: Optional[MainAgentReminder] = None,
     ) -> None:
+        """``reminder`` is a per-turn hook for the main agent's copy of the
+        latest user message; it replaces ``spec.delegation.reminder``. With
+        neither set the main agent reads the messages unchanged."""
         self.registry = registry
         self.task_sink = task_sink
         self.model = model
@@ -478,6 +483,10 @@ class HybridRouter:
             spec.delegation if spec is not None else None,
         )
         self.tool_resolver = tool_resolver
+        delegation = spec.delegation if spec is not None else None
+        self.reminder: Optional[MainAgentReminder] = (
+            reminder if reminder is not None else reminder_from_spec(delegation.reminder if delegation is not None else None)
+        )
 
     @property
     def limits(self) -> OrchestrationLimits:
@@ -587,7 +596,10 @@ class HybridRouter:
                 self.model, self.registry, guard,
                 system_prompt=self.system_prompt, tool_resolver=self.tool_resolver,
             )
-            result = await agent.ainvoke({"messages": list(state.get("messages") or [])})
+            # The reminder (if any) changes only the model's copy; the slice
+            # below keeps just the messages this run adds.
+            model_messages = main_agent_messages(list(state.get("messages") or []), state, self.reminder)
+            result = await agent.ainvoke({"messages": model_messages})
         except OrchestrationAuditError:
             raise
         except asyncio.CancelledError:

@@ -110,6 +110,15 @@ class EvalPack:
         """
         return {}
 
+    def main_agent_reminder(self) -> Optional[Any]:
+        """Python reminder hook for the main agent (none by default).
+
+        A pack that passes ``main_agent_reminder`` to ``GraphBuilder`` in
+        production returns the same hook here. A ``pack.yaml``
+        ``orchestration.delegation.reminder`` applies without this.
+        """
+        return None
+
     def flags_for(self, text: str) -> List[str]:
         """Flags the pack's policy raises for ``text``."""
         return self.safety_policy().check_flags(text)

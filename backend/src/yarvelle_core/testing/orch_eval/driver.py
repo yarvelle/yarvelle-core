@@ -337,6 +337,7 @@ class ScenarioRunner:
             turn_task_sink=turn_tasks,
             safety_policy=self.pack.safety_policy(),
             checkpointer=checkpointer,
+            main_agent_reminder=self.pack.main_agent_reminder(),
         )
         # The pack's own nodes (for example its refusal node), as in production.
         for name, node in nodes.items():
