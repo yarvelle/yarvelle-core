@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2026-11-07
+
+This patch release adds an optional per-turn delegation reminder for the main agent and fixes main-agent refusals and multi-turn evals. Nothing is removed or renamed, every new setting is off by default, and packs built for 0.2.2 work unchanged. `pack_api` stays 1.
+
+### Added
+- **Per-turn delegation reminder for the main agent** (#44). Packs can set `orchestration.delegation.reminder` (`text`, and `when: follow_up` or `always`) to add a short reminder to the main agent's copy of the latest user message. This helps models that ignore system-prompt delegation rules on follow-up turns. It is model input only: the checkpoint, history, stream and audit keep the user's words. Packs can also pass a Python hook with `main_agent_reminder` on `GraphBuilder` or `AgentExecutionService` (`reminder` on `HybridRouter`). The orch_eval driver applies it too, and an `EvalPack` can return the hook from `main_agent_reminder()`. See `docs/pack-orchestration.md`.
+- **Pack graph nodes under eval** (#41). `EvalPack.graph_nodes()` lets an eval pack supply the nodes it replaces in production (for example its refusal node). Names are checked against the new `engine.builder.OVERRIDABLE_NODES`.
+
+### Fixed
+- **Refused main-agent answers** (#43, fixes #39). When the output guardrail refused a main-agent answer, the reflection retry ran it on the single-agent node and failed with "Unknown or unregistered agent ID: 'main-agent'". The turn now ends on the refusal path. This holds even when a pack's own reflection node asks for a retry. Specialist answers are still retried.
+- **Per-turn state in multi-turn evals** (#40, fixes #30). The orch_eval driver now resets per-turn state the way the chat service does, through a shared `turn_reset_values()` helper. A routine turn after a refusal no longer re-reads the old refusal.
+- **Hidden agents reached by a fixed route** (#42, fixes #32). The `hidden_agents_not_run` eval check now allows the hidden agent picked by the turn's pack fixed route. It still fails any other hidden-agent run.
+
 ## [0.2.2] - 2026-11-07
 
 This patch release fixes dossier-type matching when packs register their own document types. Nothing is removed or renamed, and core-only setups behave as in 0.2.1.
