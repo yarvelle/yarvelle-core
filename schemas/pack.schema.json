@@ -1149,6 +1149,16 @@
           "default": null,
           "description": "Text shown when a guard refuses. Default: the safety policy's refusal template.",
           "title": "Refusal Template"
+        },
+        "release": {
+          "default": "stream",
+          "description": "stream: send answer tokens as they are generated (done carries the verdict); buffered: send the answer only after the final check passes.",
+          "enum": [
+            "stream",
+            "buffered"
+          ],
+          "title": "Release",
+          "type": "string"
         }
       },
       "title": "SafetyGuardsSpec",

@@ -38,6 +38,7 @@ model.
 safety:
   guards:
     deadline_s: 20            # budget for all model checks of one text
+    release: stream           # stream | buffered (see Streaming)
     refusal_template: "I can't share that answer. Please rephrase your question."
     checks:
       - id: account-secrets
@@ -136,6 +137,7 @@ written as `_`.
 | `<PREFIX>_SAFETY_GUARD_<ID>_BASE_URL` | endpoint for `ollama` / `custom` |
 | `<PREFIX>_SAFETY_GUARD_<ID>_TIMEOUT_S` | per-call timeout, seconds |
 | `<PREFIX>_SAFETY_GUARD_<ID>_MODE` | `enforce`, `shadow` or `off` (ignored for a required check) |
+| `<PREFIX>_SAFETY_OUTPUT_RELEASE` | `buffered` holds every answer until the final check passes (`stream` cannot undo a pack's `buffered`) |
 
 API keys use the provider's usual variables (`OPENAI_API_KEY`,
 `ANTHROPIC_API_KEY`, ...) and are read by the model factory.
@@ -204,8 +206,28 @@ verdict.
 
 ## Streaming
 
-Guards check the complete answer. In the default stream mode, answer tokens
-reach the client while the answer is generated and the `done` event carries
-the final verdict: when `done.refused` is true, the client must replace the
-streamed text with `done.fullText`. Text-to-speech, notifications and saved
-previews should wait for `done`.
+Guards check the complete answer. How the answer reaches the client is set by
+`safety.guards.release`, the service argument `output_release`, or
+`<PREFIX>_SAFETY_OUTPUT_RELEASE`. The strictest wins: if any of them says
+`buffered`, the turn is buffered.
+
+**`stream` (default).** Answer tokens reach the client while the answer is
+generated and the `done` event carries the final verdict. When `done.refused`
+is true, the client must replace the streamed text with `done.fullText`.
+Text-to-speech, notifications and saved previews should wait for `done`.
+
+**`buffered`.** No answer text leaves the service before the final check
+passes: token events are held, and `synthesis` events are sent without their
+`output`/`text` fields. When the check passes, the whole answer is sent as one
+`token` event, then `done`. When it refuses, the client gets the `refusal`
+event and `done` with the refusal text; the answer itself is never sent.
+Progress events (tools, task status, notices) still stream. The cost is that
+the user sees nothing until the answer is complete.
+
+A turn paused for approval releases its partial text only after the same
+check. A resumed turn (`execute_resume_turn`) gets the final check whenever
+the policy has guards or release is buffered; without either it behaves as
+before.
+
+Not covered: deliberation panel events (`deliberation_*`) carry the agents'
+own proposals and are filtered by scope, not by guards.
