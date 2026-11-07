@@ -63,7 +63,7 @@ safety:
         mode: shadow                     # enforce | shadow | off
         timeout_s: 8
         max_chars: 16000
-        when_unconfigured: allow         # no model set: skip this check
+        when_unconfigured: allow         # no model set: skip (warns once); or refuse
         on_abstain: block
         on_error: block
         output:
@@ -94,7 +94,7 @@ The same example is in `docs/examples/safety-guards.pack.yaml`.
 | `model` | model | Optional defaults: `provider`, `model`, `base_url`, `temperature`. Env vars override. |
 | `timeout_s` | model | Per call, default 10. |
 | `include_prompt` | model | On the output stage, also send the user's message (default true). |
-| `when_unconfigured` | model | `allow` skips the check when no model is set; `block` refuses. |
+| `when_unconfigured` | model | `allow` (default) skips the check when no model is set and logs `safety_guard_model_not_configured` once at startup, naming the check; `refuse` (or `block`) refuses. `on_abstain` and `on_error` also accept `refuse`. |
 | `on_abstain`, `on_error` | model | `block` (default) or `allow`. |
 
 ### Reading the reply (`output`)

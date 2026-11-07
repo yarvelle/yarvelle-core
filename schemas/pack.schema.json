@@ -376,9 +376,10 @@
         },
         "when_unconfigured": {
           "default": "allow",
-          "description": "No model configured: allow skips the check; block refuses every answer it would check.",
+          "description": "No model configured: allow skips the check (a warning names it at startup); block or refuse refuses every answer it would check.",
           "enum": [
             "block",
+            "refuse",
             "allow"
           ],
           "title": "When Unconfigured",
@@ -389,6 +390,7 @@
           "description": "Model not sure, or text too long.",
           "enum": [
             "block",
+            "refuse",
             "allow"
           ],
           "title": "On Abstain",
@@ -399,6 +401,7 @@
           "description": "Timeout, failed call or unreadable reply.",
           "enum": [
             "block",
+            "refuse",
             "allow"
           ],
           "title": "On Error",

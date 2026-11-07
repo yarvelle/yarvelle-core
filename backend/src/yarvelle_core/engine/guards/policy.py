@@ -35,7 +35,7 @@ from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Set, Union
 import yaml
 
 from yarvelle_core.engine.guards.audit import GuardAuditHook
-from yarvelle_core.engine.guards.env import env_only_checks
+from yarvelle_core.engine.guards.env import env_only_checks, guard_env_name
 from yarvelle_core.engine.guards.model_check import ModelCheck, ModelFactory
 from yarvelle_core.engine.guards.rules import RuleCheck
 from yarvelle_core.engine.guards.runner import GuardRunner, aggregate
@@ -53,7 +53,30 @@ from yarvelle_core.engine.safety_policy import (
     SafetyPolicy,
     SafetyVerdict,
 )
+from yarvelle_core.logging import get_logger
 from yarvelle_core.schemas.safety import GuardCheckSpec, SafetyGuardsSpec
+
+logger = get_logger("yarvelle_core.engine.guards")
+
+# Check ids already warned about a missing model, so the warning is logged once.
+_WARNED_UNCONFIGURED: Set[str] = set()
+
+
+def _warn_if_unconfigured(check: ModelCheck) -> None:
+    """A model check that will silently skip (no model, when_unconfigured allow) is logged once."""
+    if check.configured or check.mode == "off" or check.spec.when_unconfigured != "allow":
+        return
+    if check.id in _WARNED_UNCONFIGURED:
+        return
+    _WARNED_UNCONFIGURED.add(check.id)
+    logger.warning(
+        "safety_guard_model_not_configured",
+        check_id=check.id,
+        mode=check.mode,
+        effect="check is skipped and answers are allowed",
+        configure=f"{guard_env_name(check.id, 'PROVIDER')} and {guard_env_name(check.id, 'MODEL')}",
+        to_refuse_instead="set when_unconfigured: refuse",
+    )
 
 ResourceReader = Callable[[str], str]
 
@@ -278,6 +301,7 @@ def build_checks(
                     model_factory=model_factory,
                     prompt_template=template,
                 )
+                _warn_if_unconfigured(check)
         except GuardConfigError:
             raise
         except Exception as err:

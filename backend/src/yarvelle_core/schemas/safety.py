@@ -40,7 +40,7 @@ MAX_TEMPLATE_CHARS = 8000
 
 GuardStage = Literal["input", "output"]
 GuardMode = Literal["enforce", "shadow", "off"]
-GuardFailAction = Literal["block", "allow"]
+GuardFailAction = Literal["block", "refuse", "allow"]  # refuse is read as block
 GuardBlockAction = Literal["refuse", "warn"]
 GuardPreset = Literal["llama_guard", "granite_guardian", "labels", "json"]
 GuardStyle = Literal["moderation", "prompt"]
@@ -209,10 +209,18 @@ class GuardCheckSpec(_Strict):
     )
     when_unconfigured: GuardFailAction = Field(
         default="allow",
-        description="No model configured: allow skips the check; block refuses every answer it would check.",
+        description=(
+            "No model configured: allow skips the check (a warning names it at startup); "
+            "block or refuse refuses every answer it would check."
+        ),
     )
     on_abstain: GuardFailAction = Field(default="block", description="Model not sure, or text too long.")
     on_error: GuardFailAction = Field(default="block", description="Timeout, failed call or unreadable reply.")
+
+    @field_validator("when_unconfigured", "on_abstain", "on_error")
+    @classmethod
+    def _refuse_means_block(cls, value: str) -> str:
+        return "block" if value == "refuse" else value
 
     @model_validator(mode="after")
     def _consistent(self) -> "GuardCheckSpec":
