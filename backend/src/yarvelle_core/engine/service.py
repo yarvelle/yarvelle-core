@@ -99,7 +99,7 @@ from yarvelle_core.schemas.chat import ChatMessage, ChatRequestBody
 from yarvelle_core.schemas.manifest import RiskClass, SkillManifest, SLUG_REGEX
 from yarvelle_core.logging import get_logger
 from yarvelle_core.workflows.nodes.base import sanitize_log_message
-from yarvelle_core.workflows.state import AgentState
+from yarvelle_core.workflows.state import AgentState, turn_reset_values
 
 logger = get_logger("yarvelle_core.engine.service")
 
@@ -983,26 +983,15 @@ class AgentExecutionService:
             "workspace_root": str(ws_root),
             "skills_dir": str(skills_dir),
             "system_prompt": system_prompt,
-            "refused": False,
-            "is_refusal": False,
-            "refusal_reason": None,
-            "output": "",
-            "iteration_count": 0,
-            "reflection_count": 0,
-            "tool_calls": [],
-            "error": None,
-            "error_exception": None,
-            "next_step": "",
-            "follow_up_suggestions": [],
+            # Per-turn results (answer, refusal, reflection count, error)
+            # start fresh so the previous turn's never carry over.
+            **turn_reset_values(),
             "document_dossiers": [],
             "store_bodies": effective_store_bodies,
             "allow_clinical": allow_clinical,
             "attachments": attachments or [],
             "notes": [],
-            "emergency_red_flags": None,
             "execution_plan": kwargs.get("execution_plan"),
-            "provisioned_references": {},
-            "specialist_outputs": {},
         }
         for opt_k in ("target_agents", "scopes", "deliberation_config"):
             if opt_k in kwargs:
