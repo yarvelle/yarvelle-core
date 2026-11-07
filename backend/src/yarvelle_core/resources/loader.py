@@ -28,6 +28,7 @@ import threading
 from typing import Any, Dict, List, NamedTuple, Optional, Tuple, TYPE_CHECKING
 import yaml
 
+from yarvelle_core.constants.extraction import DOSSIER_TYPE_GENERIC
 from yarvelle_core.resources.pack_resolver import (
     PackResourceError,
     PackResourceResolver,
@@ -39,6 +40,9 @@ if TYPE_CHECKING:
     from yarvelle_core.pack.spec import PackSpec
 
 logger = logging.getLogger(__name__)
+
+# Core catch-all dossier type; get_routing_patterns() always orders it last.
+FALLBACK_DOSSIER_TYPE = DOSSIER_TYPE_GENERIC
 
 
 class RefusalPattern(NamedTuple):
@@ -239,6 +243,10 @@ class ResourceLoader:
         and ``routing_rules`` are preserved. Pack overlays may add new dossier type
         patterns and keywords but cannot replace core safety identity for existing
         core keys.
+
+        ``dossier_types`` order is the match order: core-specific types first,
+        then pack types in registration order, and the core catch-all
+        ``generic`` type last as the fallback.
         """
         cache_key = "merged_routing_patterns"
         if cache_key in self._cache:
@@ -267,6 +275,12 @@ class ResourceLoader:
                     # Preserve core / first-registered identity; do not override.
                     continue
                 merged["dossier_types"][key] = val
+        # Dossier types are matched first-match in order. The core catch-all
+        # type is a fallback: move it after core-specific and pack types so
+        # broad words such as "summary" do not shadow a more specific type.
+        fallback = merged["dossier_types"].pop(FALLBACK_DOSSIER_TYPE, None)
+        if fallback is not None:
+            merged["dossier_types"][FALLBACK_DOSSIER_TYPE] = fallback
         with self._lock:
             self._cache[cache_key] = merged
         return {
