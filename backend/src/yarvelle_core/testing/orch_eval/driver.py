@@ -48,7 +48,7 @@ from yarvelle_core.testing.orch_eval.judge import (
 )
 from yarvelle_core.testing.orch_eval.report import HARD_RULE_NAMES
 from yarvelle_core.testing.orch_eval.faults import FaultInjectingFakeModel, FaultPlan
-from yarvelle_core.testing.orch_eval.pack import EvalPack
+from yarvelle_core.testing.orch_eval.pack import EvalPack, EvalPackError
 from yarvelle_core.testing.orch_eval.schema import Scenario, Turn
 from yarvelle_core.testing.orch_eval.trace import TaskRecord, TurnTrace
 
@@ -317,9 +317,16 @@ class ScenarioRunner:
         return main + catalog
 
     def _build_graph(self, scenario: Scenario, spec: Any, model: Any, audit: Any, turn_tasks: Any, checkpointer: Any) -> Any:
-        from yarvelle_core.engine.builder import GraphBuilder
+        from yarvelle_core.engine.builder import OVERRIDABLE_NODES, GraphBuilder
 
-        return GraphBuilder(
+        nodes = dict(self.pack.graph_nodes() or {})
+        unknown = sorted(n for n in nodes if n not in OVERRIDABLE_NODES)
+        if unknown:
+            raise EvalPackError(
+                f"pack {self.pack.id!r} overrides unknown graph node(s) {unknown}; "
+                f"known nodes: {sorted(OVERRIDABLE_NODES)}"
+            )
+        builder = GraphBuilder(
             model=model,
             registry=self.pack.registry,
             # "builtin" runs without pack routes; the pack default still applies.
@@ -330,7 +337,11 @@ class ScenarioRunner:
             turn_task_sink=turn_tasks,
             safety_policy=self.pack.safety_policy(),
             checkpointer=checkpointer,
-        ).build()
+        )
+        # The pack's own nodes (for example its refusal node), as in production.
+        for name, node in nodes.items():
+            builder = builder.with_node(name, node)
+        return builder.build()
 
 
     def _apply_judge(

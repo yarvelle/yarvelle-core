@@ -99,6 +99,17 @@ class EvalPack:
         """The input guardrail policy for this pack (raises ``guardrail_flags``)."""
         return KeywordFlagPolicy(self.flag_words)
 
+    def graph_nodes(self) -> Dict[str, Any]:
+        """Graph nodes this pack replaces, by node name (none by default).
+
+        A pack that swaps nodes in production with ``GraphBuilder.with_node``
+        (for example its own refusal node) overrides this to return the same
+        nodes, so evals run the graph its users get. Names must be in
+        :data:`yarvelle_core.engine.builder.OVERRIDABLE_NODES`. The driver calls
+        this for every graph it builds, so return new node instances.
+        """
+        return {}
+
     def flags_for(self, text: str) -> List[str]:
         """Flags the pack's policy raises for ``text``."""
         return self.safety_policy().check_flags(text)
