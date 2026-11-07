@@ -3,6 +3,7 @@
 safety:
   guards:
     deadline_s: 20
+    release: buffered   # send answers only after the final check passes
     refusal_template: "I can't share that answer. Please rephrase your question."
     checks:
       - id: account-secrets

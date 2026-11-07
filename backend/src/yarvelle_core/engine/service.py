@@ -97,6 +97,7 @@ from yarvelle_core.model.factory import create_chat_model
 from yarvelle_core.engine.safety_policy import (
     SafetyContext,
     SafetyPolicy,
+    SafetyVerdict,
     acheck_output,
     get_default_safety_policy,
 )
@@ -353,9 +354,14 @@ class AgentExecutionService:
         orchestration: Optional[Any] = None,
         registry: Optional[Any] = None,
         main_agent_reminder: Optional[Callable[..., Optional[str]]] = None,
+        output_release: Optional[str] = None,
         **kwargs: Any,
     ) -> None:
         """Initialize the execution service with model, graph, checkpointer, and memory settings.
+
+        ``output_release`` is ``"stream"`` or ``"buffered"`` (see
+        ``yarvelle_core.engine.guards.release``). The strictest of this value,
+        the policy's guards and ``<PREFIX>_SAFETY_OUTPUT_RELEASE`` applies.
 
         ``default_agent_id`` is the agent used when a turn names none. It comes
         from the pack's ``orchestration.default_agent``; core has no default of
@@ -386,6 +392,11 @@ class AgentExecutionService:
         from yarvelle_core.engine.guards.policy import apply_env_guards
 
         self.safety_policy = apply_env_guards(safety_policy or get_default_safety_policy())
+        from yarvelle_core.engine.guards.release import RELEASE_BUFFERED, resolve_output_release
+
+        # buffered: no answer token leaves the service before the final check passes.
+        self.output_release = resolve_output_release(self.safety_policy, output_release)
+        self._buffer_answer = self.output_release == RELEASE_BUFFERED
         self.memory_adapter = memory_adapter if memory_adapter is not None else kwargs.get("memory_adapter")
         if self.memory_adapter is None and self.store is None:
             try:
@@ -1120,7 +1131,8 @@ class AgentExecutionService:
                             content_str = chunk.content
                             if isinstance(content_str, str) and content_str:
                                 accumulated_text += content_str
-                                yield self.format_token_event(content_str)
+                                if not self._buffer_answer:
+                                    yield self.format_token_event(content_str)
 
                     # Forward custom node events (tools, refusals, suggestions)
                     elif ev_kind == "on_custom_event":
@@ -1168,13 +1180,21 @@ class AgentExecutionService:
                             synth_text = data.get("output") or data.get("text") or ""
                             if synth_text and not accumulated_text:
                                 accumulated_text = synth_text
-                                yield self.format_token_event(synth_text)
+                                if not self._buffer_answer:
+                                    yield self.format_token_event(synth_text)
                             logger.info(
                                 "response_synthesis_emitted",
                                 thread_id=thread_id,
                                 text_length=len(synth_text),
                             )
-                            yield {"type": "synthesis", **data}
+                            if self._buffer_answer:
+                                # Unchecked answer text stays in the service until the final check.
+                                yield {
+                                    "type": "synthesis",
+                                    **{k: v for k, v in data.items() if k not in ("output", "text")},
+                                }
+                            else:
+                                yield {"type": "synthesis", **data}
                         elif name in ("citations", "extraction"):
                             cits = data.get("citations") or data.get("dossiers", [])
                             if cits:
@@ -1204,7 +1224,8 @@ class AgentExecutionService:
                                 out_text = chain_out.get("output")
                                 if out_text and isinstance(out_text, str):
                                     accumulated_text = out_text
-                                    yield self.format_token_event(out_text)
+                                    if not self._buffer_answer:
+                                        yield self.format_token_event(out_text)
 
         except asyncio.CancelledError:
             logger.info("turn_cancelled", thread_id=thread_id)
@@ -1221,8 +1242,19 @@ class AgentExecutionService:
         # Handle turn interrupted for HITL approval
         if approval_required_triggered:
             logger.info("workflow_turn_interrupted_for_approval", thread_id=thread_id, approval_id=active_approval_id)
+            paused_text = accumulated_text
+            if self._buffer_answer and paused_text:
+                paused_check = await acheck_output(
+                    self.safety_policy,
+                    paused_text,
+                    SafetyContext(agent_id=agent.id, metadata={"prompt": prompt, "thread_id": thread_id}),
+                )
+                if paused_check.refused:
+                    paused_text = ""
+                else:
+                    yield self.format_token_event(paused_text)
             yield self.format_done_event(
-                full_text=accumulated_text or "Action paused: human approval required to execute this operation.",
+                full_text=paused_text or "Action paused: human approval required to execute this operation.",
                 thread_id=thread_id,
                 refused=False,
                 suggestions=[],
@@ -1346,6 +1378,9 @@ class AgentExecutionService:
             except Exception as audit_err:
                 logger.warning("Failed to record run audit event: %s", audit_err)
 
+            if self._buffer_answer and accumulated_text:
+                # Checked: release the whole answer at once.
+                yield self.format_token_event(accumulated_text)
 
             yield self.format_done_event(
                 full_text=accumulated_text,
@@ -1555,7 +1590,8 @@ class AgentExecutionService:
                         chunk = event.get("data", {}).get("chunk")
                         if chunk and getattr(chunk, "content", None):
                             accumulated_text += chunk.content
-                            yield self.format_token_event(chunk.content)
+                            if not self._buffer_answer:
+                                yield self.format_token_event(chunk.content)
 
                     elif ev_kind == "on_custom_event":
                         name = event.get("name")
@@ -1593,11 +1629,37 @@ class AgentExecutionService:
                 yield self.format_error_event("Resume error: an unexpected error occurred during execution.")
                 return
 
+            # A resumed turn always gets the same final output check as a normal
+            # turn (any policy, with or without guards). No text, nothing to check.
+            resumed = (
+                await acheck_output(
+                    self.safety_policy, accumulated_text, SafetyContext(metadata={"thread_id": thread_id})
+                )
+                if accumulated_text.strip()
+                else SafetyVerdict(refused=False)
+            )
+            resumed_reason = resumed.reason or "forbidden_intent:policy_prohibited"
+            resumed_soft = resumed.refused and not self.safety_policy.is_hard_refusal_reason(resumed_reason)
+            if resumed.refused and not resumed_soft:
+                template = self.safety_policy.get_refusal_template(resumed_reason)
+                yield self.format_refusal_event(reason=resumed_reason, message=template)
+                yield self.format_done_event(
+                    full_text=template,
+                    thread_id=thread_id,
+                    refused=True,
+                    refusal_reason=resumed_reason,
+                    suggestions=[],
+                )
+                return
+            if self._buffer_answer and accumulated_text:
+                yield self.format_token_event(accumulated_text)
+
             yield self.format_done_event(
                 full_text=accumulated_text,
                 thread_id=thread_id,
                 refused=False,
                 suggestions=suggestions,
+                boundary_warning=resumed_soft,
             )
 
     async def execute_resume_chat(

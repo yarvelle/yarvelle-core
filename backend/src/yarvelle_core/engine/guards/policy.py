@@ -35,7 +35,7 @@ from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Set, Union
 import yaml
 
 from yarvelle_core.engine.guards.audit import GuardAuditHook
-from yarvelle_core.engine.guards.env import env_only_checks
+from yarvelle_core.engine.guards.env import env_only_checks, guard_env_name
 from yarvelle_core.engine.guards.model_check import ModelCheck, ModelFactory
 from yarvelle_core.engine.guards.rules import RuleCheck
 from yarvelle_core.engine.guards.runner import GuardRunner, aggregate
@@ -53,7 +53,30 @@ from yarvelle_core.engine.safety_policy import (
     SafetyPolicy,
     SafetyVerdict,
 )
+from yarvelle_core.logging import get_logger
 from yarvelle_core.schemas.safety import GuardCheckSpec, SafetyGuardsSpec
+
+logger = get_logger("yarvelle_core.engine.guards")
+
+# Check ids already warned about a missing model, so the warning is logged once.
+_WARNED_UNCONFIGURED: Set[str] = set()
+
+
+def _warn_if_unconfigured(check: ModelCheck) -> None:
+    """A model check that will silently skip (no model, when_unconfigured allow) is logged once."""
+    if check.configured or check.mode == "off" or check.spec.when_unconfigured != "allow":
+        return
+    if check.id in _WARNED_UNCONFIGURED:
+        return
+    _WARNED_UNCONFIGURED.add(check.id)
+    logger.warning(
+        "safety_guard_model_not_configured",
+        check_id=check.id,
+        mode=check.mode,
+        effect="check is skipped and answers are allowed",
+        configure=f"{guard_env_name(check.id, 'PROVIDER')} and {guard_env_name(check.id, 'MODEL')}",
+        to_refuse_instead="set when_unconfigured: refuse",
+    )
 
 ResourceReader = Callable[[str], str]
 
@@ -85,8 +108,10 @@ class GuardedSafetyPolicy:
         refusal_template: Optional[str] = None,
         includes_env: bool = False,
         cache_size: int = 64,
+        release: str = "stream",
     ) -> None:
         self.base = base
+        self.release = release
         self.runner = runner
         self.refusal_template = refusal_template
         self.includes_env = includes_env
@@ -97,7 +122,7 @@ class GuardedSafetyPolicy:
     # -- delegated protocol members ------------------------------------
     def __getattr__(self, name: str) -> Any:
         # Pack-specific helpers on the base policy stay reachable.
-        if name in ("base", "runner"):
+        if name in ("base", "runner", "release"):
             raise AttributeError(name)
         return getattr(self.base, name)
 
@@ -276,6 +301,7 @@ def build_checks(
                     model_factory=model_factory,
                     prompt_template=template,
                 )
+                _warn_if_unconfigured(check)
         except GuardConfigError:
             raise
         except Exception as err:
@@ -317,9 +343,11 @@ def build_guarded_policy(
     checks = build_checks(specs, resource_reader=resource_reader, chat_models=chat_models, model_factory=model_factory)
     checks.extend(extra_checks)
     runner = GuardRunner(checks, deadline_s=spec.deadline_s, audit_hooks=audit_hooks)
-    if not runner.checks:
+    if not runner.checks and spec.release == "stream":
         return base
-    return GuardedSafetyPolicy(base, runner, refusal_template=spec.refusal_template, includes_env=include_env)
+    return GuardedSafetyPolicy(
+        base, runner, refusal_template=spec.refusal_template, includes_env=include_env, release=spec.release
+    )
 
 
 def apply_env_guards(policy: SafetyPolicy) -> SafetyPolicy:

@@ -344,8 +344,8 @@ def test_granite_preset_reads_yes_as_risk() -> None:
 
 
 def test_moderation_messages_and_internal_tags() -> None:
-    model = fake("safe")
-    spec = GuardCheckSpec.model_validate(model_check(system="Risk: harm"))
+    model = fake("No")
+    spec = GuardCheckSpec.model_validate(model_check(preset="granite_guardian", system="Risk: harm"))
     result = asyncio.run(ModelCheck(spec, chat_model=model).evaluate(GuardRequest(stage="output", text="answer", prompt="question")))
     assert result.decision == GuardDecision.ALLOW
     sent = model.calls[0]
@@ -517,6 +517,65 @@ def test_unconfigured_check_is_skipped_unless_required_to_run() -> None:
     strict = guarded(checks=[model_check(when_unconfigured="block")])
     verdict = _run_out(strict, "answer")
     assert verdict.refused and verdict.reason == "guard_unavailable:judge"
+
+
+class _Recorder:
+    def __init__(self) -> None:
+        self.warnings: List[Any] = []
+
+    def warning(self, event: str, **kw: Any) -> None:
+        self.warnings.append((event, kw))
+
+
+def test_unconfigured_allow_check_warns_once_naming_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    from yarvelle_core.engine.guards import policy as policy_module
+
+    rec = _Recorder()
+    monkeypatch.setattr(policy_module, "logger", rec)
+    monkeypatch.setattr(policy_module, "_WARNED_UNCONFIGURED", set())
+    guarded(checks=[model_check("pack-judge")])
+    guarded(checks=[model_check("pack-judge")])
+    assert len(rec.warnings) == 1
+    event, kw = rec.warnings[0]
+    assert event == "safety_guard_model_not_configured" and kw["check_id"] == "pack-judge"
+    assert "YARVELLE_SAFETY_GUARD_PACK_JUDGE_PROVIDER" in kw["configure"]
+    # Configured, refusing or switched-off checks are not warned about.
+    guarded(checks=[model_check("set")], chat_models={"set": fake("safe")})
+    guarded(checks=[model_check("strict", when_unconfigured="refuse")])
+    guarded(checks=[model_check("off", mode="off"), RULES])
+    assert len(rec.warnings) == 1
+
+
+def test_llama_guard_preset_rejects_a_system_message() -> None:
+    # Its chat template has no system role; the text would be judged as a conversation turn.
+    with pytest.raises(ValidationError, match="does not take a system message"):
+        GuardCheckSpec.model_validate(model_check(system="be strict"))
+    assert GuardCheckSpec.model_validate(model_check(preset="granite_guardian", system="violence")).system == "violence"
+
+
+def test_refuse_is_accepted_for_fail_actions() -> None:
+    spec = GuardCheckSpec.model_validate(model_check(when_unconfigured="refuse", on_abstain="refuse", on_error="refuse"))
+    assert (spec.when_unconfigured, spec.on_abstain, spec.on_error) == ("block", "block", "block")
+    verdict = _run_out(guarded(checks=[model_check(when_unconfigured="refuse")]), "answer")
+    assert verdict.refused and verdict.reason == "guard_unavailable:judge"
+    with pytest.raises(ValidationError):
+        GuardCheckSpec.model_validate(model_check(when_unconfigured="maybe"))
+
+
+def test_env_only_check_is_shadow_and_never_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("YARVELLE_SAFETY_GUARDS", "lg")
+    monkeypatch.setenv("YARVELLE_SAFETY_GUARD_LG_PRESET", "llama_guard")
+    monkeypatch.setenv("YARVELLE_SAFETY_GUARD_LG_PROVIDER", "ollama")
+    monkeypatch.setenv("YARVELLE_SAFETY_GUARD_LG_MODEL", "guard:1b")
+    model = fake("unsafe\nS1")
+    records: List[Any] = []
+    policy = build_guarded_policy(NeutralSafetyPolicy(), None, include_env=True,
+                                  model_factory=lambda **kw: model, audit_hooks=[records.append])
+    verdict = _run_out(policy, "answer")
+    assert not verdict.refused and len(model.calls) == 1
+    assert [(r["check_id"], r["decision"], r["mode"]) for r in records[0].to_dict()["results"]] == [
+        ("lg", "block", "shadow")
+    ]
 
 
 def test_deadline_cancels_slow_checks() -> None:

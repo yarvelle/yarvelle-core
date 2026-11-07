@@ -376,9 +376,10 @@
         },
         "when_unconfigured": {
           "default": "allow",
-          "description": "No model configured: allow skips the check; block refuses every answer it would check.",
+          "description": "No model configured: allow skips the check (a warning names it at startup); block or refuse refuses every answer it would check.",
           "enum": [
             "block",
+            "refuse",
             "allow"
           ],
           "title": "When Unconfigured",
@@ -389,6 +390,7 @@
           "description": "Model not sure, or text too long.",
           "enum": [
             "block",
+            "refuse",
             "allow"
           ],
           "title": "On Abstain",
@@ -399,6 +401,7 @@
           "description": "Timeout, failed call or unreadable reply.",
           "enum": [
             "block",
+            "refuse",
             "allow"
           ],
           "title": "On Error",
@@ -1149,6 +1152,16 @@
           "default": null,
           "description": "Text shown when a guard refuses. Default: the safety policy's refusal template.",
           "title": "Refusal Template"
+        },
+        "release": {
+          "default": "stream",
+          "description": "stream: send answer tokens as they are generated (done carries the verdict); buffered: send the answer only after the final check passes.",
+          "enum": [
+            "stream",
+            "buffered"
+          ],
+          "title": "Release",
+          "type": "string"
         }
       },
       "title": "SafetyGuardsSpec",

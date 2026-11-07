@@ -40,10 +40,11 @@ MAX_TEMPLATE_CHARS = 8000
 
 GuardStage = Literal["input", "output"]
 GuardMode = Literal["enforce", "shadow", "off"]
-GuardFailAction = Literal["block", "allow"]
+GuardFailAction = Literal["block", "refuse", "allow"]  # refuse is read as block
 GuardBlockAction = Literal["refuse", "warn"]
 GuardPreset = Literal["llama_guard", "granite_guardian", "labels", "json"]
 GuardStyle = Literal["moderation", "prompt"]
+GuardRelease = Literal["stream", "buffered"]
 RegexFlag = Literal["ignorecase", "multiline", "dotall"]
 
 
@@ -208,10 +209,18 @@ class GuardCheckSpec(_Strict):
     )
     when_unconfigured: GuardFailAction = Field(
         default="allow",
-        description="No model configured: allow skips the check; block refuses every answer it would check.",
+        description=(
+            "No model configured: allow skips the check (a warning names it at startup); "
+            "block or refuse refuses every answer it would check."
+        ),
     )
     on_abstain: GuardFailAction = Field(default="block", description="Model not sure, or text too long.")
     on_error: GuardFailAction = Field(default="block", description="Timeout, failed call or unreadable reply.")
+
+    @field_validator("when_unconfigured", "on_abstain", "on_error")
+    @classmethod
+    def _refuse_means_block(cls, value: str) -> str:
+        return "block" if value == "refuse" else value
 
     @model_validator(mode="after")
     def _consistent(self) -> "GuardCheckSpec":
@@ -238,6 +247,12 @@ class GuardCheckSpec(_Strict):
                 raise ValueError(f"model check '{self.id}': set prompt or prompt_file, not both")
             if self.style == "prompt" and not (self.prompt or self.prompt_file):
                 raise ValueError(f"model check '{self.id}': style prompt needs prompt or prompt_file")
+            if self.preset == "llama_guard" and self.system and self.style in (None, "moderation"):
+                # Llama Guard's chat template has no system role: the text would be
+                # judged as one more conversation turn. Use a prompt-style check instead.
+                raise ValueError(
+                    f"model check '{self.id}': the llama_guard preset does not take a system message"
+                )
         if self.stages is not None and not self.stages:
             raise ValueError(f"check '{self.id}': stages must not be empty")
         return self
@@ -259,6 +274,13 @@ class SafetyGuardsSpec(_Strict):
         default=None,
         max_length=2000,
         description="Text shown when a guard refuses. Default: the safety policy's refusal template.",
+    )
+    release: GuardRelease = Field(
+        default="stream",
+        description=(
+            "stream: send answer tokens as they are generated (done carries the verdict); "
+            "buffered: send the answer only after the final check passes."
+        ),
     )
 
     @model_validator(mode="after")

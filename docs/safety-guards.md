@@ -38,6 +38,7 @@ model.
 safety:
   guards:
     deadline_s: 20            # budget for all model checks of one text
+    release: stream           # stream | buffered (see Streaming)
     refusal_template: "I can't share that answer. Please rephrase your question."
     checks:
       - id: account-secrets
@@ -62,7 +63,7 @@ safety:
         mode: shadow                     # enforce | shadow | off
         timeout_s: 8
         max_chars: 16000
-        when_unconfigured: allow         # no model set: skip this check
+        when_unconfigured: allow         # no model set: skip (warns once); or refuse
         on_abstain: block
         on_error: block
         output:
@@ -87,13 +88,13 @@ The same example is in `docs/examples/safety-guards.pack.yaml`.
 | `max_chars` | all | Longer text is not checked and counts as abstained. |
 | `preset` | model | `llama_guard`, `granite_guardian`, `labels`, `json`. |
 | `style` | model | `moderation` (send the conversation as chat messages) or `prompt` (send one message from `prompt`). |
-| `system` | model | Optional system message (for example the risk name for Granite Guardian). |
+| `system` | model | Optional system message. For `granite_guardian` it names the risk (`harm` (default), `violence`, `unethical_behavior`, `jailbreak`, ...). Not allowed with `llama_guard`, whose template has no system role. |
 | `prompt`, `prompt_file` | model | Template for `style: prompt`. `{{text}}`, `{{prompt}}`, `{{stage}}` are replaced. |
 | `output` | model | How to read the reply (below). |
 | `model` | model | Optional defaults: `provider`, `model`, `base_url`, `temperature`. Env vars override. |
 | `timeout_s` | model | Per call, default 10. |
 | `include_prompt` | model | On the output stage, also send the user's message (default true). |
-| `when_unconfigured` | model | `allow` skips the check when no model is set; `block` refuses. |
+| `when_unconfigured` | model | `allow` (default) skips the check when no model is set and logs `safety_guard_model_not_configured` once at startup, naming the check; `refuse` (or `block`) refuses. `on_abstain` and `on_error` also accept `refuse`. |
 | `on_abstain`, `on_error` | model | `block` (default) or `allow`. |
 
 ### Reading the reply (`output`)
@@ -123,6 +124,13 @@ The same example is in `docs/examples/safety-guards.pack.yaml`.
 A preset only describes the reply format. Validate any model on the pack's own
 labelled examples in `shadow` mode before giving it `enforce`.
 
+Both presets were checked locally with Ollama (`llama-guard3:1b`,
+`granite3-guardian:2b`) on a small set of safe, unsafe and tricky examples.
+Both replies parse as expected. Generic taxonomies still misfire on ordinary
+technical text: Llama Guard marked "run `kill -9 <pid>`" as `S1` (violent
+crimes). Use `output.block_categories` to keep only the categories your pack
+cares about, and start in `shadow`.
+
 ## Environment variables
 
 `<PREFIX>` is `YARVELLE` unless `YARVELLE_ENV_PREFIX` sets another (see
@@ -136,6 +144,7 @@ written as `_`.
 | `<PREFIX>_SAFETY_GUARD_<ID>_BASE_URL` | endpoint for `ollama` / `custom` |
 | `<PREFIX>_SAFETY_GUARD_<ID>_TIMEOUT_S` | per-call timeout, seconds |
 | `<PREFIX>_SAFETY_GUARD_<ID>_MODE` | `enforce`, `shadow` or `off` (ignored for a required check) |
+| `<PREFIX>_SAFETY_OUTPUT_RELEASE` | `buffered` holds every answer until the final check passes (`stream` cannot undo a pack's `buffered`) |
 
 API keys use the provider's usual variables (`OPENAI_API_KEY`,
 `ANTHROPIC_API_KEY`, ...) and are read by the model factory.
@@ -204,8 +213,28 @@ verdict.
 
 ## Streaming
 
-Guards check the complete answer. In the default stream mode, answer tokens
-reach the client while the answer is generated and the `done` event carries
-the final verdict: when `done.refused` is true, the client must replace the
-streamed text with `done.fullText`. Text-to-speech, notifications and saved
-previews should wait for `done`.
+Guards check the complete answer. How the answer reaches the client is set by
+`safety.guards.release`, the service argument `output_release`, or
+`<PREFIX>_SAFETY_OUTPUT_RELEASE`. The strictest wins: if any of them says
+`buffered`, the turn is buffered.
+
+**`stream` (default).** Answer tokens reach the client while the answer is
+generated and the `done` event carries the final verdict. When `done.refused`
+is true, the client must replace the streamed text with `done.fullText`.
+Text-to-speech, notifications and saved previews should wait for `done`.
+
+**`buffered`.** No answer text leaves the service before the final check
+passes: token events are held, and `synthesis` events are sent without their
+`output`/`text` fields. When the check passes, the whole answer is sent as one
+`token` event, then `done`. When it refuses, the client gets the `refusal`
+event and `done` with the refusal text; the answer itself is never sent.
+Progress events (tools, task status, notices) still stream. The cost is that
+the user sees nothing until the answer is complete.
+
+A turn paused for approval releases its partial text only after the same
+check. A resumed turn (`execute_resume_turn`) always gets the final output
+check, like a normal turn, with or without guards; in stream mode its done
+event carries the verdict, in buffered mode its text is held until it passes.
+
+Not covered: deliberation panel events (`deliberation_*`) carry the agents'
+own proposals and are filtered by scope, not by guards.
