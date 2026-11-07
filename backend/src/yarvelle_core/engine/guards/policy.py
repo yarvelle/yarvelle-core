@@ -85,8 +85,10 @@ class GuardedSafetyPolicy:
         refusal_template: Optional[str] = None,
         includes_env: bool = False,
         cache_size: int = 64,
+        release: str = "stream",
     ) -> None:
         self.base = base
+        self.release = release
         self.runner = runner
         self.refusal_template = refusal_template
         self.includes_env = includes_env
@@ -97,7 +99,7 @@ class GuardedSafetyPolicy:
     # -- delegated protocol members ------------------------------------
     def __getattr__(self, name: str) -> Any:
         # Pack-specific helpers on the base policy stay reachable.
-        if name in ("base", "runner"):
+        if name in ("base", "runner", "release"):
             raise AttributeError(name)
         return getattr(self.base, name)
 
@@ -317,9 +319,11 @@ def build_guarded_policy(
     checks = build_checks(specs, resource_reader=resource_reader, chat_models=chat_models, model_factory=model_factory)
     checks.extend(extra_checks)
     runner = GuardRunner(checks, deadline_s=spec.deadline_s, audit_hooks=audit_hooks)
-    if not runner.checks:
+    if not runner.checks and spec.release == "stream":
         return base
-    return GuardedSafetyPolicy(base, runner, refusal_template=spec.refusal_template, includes_env=include_env)
+    return GuardedSafetyPolicy(
+        base, runner, refusal_template=spec.refusal_template, includes_env=include_env, release=spec.release
+    )
 
 
 def apply_env_guards(policy: SafetyPolicy) -> SafetyPolicy:

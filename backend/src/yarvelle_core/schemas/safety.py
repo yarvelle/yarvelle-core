@@ -44,6 +44,7 @@ GuardFailAction = Literal["block", "allow"]
 GuardBlockAction = Literal["refuse", "warn"]
 GuardPreset = Literal["llama_guard", "granite_guardian", "labels", "json"]
 GuardStyle = Literal["moderation", "prompt"]
+GuardRelease = Literal["stream", "buffered"]
 RegexFlag = Literal["ignorecase", "multiline", "dotall"]
 
 
@@ -259,6 +260,13 @@ class SafetyGuardsSpec(_Strict):
         default=None,
         max_length=2000,
         description="Text shown when a guard refuses. Default: the safety policy's refusal template.",
+    )
+    release: GuardRelease = Field(
+        default="stream",
+        description=(
+            "stream: send answer tokens as they are generated (done carries the verdict); "
+            "buffered: send the answer only after the final check passes."
+        ),
     )
 
     @model_validator(mode="after")
