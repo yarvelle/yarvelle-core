@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 from yarvelle_core.constants.defaults import DEFAULT_MAX_REFLECTIONS
+from yarvelle_core.engine.orchestration.runtime import MAIN_AGENT_ID
 from yarvelle_core.workflows.nodes.base import BaseNode
 
 
@@ -38,6 +39,17 @@ class ReflectionNode(BaseNode):
         raw_count = state.get("reflection_count", 0)
         current_count = max(0, int(raw_count))
         max_refl = int(state.get("max_reflections", self.max_reflections))
+
+        # A refused main-agent answer ends on the refusal path. The retry edge
+        # goes to the single-agent node, which cannot run the main agent, and
+        # rerunning the main agent would repeat every hand-off.
+        if state.get("current_agent") == MAIN_AGENT_ID:
+            return {
+                "reflection_count": current_count,
+                "next_step": "refusal",
+                "critique": "The coordinated answer was refused; returning the refusal.",
+                "previous_attempts": list(state.get("previous_attempts", [])),
+            }
 
         # Ceiling check: if max_reflections is 0 or current count reached ceiling
         if max_refl <= 0 or current_count >= max_refl:
