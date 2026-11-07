@@ -18,8 +18,12 @@ on:
         default: ''
         type: string
 
+# npm trusted publishing (OIDC): npmjs.com must list this repository and the
+# workflow file "release-npm.yml" (no environment) as the package's trusted
+# publisher. No npm token is used; npm adds provenance automatically.
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   publish-npm:
@@ -34,8 +38,13 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
+
+      - name: Use npm with trusted publishing support (>= 11.5.1)
+        run: |
+          npm install -g npm@^11.5.1
+          npm --version
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
@@ -44,13 +53,8 @@ jobs:
 
       - name: Build and Publish @yarvelle/ui
         working-directory: frontend
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          if [ "${{ github.event.inputs.dryRun }}" != "true" ] && [ -z "${NODE_AUTH_TOKEN}" ]; then
-            echo "Error: NPM_TOKEN secret is not configured." >&2
-            exit 1
-          fi
+          set -euo pipefail
           if [ -n "${{ github.event.inputs.version }}" ]; then
             npm version "${{ github.event.inputs.version }}" --no-git-tag-version --allow-same-version
           elif [[ "$GITHUB_REF_NAME" =~ ^(ui-)?v?[0-9] ]]; then
@@ -60,19 +64,13 @@ jobs:
           fi
           pnpm install --no-frozen-lockfile
           pnpm run build
-          EXTRA_FLAGS=""
-          if [ "${{ github.event.inputs.dryRun }}" = "true" ]; then
-            EXTRA_FLAGS="--dry-run"
-          fi
+          npm pack --dry-run
           CURRENT_VER=$(node -p "require('./package.json').version")
-          if [ "${{ github.event.inputs.dryRun }}" != "true" ] && npm view "@yarvelle/ui@$CURRENT_VER" version >/dev/null 2>&1; then
+          if [ "${{ github.event.inputs.dryRun }}" = "true" ]; then
+            npm publish --access public --dry-run
+          elif npm view "@yarvelle/ui@$CURRENT_VER" version >/dev/null 2>&1; then
             echo "Version $CURRENT_VER of @yarvelle/ui is already published on npm. Skipping publish."
           else
-            npm publish --access public $EXTRA_FLAGS 2>&1 | tee /tmp/npm-publish.log || {
-              if grep -qE "E409|EPUBLISHCONFLICT|previously published|previously staged" /tmp/npm-publish.log; then
-                echo "Version $CURRENT_VER of @yarvelle/ui is already staged/published on npm. Skipping."
-              else
-                exit 1
-              fi
-            }
+            # Any publish error (for example E404 or ENEEDAUTH) fails the job.
+            npm publish --access public
           fi
