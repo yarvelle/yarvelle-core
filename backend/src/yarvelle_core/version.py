@@ -17,4 +17,4 @@ this file; ``yarvelle_core.__version__`` re-exports it.
 
 from __future__ import annotations
 
-__version__ = "0.2.3"
+__version__ = "0.2.4"

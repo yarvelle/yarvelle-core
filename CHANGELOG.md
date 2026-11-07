@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] - 2026-11-07
+
+This patch release adds configurable safety guards that run after a pack's safety policy, an opt-in buffered answer release, and a final output check on resumed turns. With no guards configured, normal turns behave as in 0.2.3. `pack_api` stays 1: `safety` is a new optional block in `pack.yaml`.
+
+### Added
+- **Safety guards** (#46, #48). Packs can declare `safety.guards` in `pack.yaml`: regex `rules` checks (named fragments, normalization, exempt spans, sentence-scoped patterns, `rules_file`) and `model` checks that call any LangChain chat model through the existing model factory (Ollama, OpenAI, Anthropic, Google, custom). Presets `llama_guard`, `granite_guardian`, `labels` and `json` read the reply. Checks run in `enforce`, `shadow` or `off` mode. The pack's policy decides first, a rules block can't be undone by a model, and timeouts, failed calls, unreadable replies and abstentions refuse by default. Every evaluation is audited without the checked text (`add_guard_audit_hook`). Models and modes can be set with `<PREFIX>_SAFETY_GUARD_<ID>_*` env vars, and `<PREFIX>_SAFETY_GUARDS` adds env-only checks, which run in shadow by default. Core ships no guard model. See `docs/safety-guards.md`.
+- **Buffered answer release** (#47 via #48). `safety.guards.release: buffered`, `AgentExecutionService(output_release="buffered")` or `<PREFIX>_SAFETY_OUTPUT_RELEASE=buffered` holds answer tokens until the final check passes, then sends the answer as one token event; a refused answer is never sent. The default stays `stream`, where `done.refused` tells the client to replace the streamed text.
+- **Unconfigured model checks are reported** (#48). A model check with no model and `when_unconfigured: allow` (the default) logs `safety_guard_model_not_configured` once at startup, naming the check. `when_unconfigured`, `on_abstain` and `on_error` accept `refuse`.
+
+### Changed
+- **Resumed turns get the final output check** (#48). `execute_resume_turn` now runs the same final output check as a normal turn, for every policy. A hard refusal replaces the resumed answer with the refusal template.
+- **Async safety checks** (#46). The guardrail nodes and the service call the new `acheck_input` / `acheck_output` helpers. Existing synchronous policies are called exactly as before.
+
+### Fixed
+- **Llama Guard system messages** (#48). Llama Guard's chat template has no system role, so `preset: llama_guard` with `system` is now rejected at load instead of being judged as a conversation turn.
+
 ## [0.2.3] - 2026-11-07
 
 This patch release adds an optional per-turn delegation reminder for the main agent and fixes main-agent refusals and multi-turn evals. Nothing is removed or renamed, every new setting is off by default, and packs built for 0.2.2 work unchanged. `pack_api` stays 1.

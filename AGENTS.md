@@ -14,7 +14,7 @@
 -->
 
 Specification compliance: [AGENTS.md v1.0.0](https://github.com/agent-infra/agents.md)  
-Runtime version: Yarvelle Core 0.2.3  
+Runtime version: Yarvelle Core 0.2.4  
 Last updated: 2026-11-07  
 
 ---
