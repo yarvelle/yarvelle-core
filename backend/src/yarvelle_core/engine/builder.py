@@ -395,6 +395,7 @@ class GraphBuilder:
                 bound_model = self.model
 
         # 2. Instantiate discrete workflow nodes
+        from yarvelle_core.engine.orchestration.runtime import MAIN_AGENT_ID
         from yarvelle_core.workflows.deliberation.node import DeliberationNode
         from yarvelle_core.workflows.nodes import (
             AgentExecutionNode,
@@ -974,6 +975,11 @@ class GraphBuilder:
         # Reflection self-correction loop
         if self.include_reflection:
             def route_reflection(state: AgentState) -> str:
+                # A main-agent turn is never retried on the single-agent node:
+                # "main-agent" is not a registered agent there. This also holds
+                # for a pack's own reflection node that asks for "agent".
+                if state.get("current_agent") == MAIN_AGENT_ID:
+                    return "refusal"
                 if state.get("next_step") == "agent" and state.get("reflection_count", 0) <= self.max_reflections:
                     return "agent"
                 return "refusal"
