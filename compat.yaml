@@ -2,12 +2,20 @@
 # Defines supported pairings of core, @yarvelle/ui, and pack_api versions.
 
 matrix:
+  - core: "0.2.4"
+    ui: "0.2.4"
+    pack_api: 1
+    python: ">=3.12"
+    node: ">=20.0.0"
+    status: "active"
+    notes: "Configurable safety guards (rules and model checks), buffered answer release, and a final output check on resumed turns"
+
   - core: "0.2.3"
     ui: "0.2.3"
     pack_api: 1
     python: ">=3.12"
     node: ">=20.0.0"
-    status: "active"
+    status: "supported"
     notes: "Per-turn delegation reminder for the main agent, pack-supplied eval graph nodes, and fixes for main-agent refusals and multi-turn evals"
 
   - core: "0.2.2"
