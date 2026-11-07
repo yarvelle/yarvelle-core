@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-11-06
+
+This release adds optional pack settings and opt-in features on top of 0.2.0. Nothing is removed or renamed, and every new setting defaults to the 0.2.0 behaviour, so packs built for 0.2.0 work unchanged.
+
+### Added
+- **Delegation instructions for the main agent** (#34). Packs can set `orchestration.delegation.instructions` to say when the main agent should hand work to specialists, for example on follow-up questions. The text is added after the base prompt under "When to hand work to specialists:" and before the synthesis instructions. It is empty by default. See `docs/pack-orchestration.md`.
+- **Pack-native resources** (#28). A secure resolver lets packs ship routing and pattern resources inside the pack package.
+- **Encryption at rest for audit bodies and long-term memory** (#29). Opt-in and off by default.
+- **Local orchestration eval harness** (#20 to #26), local only and never run in CI:
+  - fault injection, restart and cancel
+  - Ollama and metered backends, with a spend cap that defaults to $0
+  - JSON, Markdown and HTML reports with baseline compare
+  - record and replay cassettes
+  - an LLM judge with rubrics and calibration
+  - paraphrase, adversarial and forty-agent scenarios
+  - `glm-4.7-flash` as the default Ollama subject
+
+### Fixed
+- **Release metadata** (#27). A `version.py` module is the single version source, and the release config targets plain `vX.Y.Z` tags.
+- **Route kept on cancel** (#21). A cancel during a hand-off keeps the route and agent decision.
+
 ## [0.2.0] - 2026-11-04
 
 This release replaces keyword dispatch with subagent orchestration and makes routing and hand-offs auditable. It also adds opt-in encryption for checkpoints and a local-only harness for orchestration evals. It contains breaking changes; read **Upgrading from 0.1.x** below before updating.
