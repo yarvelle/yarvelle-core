@@ -141,6 +141,30 @@ async def _store_turn_tasks(rows: Sequence[Any]) -> None:
         await session.commit()
 
 
+# Node names :meth:`GraphBuilder.with_node` can replace. Aliases name the same
+# node (``orchestrator`` = ``supervisor``, ``agent_execution`` = ``agent``,
+# ``synthesizer`` = ``response_synthesizer``).
+OVERRIDABLE_NODES: frozenset[str] = frozenset({
+    "agent",
+    "agent_execution",
+    "audit",
+    "deliberation",
+    "error",
+    "input_guardrail",
+    "main_agent",
+    "orchestrator",
+    "output_guardrail",
+    "reflection",
+    "refusal",
+    "response_synthesizer",
+    "suggestion",
+    "supervisor",
+    "synthesizer",
+    "tool_validator",
+    "tools",
+})
+
+
 class GraphBuilder:
     """Fluent state graph builder assembling discrete workflow nodes and subgraphs.
 
