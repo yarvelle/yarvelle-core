@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-11-07
+
+This patch release fixes dossier-type matching when packs register their own document types. Nothing is removed or renamed, and core-only setups behave as in 0.2.1.
+
+### Fixed
+- **Generic dossier type matched last** (#36). `get_routing_patterns()` now orders `dossier_types` as core-specific types, then pack types in registration order, then the catch-all `generic` type as the fallback. Before this, `generic` came first, so broad words such as "summary" or "document" shadowed more specific types registered through `routing_hints.patterns_resource`. Packs still cannot override core types.
+
 ## [0.2.1] - 2026-11-06
 
 This release adds optional pack settings and opt-in features on top of 0.2.0. Nothing is removed or renamed, and every new setting defaults to the 0.2.0 behaviour, so packs built for 0.2.0 work unchanged.
