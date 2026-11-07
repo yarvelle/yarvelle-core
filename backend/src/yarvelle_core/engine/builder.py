@@ -198,6 +198,7 @@ class GraphBuilder:
         orchestration_audit_sink: Optional[Callable[..., Any]] = None,
         turn_task_sink: Optional[Callable[..., Any]] = None,
         include_main_agent: bool = True,
+        main_agent_reminder: Optional[Callable[..., Optional[str]]] = None,
         **kwargs: Any,
     ) -> None:
         """Initialize GraphBuilder configuration.
@@ -206,6 +207,10 @@ class GraphBuilder:
         orchestrator uses it only when routing cannot pick a registered agent.
         ``include_main_agent=False`` leaves out the main agent, so model-routed
         turns use the routing model's single pick instead of hand-offs.
+        ``main_agent_reminder`` is a pack hook that returns a reminder for the
+        main agent's copy of the latest user message (see
+        ``yarvelle_core.engine.orchestration.reminder``); it replaces
+        ``orchestration.delegation.reminder``. Neither is set by default.
         """
         self.model = model
         self.checkpointer = checkpointer
@@ -235,6 +240,7 @@ class GraphBuilder:
         # Where each turn's hand-off records go; defaults to the ``turn_tasks`` table.
         self.turn_task_sink = turn_task_sink
         self.include_main_agent = include_main_agent
+        self.main_agent_reminder = main_agent_reminder
         self.suggestion_model = kwargs.get("suggestion_model")
         self.extra_kwargs = kwargs
 
@@ -349,6 +355,11 @@ class GraphBuilder:
         self._custom_nodes[name] = node
         return self
 
+    def with_main_agent_reminder(self, reminder: Optional[Callable[..., Optional[str]]]) -> GraphBuilder:
+        """Set the per-turn reminder hook for the main agent (model input only)."""
+        self.main_agent_reminder = reminder
+        return self
+
     def with_max_reflections(self, max_reflections: int) -> GraphBuilder:
         """Set the maximum self-correction reflection ceiling."""
         self.max_reflections = max_reflections
@@ -434,6 +445,7 @@ class GraphBuilder:
                         default_agent=self.default_agent,
                         audit_sink=self.orchestration_audit_sink or _record_orchestration_audit,
                         task_sink=self.turn_task_sink or _store_turn_tasks,
+                        reminder=self.main_agent_reminder,
                     )
                 supervisor_node = OrchestratorNode(
                     model=self.model,

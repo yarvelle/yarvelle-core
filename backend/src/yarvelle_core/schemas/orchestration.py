@@ -149,6 +149,40 @@ class SynthesisSpec(_Strict):
     )
 
 
+ReminderWhen = Literal["follow_up", "always"]
+
+
+class DelegationReminderSpec(_Strict):
+    """A short reminder the main agent reads with the latest user message
+    (``orchestration.delegation.reminder``).
+
+    Some models stop applying system-prompt delegation rules once the
+    conversation has history. The reminder is appended to a model-only copy of
+    the turn's user message; the saved conversation keeps the user's words.
+    """
+
+    text: str = Field(
+        ...,
+        min_length=1,
+        max_length=2000,
+        description="Reminder appended to the model's copy of the latest user message.",
+    )
+    when: ReminderWhen = Field(
+        default="follow_up",
+        description=(
+            "follow_up: only when the conversation already has a reply; "
+            "always: on every turn that ends with a user message."
+        ),
+    )
+
+    @field_validator("text")
+    @classmethod
+    def _not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("reminder text must not be blank")
+        return v
+
+
 class DelegationSpec(_Strict):
     """When the main agent hands work to specialists (``orchestration.delegation``).
 
@@ -161,6 +195,10 @@ class DelegationSpec(_Strict):
         default="",
         max_length=4000,
         description="Guidance added to the main agent's system prompt on when to hand work to specialists.",
+    )
+    reminder: Optional[DelegationReminderSpec] = Field(
+        default=None,
+        description="Optional per-turn reminder next to the latest user message (model input only; off by default).",
     )
 
 
@@ -347,6 +385,7 @@ __all__ = [
     "DEFAULT_AGENT_TIMEOUT_S",
     "DEFAULT_MAX_AGENTS",
     "DEFAULT_TURN_TIMEOUT_S",
+    "DelegationReminderSpec",
     "DelegationSpec",
     "FallbackReason",
     "RejectedPickReason",
@@ -359,6 +398,7 @@ __all__ = [
     "OrchestrationStreamEvent",
     "PackOrchestrationSpec",
     "ROUTE_ID_PATTERN",
+    "ReminderWhen",
     "RouteDecision",
     "RouteSource",
     "RouteTrigger",

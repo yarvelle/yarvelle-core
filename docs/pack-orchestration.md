@@ -15,6 +15,10 @@ orchestration:
     instructions: |
       Hand follow-up questions about an earlier specialist answer back to that
       specialist, even when the question looks simple.
+    reminder:               # optional, off by default; model input only
+      when: follow_up       # follow_up (default) or always
+      text: |
+        (Follow-up: apply the hand-off rules to this new message.)
   synthesis:
     instructions: |
       Keep the reply short and list any missing part first.
@@ -42,3 +46,46 @@ inside `delegation` or `synthesis` are rejected when the pack loads.
 
 Delegation instructions guide the model; they do not force a route. For a
 request that must always reach one agent, use a fixed route instead.
+
+## Per-turn delegation reminder
+
+With some models (seen with local models such as `glm-4.7-flash`), rules that
+appear only in the system prompt stop working once the conversation has
+history. On a follow-up turn the model answers from its earlier reply instead
+of handing the new question to a specialist. `delegation.reminder` puts a short
+reminder next to the latest user message:
+
+- The reminder is added to the main agent's **copy** of the turn's latest user
+  message, after a blank line. For multipart content it is added as an extra
+  text block. It is not a separate system message, because some providers
+  accept system text only at the start.
+- It is **model input only**. The checkpoint, conversation history, stream and
+  audit keep the user's own words. Only the main agent sees it; specialists get
+  their task brief as before.
+- `when: follow_up` (the default) adds it only when the conversation already
+  has a reply. `when: always` adds it on every turn that ends with a user
+  message.
+- `text` is required, must not be blank, and can be up to 2000 characters.
+  Unknown keys are rejected when the pack loads.
+- When `reminder` is not set, nothing changes and the main agent reads the
+  messages as before.
+
+### Python hook
+
+A pack that needs its own logic can pass a hook instead of, or on top of, the
+`pack.yaml` text. A hook replaces the `pack.yaml` reminder.
+
+```python
+from yarvelle_core.engine.orchestration.reminder import is_follow_up
+
+def reminder(messages, state):
+    # messages: the turn's messages, ending with the user's; state: graph state.
+    # Return the reminder text, or None for no reminder this turn.
+    return "(Follow-up: hand this to the right specialist again.)" if is_follow_up(messages) else None
+
+GraphBuilder(..., main_agent_reminder=reminder)          # or .with_main_agent_reminder(reminder)
+AgentExecutionService(..., main_agent_reminder=reminder)  # built-in routing graph
+```
+
+For evals, the orch_eval driver applies the `pack.yaml` reminder automatically.
+An `EvalPack` subclass can return the same hook from `main_agent_reminder()`.

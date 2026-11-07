@@ -31,6 +31,34 @@
       "title": "CrossPackGrantSpec",
       "type": "object"
     },
+    "DelegationReminderSpec": {
+      "additionalProperties": false,
+      "description": "A short reminder the main agent reads with the latest user message\n(``orchestration.delegation.reminder``).\n\nSome models stop applying system-prompt delegation rules once the\nconversation has history. The reminder is appended to a model-only copy of\nthe turn's user message; the saved conversation keeps the user's words.",
+      "properties": {
+        "text": {
+          "description": "Reminder appended to the model's copy of the latest user message.",
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "when": {
+          "default": "follow_up",
+          "description": "follow_up: only when the conversation already has a reply; always: on every turn that ends with a user message.",
+          "enum": [
+            "follow_up",
+            "always"
+          ],
+          "title": "When",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "DelegationReminderSpec",
+      "type": "object"
+    },
     "DelegationSpec": {
       "additionalProperties": false,
       "description": "When the main agent hands work to specialists (``orchestration.delegation``).\n\nThe base prompt tells the main agent to answer directly when no specialist\nis needed. A pack can say when its specialists should take the work\ninstead, for example follow-up questions about an earlier specialist answer.",
@@ -41,6 +69,18 @@
           "maxLength": 4000,
           "title": "Instructions",
           "type": "string"
+        },
+        "reminder": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DelegationReminderSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional per-turn reminder next to the latest user message (model input only; off by default)."
         }
       },
       "title": "DelegationSpec",
