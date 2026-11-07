@@ -303,7 +303,13 @@ class ScenarioRunner:
         """
         from yarvelle_core.engine.orchestration.runtime import compose_main_prompt
 
-        main = len(compose_main_prompt(None, getattr(self.pack.spec, "synthesis", None)))
+        main = len(
+            compose_main_prompt(
+                None,
+                getattr(self.pack.spec, "synthesis", None),
+                getattr(self.pack.spec, "delegation", None),
+            )
+        )
         catalog = 0
         for spec in self.pack.registry.list_subagents():
             catalog += len(str(spec.get("name") or ""))

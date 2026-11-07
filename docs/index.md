@@ -28,6 +28,12 @@ flowchart LR
 
 ---
 
+## Guides
+
+- **[Pack orchestration settings](pack-orchestration.md)**: the `orchestration:` block in `pack.yaml`, including delegation and synthesis instructions for the main agent.
+
+---
+
 ## Architecture Decision Records (ADRs)
 
 Explore the full [ADR Index](adr/README.md):

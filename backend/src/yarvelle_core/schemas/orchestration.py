@@ -149,6 +149,21 @@ class SynthesisSpec(_Strict):
     )
 
 
+class DelegationSpec(_Strict):
+    """When the main agent hands work to specialists (``orchestration.delegation``).
+
+    The base prompt tells the main agent to answer directly when no specialist
+    is needed. A pack can say when its specialists should take the work
+    instead, for example follow-up questions about an earlier specialist answer.
+    """
+
+    instructions: str = Field(
+        default="",
+        max_length=4000,
+        description="Guidance added to the main agent's system prompt on when to hand work to specialists.",
+    )
+
+
 class PackOrchestrationSpec(_Strict):
     """Pack-level orchestration config (``orchestration:`` in pack.yaml).
 
@@ -161,6 +176,7 @@ class PackOrchestrationSpec(_Strict):
     default_agent: str
     fixed_routes: List[FixedRoute] = Field(default_factory=list)
     limits: OrchestrationLimits = Field(default_factory=OrchestrationLimits)
+    delegation: DelegationSpec = Field(default_factory=DelegationSpec)
     synthesis: SynthesisSpec = Field(default_factory=SynthesisSpec)
 
     @field_validator("default_agent")
@@ -331,6 +347,7 @@ __all__ = [
     "DEFAULT_AGENT_TIMEOUT_S",
     "DEFAULT_MAX_AGENTS",
     "DEFAULT_TURN_TIMEOUT_S",
+    "DelegationSpec",
     "FallbackReason",
     "RejectedPickReason",
     "FixedRoute",
