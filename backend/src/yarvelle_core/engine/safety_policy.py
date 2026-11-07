@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import inspect
 import re
 from typing import Any, Dict, List, Optional, Protocol, Sequence, Set, runtime_checkable
 
@@ -115,6 +116,58 @@ def policy_flags(policy: Any, text: Optional[str], ctx: Optional[SafetyContext] 
         if _FLAG_PATTERN.match(name) and name not in out:
             out.append(name)
     return out
+
+
+
+async def acheck_input(
+    policy: Any, text: Optional[str], ctx: Optional[SafetyContext] = None
+) -> SafetyVerdict:
+    """Input check that also runs asynchronous guard checks when the policy has them.
+
+    Policies without ``acheck_input`` are called exactly as before:
+    ``check_input(text)``, so existing policies see no change.
+    """
+    check = getattr(policy, "acheck_input", None)
+    if inspect.iscoroutinefunction(check):
+        return await check(text, ctx)
+    return policy.check_input(text)
+
+
+async def acheck_output(
+    policy: Any, text: Optional[str], ctx: Optional[SafetyContext] = None
+) -> SafetyVerdict:
+    """Output check that also runs asynchronous guard checks when the policy has them.
+
+    Policies without ``acheck_output`` are called exactly as before:
+    ``check_output(text)``.
+    """
+    check = getattr(policy, "acheck_output", None)
+    if inspect.iscoroutinefunction(check):
+        return await check(text, ctx)
+    return policy.check_output(text)
+
+
+def _union_verdict(refused_verdicts: List[tuple[SafetyVerdict, Any]]) -> SafetyVerdict:
+    """Hard refusals take precedence over soft ones; otherwise the first refusal."""
+    if not refused_verdicts:
+        return SafetyVerdict(refused=False)
+    for v, p in refused_verdicts:
+        if v.is_hard or p.is_hard_refusal_reason(v.reason):
+            return SafetyVerdict(
+                refused=True,
+                reason=v.reason,
+                safe_response=v.safe_response,
+                category=v.category,
+                is_hard=True,
+            )
+    first_v, _ = refused_verdicts[0]
+    return SafetyVerdict(
+        refused=True,
+        reason=first_v.reason,
+        safe_response=first_v.safe_response,
+        category=first_v.category,
+        is_hard=False,
+    )
 
 
 _DEFAULT_SAFETY_POLICY: Optional[SafetyPolicy] = None
@@ -249,6 +302,28 @@ class UnionSafetyPolicy:
             is_hard=False,
         )
 
+    async def acheck_output(
+        self, text: Optional[str], ctx: Optional[SafetyContext] = None
+    ) -> SafetyVerdict:
+        """Async output check across policies (runs guard checks), hard refusals first."""
+        refused: List[tuple[SafetyVerdict, SafetyPolicy]] = []
+        for policy in self.policies:
+            verdict = await acheck_output(policy, text, ctx)
+            if verdict.refused:
+                refused.append((verdict, policy))
+        return _union_verdict(refused)
+
+    async def acheck_input(
+        self, text: Optional[str], ctx: Optional[SafetyContext] = None
+    ) -> SafetyVerdict:
+        """Async input check across policies (runs guard checks), hard refusals first."""
+        refused: List[tuple[SafetyVerdict, SafetyPolicy]] = []
+        for policy in self.policies:
+            verdict = await acheck_input(policy, text, ctx)
+            if verdict.refused:
+                refused.append((verdict, policy))
+        return _union_verdict(refused)
+
     def check_emergency(self, text: Optional[str]) -> Optional[EmergencyDirective]:
         """Returns the first detected emergency directive across all policies."""
         for policy in self.policies:
@@ -293,6 +368,8 @@ class UnionSafetyPolicy:
 
 __all__ = [
     "EmergencyDirective",
+    "acheck_input",
+    "acheck_output",
     "NeutralSafetyPolicy",
     "SafetyContext",
     "SafetyPolicy",

@@ -1,0 +1,46 @@
+# Example safety.guards block for pack.yaml (see docs/safety-guards.md).
+# Domain-neutral illustration; a real pack supplies its own rules and labels.
+safety:
+  guards:
+    deadline_s: 20
+    refusal_template: "I can't share that answer. Please rephrase your question."
+    checks:
+      - id: account-secrets
+        type: rules
+        stages: [input, output]
+        blocks:
+          VERB: [share, reveal, send]
+          SECRET: "(?:the|your) (?:password|passcode|recovery code)"
+        normalize:
+          - {pattern: "[*_`]", replace: ""}
+        exempt:
+          - "\\bnever <VERB> <SECRET>\\b"
+        patterns:
+          - {id: disclose-secret, category: credential_disclosure, pattern: "\\b<VERB> <SECRET>\\b"}
+          - {id: urgent-transfer, pattern: "^transfer it now", scope: sentence}
+
+      # Model comes from YARVELLE_SAFETY_GUARD_GUARD_MODEL_PROVIDER / _MODEL.
+      - id: guard-model
+        type: model
+        preset: llama_guard
+        mode: shadow
+        timeout_s: 8
+        when_unconfigured: allow
+        output:
+          allow_labels: [safe]
+          block_labels: [unsafe]
+
+      # A self-trained classifier or judge behind a chat endpoint.
+      - id: policy-judge
+        type: model
+        preset: json
+        mode: shadow
+        prompt: |
+          Decide whether the assistant answer below follows the policy.
+          Reply with one JSON object: {"decision": "allow" | "block" | "abstain", "category": "<id>"}.
+          User message: {{prompt}}
+          Assistant answer: {{text}}
+        output:
+          format: json
+          allow_labels: [allow]
+          block_labels: [block]

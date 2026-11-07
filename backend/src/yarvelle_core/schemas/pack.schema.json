@@ -131,6 +131,287 @@
       "title": "FixedRoute",
       "type": "object"
     },
+    "GuardCheckSpec": {
+      "additionalProperties": false,
+      "description": "One guard check (an entry of ``safety.guards.checks``).",
+      "properties": {
+        "id": {
+          "description": "Check id; also names its environment variables.",
+          "pattern": "^[a-z0-9_-]{1,64}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "rules",
+            "model"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "stages": {
+          "anyOf": [
+            {
+              "items": {
+                "enum": [
+                  "input",
+                  "output"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "When the check runs. Default: rules both stages, model output only.",
+          "title": "Stages"
+        },
+        "mode": {
+          "default": "enforce",
+          "description": "enforce: the verdict counts; shadow: run and audit only; off: do not run.",
+          "enum": [
+            "enforce",
+            "shadow",
+            "off"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "required": {
+          "default": false,
+          "description": "A required check cannot be switched to shadow or off by environment variables.",
+          "title": "Required",
+          "type": "boolean"
+        },
+        "on_block": {
+          "default": "refuse",
+          "description": "refuse: replace the answer; warn: keep it and flag a boundary warning.",
+          "enum": [
+            "refuse",
+            "warn"
+          ],
+          "title": "On Block",
+          "type": "string"
+        },
+        "blocks": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ]
+          },
+          "description": "Named regex fragments. <NAME> in a pattern inserts one; a list becomes (?:a|b).",
+          "title": "Blocks",
+          "type": "object"
+        },
+        "normalize": {
+          "items": {
+            "$ref": "#/$defs/RuleNormalizeSpec"
+          },
+          "title": "Normalize",
+          "type": "array"
+        },
+        "exempt": {
+          "description": "Regexes whose matches are blanked out before patterns are checked.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Exempt",
+          "type": "array"
+        },
+        "patterns": {
+          "items": {
+            "$ref": "#/$defs/RulePatternSpec"
+          },
+          "title": "Patterns",
+          "type": "array"
+        },
+        "sentence_split": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Regex splitting text into sentences.",
+          "title": "Sentence Split"
+        },
+        "rules_file": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Pack resource (YAML) with blocks/normalize/exempt/patterns/sentence_split.",
+          "title": "Rules File"
+        },
+        "max_chars": {
+          "default": 100000,
+          "description": "Longer text is not checked and counts as unchecked (blocked unless on_abstain is allow).",
+          "maximum": 1000000,
+          "minimum": 1,
+          "title": "Max Chars",
+          "type": "integer"
+        },
+        "preset": {
+          "anyOf": [
+            {
+              "enum": [
+                "llama_guard",
+                "granite_guardian",
+                "labels",
+                "json"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Defaults for a known guard reply format.",
+          "title": "Preset"
+        },
+        "style": {
+          "anyOf": [
+            {
+              "enum": [
+                "moderation",
+                "prompt"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "moderation: send the conversation (user message, then answer) as chat messages; prompt: send one message built from `prompt`.",
+          "title": "Style"
+        },
+        "system": {
+          "anyOf": [
+            {
+              "maxLength": 8000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional system message.",
+          "title": "System"
+        },
+        "prompt": {
+          "anyOf": [
+            {
+              "maxLength": 8000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Template for style=prompt. {{text}}, {{prompt}} and {{stage}} are replaced.",
+          "title": "Prompt"
+        },
+        "prompt_file": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Pack resource holding the prompt template.",
+          "title": "Prompt File"
+        },
+        "output": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelOutputSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "model": {
+          "$ref": "#/$defs/ModelEndpointSpec"
+        },
+        "timeout_s": {
+          "default": 10.0,
+          "exclusiveMinimum": 0,
+          "maximum": 120,
+          "title": "Timeout S",
+          "type": "number"
+        },
+        "include_prompt": {
+          "default": true,
+          "description": "On the output stage, also send the user's message as context.",
+          "title": "Include Prompt",
+          "type": "boolean"
+        },
+        "when_unconfigured": {
+          "default": "allow",
+          "description": "No model configured: allow skips the check; block refuses every answer it would check.",
+          "enum": [
+            "block",
+            "allow"
+          ],
+          "title": "When Unconfigured",
+          "type": "string"
+        },
+        "on_abstain": {
+          "default": "block",
+          "description": "Model not sure, or text too long.",
+          "enum": [
+            "block",
+            "allow"
+          ],
+          "title": "On Abstain",
+          "type": "string"
+        },
+        "on_error": {
+          "default": "block",
+          "description": "Timeout, failed call or unreadable reply.",
+          "enum": [
+            "block",
+            "allow"
+          ],
+          "title": "On Error",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type"
+      ],
+      "title": "GuardCheckSpec",
+      "type": "object"
+    },
     "GuardrailFlagTrigger": {
       "additionalProperties": false,
       "description": "Fires when the input guardrail raises the named flag.",
@@ -173,6 +454,149 @@
         }
       },
       "title": "HasAttachmentsTrigger",
+      "type": "object"
+    },
+    "ModelEndpointSpec": {
+      "additionalProperties": false,
+      "description": "Where a model check's model runs. Environment variables override every field.",
+      "properties": {
+        "provider": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Model provider, e.g. ollama, openai, custom.",
+          "title": "Provider"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Model name at the provider.",
+          "title": "Model"
+        },
+        "base_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Endpoint URL for ollama or custom providers.",
+          "title": "Base Url"
+        },
+        "temperature": {
+          "default": 0.0,
+          "maximum": 2.0,
+          "minimum": 0.0,
+          "title": "Temperature",
+          "type": "number"
+        }
+      },
+      "title": "ModelEndpointSpec",
+      "type": "object"
+    },
+    "ModelOutputSpec": {
+      "additionalProperties": false,
+      "description": "How a model check reads the model's reply.\n\n``labels``: the first word of the reply is matched against ``allow_labels``\nand ``block_labels`` (case-insensitive). Categories are read from the rest\nof the first line or the next line, comma separated.\n\n``json``: the first JSON object in the reply is read. ``decision`` is\nmatched against the same labels; ``abstain_labels`` mean the model is not\nsure. With ``block_threshold`` / ``allow_threshold`` set, ``score``\ndecides instead: at or above block_threshold blocks, at or below\nallow_threshold allows, in between abstains.\n\nAnything else is an unreadable reply and counts as an error.",
+      "properties": {
+        "format": {
+          "default": "labels",
+          "enum": [
+            "labels",
+            "json"
+          ],
+          "title": "Format",
+          "type": "string"
+        },
+        "allow_labels": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Allow Labels",
+          "type": "array"
+        },
+        "block_labels": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Block Labels",
+          "type": "array"
+        },
+        "abstain_labels": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Abstain Labels",
+          "type": "array"
+        },
+        "decision_key": {
+          "default": "decision",
+          "title": "Decision Key",
+          "type": "string"
+        },
+        "category_key": {
+          "default": "category",
+          "title": "Category Key",
+          "type": "string"
+        },
+        "score_key": {
+          "default": "score",
+          "title": "Score Key",
+          "type": "string"
+        },
+        "block_threshold": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Block Threshold"
+        },
+        "allow_threshold": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Allow Threshold"
+        },
+        "block_categories": {
+          "description": "When set, a block verdict counts only if the model names one of these categories; other categories are allowed and recorded.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Block Categories",
+          "type": "array"
+        }
+      },
+      "title": "ModelOutputSpec",
       "type": "object"
     },
     "OrchestrationLimits": {
@@ -525,6 +949,25 @@
       "title": "PackProvidesSpec",
       "type": "object"
     },
+    "PackSafetySpec": {
+      "additionalProperties": false,
+      "description": "The ``safety`` block of ``pack.yaml``.",
+      "properties": {
+        "guards": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SafetyGuardsSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "PackSafetySpec",
+      "type": "object"
+    },
     "PanelDefaultConstraintSpec": {
       "description": "Specification of default constraint declared by a panel.",
       "properties": {
@@ -589,6 +1032,126 @@
         "id"
       ],
       "title": "ReadScopeSpec",
+      "type": "object"
+    },
+    "RuleNormalizeSpec": {
+      "additionalProperties": false,
+      "description": "A regex substitution applied to the text before patterns are checked.",
+      "properties": {
+        "pattern": {
+          "minLength": 1,
+          "title": "Pattern",
+          "type": "string"
+        },
+        "replace": {
+          "default": "",
+          "title": "Replace",
+          "type": "string"
+        }
+      },
+      "required": [
+        "pattern"
+      ],
+      "title": "RuleNormalizeSpec",
+      "type": "object"
+    },
+    "RulePatternSpec": {
+      "additionalProperties": false,
+      "description": "One pattern of a ``rules`` check. A match blocks the text.",
+      "properties": {
+        "id": {
+          "description": "Pattern id, reported in audit records.",
+          "pattern": "^[a-z0-9_-]{1,64}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "pattern": {
+          "description": "Regex. <NAME> inserts a fragment from `blocks`.",
+          "minLength": 1,
+          "title": "Pattern",
+          "type": "string"
+        },
+        "category": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9_-]{1,64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Refusal category; defaults to the pattern id.",
+          "title": "Category"
+        },
+        "scope": {
+          "default": "text",
+          "description": "text: search the whole text; sentence: search each sentence (see sentence_split).",
+          "enum": [
+            "text",
+            "sentence"
+          ],
+          "title": "Scope",
+          "type": "string"
+        },
+        "flags": {
+          "description": "Regex flags.",
+          "items": {
+            "enum": [
+              "ignorecase",
+              "multiline",
+              "dotall"
+            ],
+            "type": "string"
+          },
+          "title": "Flags",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "pattern"
+      ],
+      "title": "RulePatternSpec",
+      "type": "object"
+    },
+    "SafetyGuardsSpec": {
+      "additionalProperties": false,
+      "description": "Guard checks and how their answers are released (``safety.guards``).",
+      "properties": {
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/GuardCheckSpec"
+          },
+          "maxItems": 16,
+          "title": "Checks",
+          "type": "array"
+        },
+        "deadline_s": {
+          "default": 20.0,
+          "description": "Wall-clock budget for all model checks of one text.",
+          "exclusiveMinimum": 0,
+          "maximum": 300,
+          "title": "Deadline S",
+          "type": "number"
+        },
+        "refusal_template": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Text shown when a guard refuses. Default: the safety policy's refusal template.",
+          "title": "Refusal Template"
+        }
+      },
+      "title": "SafetyGuardsSpec",
       "type": "object"
     },
     "ScopeDefinitionSpec": {
@@ -808,6 +1371,18 @@
       ],
       "default": null,
       "description": "Default agent, fixed routes and limits for multi-agent orchestration"
+    },
+    "safety": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PackSafetySpec"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Guard checks that run after the safety policy (safety.guards)"
     }
   },
   "required": [

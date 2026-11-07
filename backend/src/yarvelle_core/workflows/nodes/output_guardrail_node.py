@@ -22,8 +22,10 @@ from typing import Any, Dict, List, Optional, Sequence, Union
 from langchain_core.messages import AIMessage
 
 from yarvelle_core.engine.safety_policy import (
+    SafetyContext,
     SafetyPolicy,
     UnionSafetyPolicy,
+    acheck_output,
     get_default_safety_policy,
     get_domain_safety_policy,
 )
@@ -81,7 +83,8 @@ class OutputGuardrailNode(BaseNode):
                 policies.append(dom_pol)
 
         effective_policy = UnionSafetyPolicy(policies) if len(policies) > 1 else policies[0]
-        safety_check = effective_policy.check_output(output_text)
+        # Guard checks (if the policy has any) also see the user's message.
+        safety_check = await acheck_output(effective_policy, output_text, _guard_context(state))
 
         # Safety refusal gate
         if safety_check.refused:
@@ -141,6 +144,32 @@ class OutputGuardrailNode(BaseNode):
             "next_step": "suggestion",
         }
 
+
+def _latest_user_text(messages: Sequence[Any]) -> Optional[str]:
+    for m in reversed(list(messages or [])):
+        if isinstance(m, dict):
+            if m.get("role") in ("user", "human"):
+                return str(m.get("content") or "")
+        elif getattr(m, "type", "") in ("human", "user"):
+            content = getattr(m, "content", "")
+            return content if isinstance(content, str) else str(content or "")
+    return None
+
+
+def _guard_context(state: Dict[str, Any]) -> SafetyContext:
+    """Context for guard checks. Policies without guards never receive it."""
+    metadata: Dict[str, Any] = {}
+    prompt = _latest_user_text(state.get("messages") or [])
+    if prompt:
+        metadata["prompt"] = prompt
+    for key in ("thread_id", "run_id"):
+        if state.get(key):
+            metadata[key] = state[key]
+    return SafetyContext(
+        profile_id=state.get("profile_id"),
+        agent_id=state.get("current_agent") or state.get("agent_id"),
+        metadata=metadata,
+    )
 
 
 __all__ = ["OutputGuardrailNode"]

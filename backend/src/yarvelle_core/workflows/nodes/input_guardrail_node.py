@@ -23,7 +23,13 @@ from typing import Any, Dict, List, Optional
 from langchain_core.messages import BaseMessage, HumanMessage
 from langgraph.store.base import BaseStore
 
-from yarvelle_core.engine.safety_policy import SafetyPolicy, get_default_safety_policy, policy_flags
+from yarvelle_core.engine.safety_policy import (
+    SafetyContext,
+    SafetyPolicy,
+    acheck_input,
+    get_default_safety_policy,
+    policy_flags,
+)
 from yarvelle_core.workflows.nodes.base import BaseNode
 
 
@@ -124,8 +130,14 @@ class InputGuardrailNode(BaseNode):
                 },
             }
 
-        # 3. Standard Safety Refusal (34 patterns in refusal_patterns.yaml)
-        safety_check = self.safety_policy.check_input(prompt_text)
+        # 3. Standard Safety Refusal (34 patterns in refusal_patterns.yaml),
+        # then any guard checks the policy carries.
+        guard_ctx = SafetyContext(
+            profile_id=state.get("profile_id"),
+            agent_id=state.get("current_agent") or state.get("agent_id"),
+            metadata={k: state[k] for k in ("thread_id", "run_id") if state.get(k)},
+        )
+        safety_check = await acheck_input(self.safety_policy, prompt_text, guard_ctx)
 
         if safety_check.refused:
             reason = safety_check.reason or "forbidden_intent:medical_prohibited"

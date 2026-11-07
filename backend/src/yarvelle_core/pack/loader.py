@@ -145,6 +145,24 @@ def discover_and_load_packs(
             router_contrib.pack_id = pack_spec.id
             registry.router_contributions.append(router_contrib)
 
+        # Wrap the safety policy with the pack's guard checks (safety.guards).
+        # Invalid guard configuration fails the load instead of running unguarded.
+        guards = pack_spec.safety.guards if pack_spec.safety is not None else None
+        if guards is not None and guards.checks:
+            from yarvelle_core.engine.guards import build_guarded_policy
+            from yarvelle_core.engine.safety_policy import NeutralSafetyPolicy
+
+            try:
+                guarded = build_guarded_policy(
+                    pack_spec.safety_policy or NeutralSafetyPolicy(),
+                    guards,
+                    pack=pack_spec,
+                    include_env=False,
+                )
+            except Exception as err:
+                raise PackLoadError(f"Invalid safety.guards in pack '{pack_id}': {err}") from err
+            pack_spec = pack_spec.model_copy(update={"safety_policy": guarded})
+
         # Register safety policy
         if pack_spec.safety_policy is not None:
             registry.safety_policies[pack_spec.domain] = pack_spec.safety_policy
