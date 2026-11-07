@@ -247,6 +247,12 @@ class GuardCheckSpec(_Strict):
                 raise ValueError(f"model check '{self.id}': set prompt or prompt_file, not both")
             if self.style == "prompt" and not (self.prompt or self.prompt_file):
                 raise ValueError(f"model check '{self.id}': style prompt needs prompt or prompt_file")
+            if self.preset == "llama_guard" and self.system and self.style in (None, "moderation"):
+                # Llama Guard's chat template has no system role: the text would be
+                # judged as one more conversation turn. Use a prompt-style check instead.
+                raise ValueError(
+                    f"model check '{self.id}': the llama_guard preset does not take a system message"
+                )
         if self.stages is not None and not self.stages:
             raise ValueError(f"check '{self.id}': stages must not be empty")
         return self
