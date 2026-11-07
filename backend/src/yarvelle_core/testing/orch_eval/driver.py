@@ -481,6 +481,7 @@ class ScenarioRunner:
         from langchain_core.messages import HumanMessage
 
         from yarvelle_core.engine.service import is_subagent_token
+        from yarvelle_core.workflows.state import turn_reset_values
 
         trace = TurnTrace(turn=number, user=turn.user)
         if hasattr(self.backend, "load_turn"):
@@ -491,7 +492,10 @@ class ScenarioRunner:
         tasks_start = len(turn_tasks.rows)
 
         attachments = list(turn.input.attachments) if turn.input is not None else []
+        # Reset the per-turn results exactly as the chat service does, so a
+        # turn never re-reads the previous turn's answer or refusal.
         state_in: Dict[str, Any] = {
+            **turn_reset_values(),
             "messages": [HumanMessage(content=turn.user)],
             "thread_id": thread_id,
             "explicit_agent": turn.explicit_agent,

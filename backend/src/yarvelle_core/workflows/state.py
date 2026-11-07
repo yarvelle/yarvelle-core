@@ -198,6 +198,36 @@ TURN_OUTPUT_DEFAULTS: Dict[str, Any] = {
 TURN_INPUT_FIELDS: tuple[str, ...] = ("explicit_agent", "execution_plan")
 
 
+# Per-turn results a caller resets in the input of every new turn on a
+# thread. Without this, values from the previous turn (its answer, refusal,
+# reflection count or error) come back from the checkpoint and the new turn
+# reads them as its own. The chat service and the eval driver both use it.
+TURN_RESET_DEFAULTS: Dict[str, Any] = {
+    "refused": False,
+    "is_refusal": False,
+    "refusal_reason": None,
+    "refusal_message": None,
+    "output": "",
+    "iteration_count": 0,
+    "reflection_count": 0,
+    "critique": None,
+    "previous_attempts": [],
+    "tool_calls": [],
+    "error": None,
+    "error_exception": None,
+    "next_step": "",
+    "follow_up_suggestions": [],
+    "emergency_red_flags": None,
+    "provisioned_references": {},
+    "specialist_outputs": {},
+}
+
+
+def turn_reset_values() -> Dict[str, Any]:
+    """Fresh per-turn results for a new turn's input (lists and dicts are copies)."""
+    return {k: (list(v) if isinstance(v, list) else dict(v) if isinstance(v, dict) else v) for k, v in TURN_RESET_DEFAULTS.items()}
+
+
 def turn_start_values(turn_id: Optional[str] = None, explicit_agent: Optional[str] = None) -> Dict[str, Any]:
     """State updates that start a turn: fresh routing results and a turn id.
 
@@ -566,8 +596,10 @@ __all__ = [
     "TypedClaim",
     "TURN_INPUT_FIELDS",
     "TURN_OUTPUT_DEFAULTS",
+    "TURN_RESET_DEFAULTS",
     "create_initial_state",
     "turn_end_values",
+    "turn_reset_values",
     "turn_start_values",
     "extract_text_content",
     "get_last_message",
