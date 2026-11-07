@@ -31,6 +31,7 @@ flowchart LR
 ## Guides
 
 - **[Pack orchestration settings](pack-orchestration.md)**: the `orchestration:` block in `pack.yaml`, including delegation and synthesis instructions and the per-turn delegation reminder for the main agent.
+- **[Safety guards](safety-guards.md)**: the `safety.guards` block in `pack.yaml`: regex rules checks and model checks (guard models, classifiers or judges you configure through environment variables), fail-closed verdicts and the guard audit hook.
 
 ---
 

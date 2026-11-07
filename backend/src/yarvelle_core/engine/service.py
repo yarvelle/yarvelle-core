@@ -94,7 +94,12 @@ from yarvelle_core.engine.orchestration.runtime import MAIN_AGENT_ID, rejected_p
 from yarvelle_core.engine.prompt_builder import build_system_prompt
 from yarvelle_core.loaders.agent_loader import find_agent_dir, load_agent
 from yarvelle_core.model.factory import create_chat_model
-from yarvelle_core.engine.safety_policy import SafetyPolicy, get_default_safety_policy
+from yarvelle_core.engine.safety_policy import (
+    SafetyContext,
+    SafetyPolicy,
+    acheck_output,
+    get_default_safety_policy,
+)
 from yarvelle_core.schemas.audit import AuditEvent
 from yarvelle_core.schemas.chat import ChatMessage, ChatRequestBody
 from yarvelle_core.schemas.manifest import RiskClass, SkillManifest, SLUG_REGEX
@@ -377,7 +382,10 @@ class AgentExecutionService:
         self.graph_builder = graph_builder
         self.checkpointer = checkpointer
         self.store = store if store is not None else kwargs.get("store")
-        self.safety_policy = safety_policy or get_default_safety_policy()
+        # Env-only guard checks (<PREFIX>_SAFETY_GUARDS) wrap the policy; unchanged when unset.
+        from yarvelle_core.engine.guards.policy import apply_env_guards
+
+        self.safety_policy = apply_env_guards(safety_policy or get_default_safety_policy())
         self.memory_adapter = memory_adapter if memory_adapter is not None else kwargs.get("memory_adapter")
         if self.memory_adapter is None and self.store is None:
             try:
@@ -1228,7 +1236,11 @@ class AgentExecutionService:
         accumulated_text = strip_reference_doc_preamble(strip_internal_suggestion_leakage(accumulated_text))
 
         # Verify output against safety boundaries if not already flagged
-        output_safety = self.safety_policy.check_output(accumulated_text)
+        output_safety = await acheck_output(
+            self.safety_policy,
+            accumulated_text,
+            SafetyContext(agent_id=agent.id, metadata={"prompt": prompt, "thread_id": thread_id}),
+        )
         is_refusal_candidate = refusal_triggered or output_safety.refused
         reason = refusal_reason or (output_safety.reason if output_safety.refused else None) or "forbidden_intent:medical_prohibited"
         is_hard = refusal_triggered or (output_safety.refused and self.safety_policy.is_hard_refusal_reason(reason))

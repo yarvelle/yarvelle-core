@@ -84,6 +84,7 @@ from yarvelle_core.constants.paths import (
     ENV_DB_PATH,
     LOGS_DIR,
 )
+from yarvelle_core.engine.guards.policy import apply_env_guards
 from yarvelle_core.engine.safety_policy import SafetyPolicy, get_default_safety_policy
 from yarvelle_core.schemas.audit import AuditEvent
 from yarvelle_core.tools.registry import CLOSED_TOOL_DEFINITIONS
@@ -215,7 +216,7 @@ class GraphBuilder:
         self.model = model
         self.checkpointer = checkpointer
         self.store = store
-        self.safety_policy = safety_policy or get_default_safety_policy()
+        self.safety_policy = apply_env_guards(safety_policy or get_default_safety_policy())
         self.tools = list(tools) if tools is not None else None
         self.subgraphs: Dict[str, Union[StateGraph, CompiledStateGraph]] = dict(subgraphs or {})
         self.system_prompt = system_prompt
@@ -275,16 +276,16 @@ class GraphBuilder:
         if isinstance(safety_policy, (list, tuple)):
             from yarvelle_core.engine.safety_policy import UnionSafetyPolicy
 
-            self.safety_policy = UnionSafetyPolicy(safety_policy)
+            self.safety_policy = apply_env_guards(UnionSafetyPolicy(safety_policy))
         else:
-            self.safety_policy = safety_policy
+            self.safety_policy = apply_env_guards(safety_policy)
         return self
 
     def with_safety_policies(self, safety_policies: Sequence[SafetyPolicy]) -> GraphBuilder:
         """Attach multiple SafetyPolicy instances aggregated via UnionSafetyPolicy."""
         from yarvelle_core.engine.safety_policy import UnionSafetyPolicy
 
-        self.safety_policy = UnionSafetyPolicy(safety_policies)
+        self.safety_policy = apply_env_guards(UnionSafetyPolicy(safety_policies))
         return self
 
     # ========================================================================

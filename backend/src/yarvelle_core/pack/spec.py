@@ -22,6 +22,7 @@ from yarvelle_core.engine.safety_policy import SafetyPolicy
 from yarvelle_core.engine.tool_registry import ToolSpec
 from yarvelle_core.schemas.orchestration import PackOrchestrationSpec
 from yarvelle_core.schemas.routing import RoutingHints
+from yarvelle_core.schemas.safety import PackSafetySpec
 
 
 @dataclass
@@ -208,6 +209,9 @@ class PackManifest(BaseModel):
     orchestration: Optional[PackOrchestrationSpec] = Field(
         default=None, description="Default agent, fixed routes and limits for multi-agent orchestration"
     )
+    safety: Optional[PackSafetySpec] = Field(
+        default=None, description="Guard checks that run after the safety policy (safety.guards)"
+    )
 
     @field_validator("id")
     @classmethod
@@ -261,6 +265,9 @@ class PackSpec(BaseModel):
     agents: List[str] = Field(default_factory=list, description="Agent identifiers contributed by this pack")
     orchestration: Optional[PackOrchestrationSpec] = Field(
         default=None, description="Default agent, fixed routes and limits for multi-agent orchestration"
+    )
+    safety: Optional[PackSafetySpec] = Field(
+        default=None, description="Guard checks that run after the safety policy (safety.guards)"
     )
 
     @field_validator("id", "domain")

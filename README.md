@@ -12,6 +12,7 @@ Licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE) and the [Yarv
 `yarvelle-core` is the domain-neutral execution backbone of the Yarvelle ecosystem. It provides:
 1. **Deterministic Agent Runtime**: LangGraph state machine execution, tool execution gating, agent reflection, and contextual follow-up generation.
 2. **Pack API v1**: Pluggable domain pack architecture (`pack.yaml`, `PackSpec`) allowing external packs to register specialized tools, routers, safety policies, and database models.
+   Packs can add **safety guards** (`safety.guards`): regex rules checks and model checks that run after the pack's safety policy, using guard models or classifiers the user configures through environment variables. Guards only add refusals and fail closed. See [docs/safety-guards.md](docs/safety-guards.md).
 3. **11-Layer Scope Isolation Engine**: Strict multi-domain data isolation (`ScopeContext`, `ScopedSession`, partitioned CAS storage, scoped FTS5 lexical search, memory namespace partitioning, and HKDF-derived vault sub-keys).
 4. **Local-First Security & Cryptography**: Envelope encryption keyring vault (PBKDF2/Argon2 KEK, AES-256-GCM DEK), audit hash chaining, and localhost-bound API server.
 5. **Conformance Test Suite**: Comprehensive verification framework (`yarvelle_core.conformance`) asserting zero cross-domain leakage across all 11 security layers.
