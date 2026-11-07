@@ -60,6 +60,7 @@ from yarvelle_core.schemas.orchestration import (
     RouteDecision,
     RouteSource,
     SSEOrchestrationNoticeEvent,
+    DelegationSpec,
     SynthesisSpec,
     TaskProvenance,
     TurnTaskRecord,
@@ -110,13 +111,27 @@ class TurnOutcome:
     provenance: List[TaskProvenance] = field(default_factory=list)
 
 
-def compose_main_prompt(base: Optional[str] = None, synthesis: Optional[SynthesisSpec] = None) -> str:
-    """Main agent system prompt: the base prompt plus the pack's synthesis instructions."""
+def compose_main_prompt(
+    base: Optional[str] = None,
+    synthesis: Optional[SynthesisSpec] = None,
+    delegation: Optional[DelegationSpec] = None,
+) -> str:
+    """Main agent system prompt: the base prompt plus the pack's delegation and synthesis instructions.
+
+    Delegation guidance (when to hand work to specialists) comes first, under its
+    own heading, then the guidance on composing the reply. Empty sections are
+    left out, so a pack without either gets the base prompt unchanged.
+    """
     prompt = base or MAIN_AGENT_PROMPT
-    extra = (synthesis.instructions if synthesis is not None else "").strip()
-    if not extra:
-        return prompt
-    return f"{prompt}\n\nHow to compose the reply:\n{extra}"
+    sections = (
+        ("When to hand work to specialists:", delegation.instructions if delegation is not None else ""),
+        ("How to compose the reply:", synthesis.instructions if synthesis is not None else ""),
+    )
+    for heading, text in sections:
+        text = (text or "").strip()
+        if text:
+            prompt = f"{prompt}\n\n{heading}\n{text}"
+    return prompt
 
 
 def build_provenance(
@@ -457,7 +472,11 @@ class HybridRouter:
         self.default_agent = (spec.default_agent if spec is not None else None) or default_agent
         self.audit_sink = audit_sink
         self.status_sink = status_sink
-        self.system_prompt = compose_main_prompt(system_prompt, spec.synthesis if spec is not None else None)
+        self.system_prompt = compose_main_prompt(
+            system_prompt,
+            spec.synthesis if spec is not None else None,
+            spec.delegation if spec is not None else None,
+        )
         self.tool_resolver = tool_resolver
 
     @property

@@ -31,6 +31,21 @@
       "title": "CrossPackGrantSpec",
       "type": "object"
     },
+    "DelegationSpec": {
+      "additionalProperties": false,
+      "description": "When the main agent hands work to specialists (``orchestration.delegation``).\n\nThe base prompt tells the main agent to answer directly when no specialist\nis needed. A pack can say when its specialists should take the work\ninstead, for example follow-up questions about an earlier specialist answer.",
+      "properties": {
+        "instructions": {
+          "default": "",
+          "description": "Guidance added to the main agent's system prompt on when to hand work to specialists.",
+          "maxLength": 4000,
+          "title": "Instructions",
+          "type": "string"
+        }
+      },
+      "title": "DelegationSpec",
+      "type": "object"
+    },
     "FixedRoute": {
       "additionalProperties": false,
       "description": "A pack-declared deterministic route, evaluated before the main agent, in declared order.",
@@ -213,6 +228,9 @@
         },
         "limits": {
           "$ref": "#/$defs/OrchestrationLimits"
+        },
+        "delegation": {
+          "$ref": "#/$defs/DelegationSpec"
         },
         "synthesis": {
           "$ref": "#/$defs/SynthesisSpec"
