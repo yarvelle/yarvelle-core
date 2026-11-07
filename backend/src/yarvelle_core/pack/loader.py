@@ -148,7 +148,7 @@ def discover_and_load_packs(
         # Wrap the safety policy with the pack's guard checks (safety.guards).
         # Invalid guard configuration fails the load instead of running unguarded.
         guards = pack_spec.safety.guards if pack_spec.safety is not None else None
-        if guards is not None and guards.checks:
+        if guards is not None and (guards.checks or guards.release == "buffered"):
             from yarvelle_core.engine.guards import build_guarded_policy
             from yarvelle_core.engine.safety_policy import NeutralSafetyPolicy
 

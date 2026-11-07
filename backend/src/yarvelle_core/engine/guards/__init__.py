@@ -35,6 +35,7 @@ from yarvelle_core.engine.guards.policy import (
     build_checks,
     build_guarded_policy,
 )
+from yarvelle_core.engine.guards.release import has_guards, resolve_output_release
 from yarvelle_core.engine.guards.rules import RuleCheck, RulesConfigError
 from yarvelle_core.engine.guards.runner import GuardCheck, GuardRunner, aggregate
 from yarvelle_core.engine.guards.types import (
@@ -69,7 +70,9 @@ __all__ = [
     "build_checks",
     "build_guarded_policy",
     "guard_env_name",
+    "has_guards",
     "is_guard_reason",
     "is_hard_guard_reason",
     "remove_guard_audit_hook",
+    "resolve_output_release",
 ]
