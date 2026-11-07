@@ -9,7 +9,7 @@
 #
 # Required Notice: Copyright 2026 Spectrayan (https://spectrayan.com)
 
-"""Offline checks that release metadata and the version module stay aligned at 0.2.0."""
+"""Offline checks that release metadata and the version module stay aligned at 0.2.1."""
 
 from __future__ import annotations
 
@@ -27,18 +27,18 @@ from yarvelle_core import version as version_mod
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_version_module_is_020() -> None:
-    assert version_mod.__version__ == "0.2.0"
-    assert yarvelle_core.__version__ == "0.2.0"
+def test_version_module_is_021() -> None:
+    assert version_mod.__version__ == "0.2.1"
+    assert yarvelle_core.__version__ == "0.2.1"
     assert yarvelle_core.__version__ is version_mod.__version__ or yarvelle_core.__version__ == version_mod.__version__
 
 
 def test_pyproject_and_manifest_agree() -> None:
     pyproject = tomllib.loads((REPO_ROOT / "backend" / "pyproject.toml").read_text(encoding="utf-8"))
-    assert pyproject["project"]["version"] == "0.2.0"
+    assert pyproject["project"]["version"] == "0.2.1"
     manifest = json.loads((REPO_ROOT / ".release-please-manifest.json").read_text(encoding="utf-8"))
-    assert manifest["backend"] == "0.2.0"
-    assert importlib.metadata.version("yarvelle-core") == "0.2.0"
+    assert manifest["backend"] == "0.2.1"
+    assert importlib.metadata.version("yarvelle-core") == "0.2.1"
 
 
 def test_release_please_config_targets_v_tags_and_version_file() -> None:
@@ -50,7 +50,7 @@ def test_release_please_config_targets_v_tags_and_version_file() -> None:
     assert "tag-separator" not in pkg
 
 
-def test_wheel_metadata_reports_020(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_wheel_metadata_reports_021(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     hatchling = pytest.importorskip("hatchling.build")
     backend_root = REPO_ROOT / "backend"
     monkeypatch.chdir(backend_root)
@@ -61,11 +61,11 @@ def test_wheel_metadata_reports_020(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         meta_names = [n for n in zf.namelist() if n.endswith(".dist-info/METADATA")]
         assert meta_names
         meta = zf.read(meta_names[0]).decode("utf-8")
-        assert "Version: 0.2.0" in meta
+        assert "Version: 0.2.1" in meta
         version_members = [n for n in zf.namelist() if n.endswith("yarvelle_core/version.py")]
         assert version_members
         body = zf.read(version_members[0]).decode("utf-8")
-        assert '__version__ = "0.2.0"' in body
+        assert '__version__ = "0.2.1"' in body
 
 def test_httpx_constraint_keeps_stable_api() -> None:
     """CI uses --prerelease=allow; httpx must stay on the 0.x line with HTTPStatusError."""
