@@ -97,6 +97,7 @@ from yarvelle_core.model.factory import create_chat_model
 from yarvelle_core.engine.safety_policy import (
     SafetyContext,
     SafetyPolicy,
+    SafetyVerdict,
     acheck_output,
     get_default_safety_policy,
 )
@@ -1628,34 +1629,37 @@ class AgentExecutionService:
                 yield self.format_error_event("Resume error: an unexpected error occurred during execution.")
                 return
 
-            # A resumed turn gets the same final check when guards or buffered
-            # release are configured. Without either, resume is unchanged.
-            from yarvelle_core.engine.guards.release import has_guards
-
-            if self._buffer_answer or has_guards(self.safety_policy):
-                resumed = await acheck_output(
+            # A resumed turn always gets the same final output check as a normal
+            # turn (any policy, with or without guards). No text, nothing to check.
+            resumed = (
+                await acheck_output(
                     self.safety_policy, accumulated_text, SafetyContext(metadata={"thread_id": thread_id})
                 )
-                resumed_reason = resumed.reason or "forbidden_intent:policy_prohibited"
-                if resumed.refused and self.safety_policy.is_hard_refusal_reason(resumed_reason):
-                    template = self.safety_policy.get_refusal_template(resumed_reason)
-                    yield self.format_refusal_event(reason=resumed_reason, message=template)
-                    yield self.format_done_event(
-                        full_text=template,
-                        thread_id=thread_id,
-                        refused=True,
-                        refusal_reason=resumed_reason,
-                        suggestions=[],
-                    )
-                    return
-                if self._buffer_answer and accumulated_text:
-                    yield self.format_token_event(accumulated_text)
+                if accumulated_text.strip()
+                else SafetyVerdict(refused=False)
+            )
+            resumed_reason = resumed.reason or "forbidden_intent:policy_prohibited"
+            resumed_soft = resumed.refused and not self.safety_policy.is_hard_refusal_reason(resumed_reason)
+            if resumed.refused and not resumed_soft:
+                template = self.safety_policy.get_refusal_template(resumed_reason)
+                yield self.format_refusal_event(reason=resumed_reason, message=template)
+                yield self.format_done_event(
+                    full_text=template,
+                    thread_id=thread_id,
+                    refused=True,
+                    refusal_reason=resumed_reason,
+                    suggestions=[],
+                )
+                return
+            if self._buffer_answer and accumulated_text:
+                yield self.format_token_event(accumulated_text)
 
             yield self.format_done_event(
                 full_text=accumulated_text,
                 thread_id=thread_id,
                 refused=False,
                 suggestions=suggestions,
+                boundary_warning=resumed_soft,
             )
 
     async def execute_resume_chat(

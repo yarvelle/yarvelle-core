@@ -88,7 +88,7 @@ The same example is in `docs/examples/safety-guards.pack.yaml`.
 | `max_chars` | all | Longer text is not checked and counts as abstained. |
 | `preset` | model | `llama_guard`, `granite_guardian`, `labels`, `json`. |
 | `style` | model | `moderation` (send the conversation as chat messages) or `prompt` (send one message from `prompt`). |
-| `system` | model | Optional system message (for example the risk name for Granite Guardian). |
+| `system` | model | Optional system message. For `granite_guardian` it names the risk (`harm` (default), `violence`, `unethical_behavior`, `jailbreak`, ...). Not allowed with `llama_guard`, whose template has no system role. |
 | `prompt`, `prompt_file` | model | Template for `style: prompt`. `{{text}}`, `{{prompt}}`, `{{stage}}` are replaced. |
 | `output` | model | How to read the reply (below). |
 | `model` | model | Optional defaults: `provider`, `model`, `base_url`, `temperature`. Env vars override. |
@@ -123,6 +123,13 @@ The same example is in `docs/examples/safety-guards.pack.yaml`.
 
 A preset only describes the reply format. Validate any model on the pack's own
 labelled examples in `shadow` mode before giving it `enforce`.
+
+Both presets were checked locally with Ollama (`llama-guard3:1b`,
+`granite3-guardian:2b`) on a small set of safe, unsafe and tricky examples.
+Both replies parse as expected. Generic taxonomies still misfire on ordinary
+technical text: Llama Guard marked "run `kill -9 <pid>`" as `S1` (violent
+crimes). Use `output.block_categories` to keep only the categories your pack
+cares about, and start in `shadow`.
 
 ## Environment variables
 
@@ -225,9 +232,9 @@ Progress events (tools, task status, notices) still stream. The cost is that
 the user sees nothing until the answer is complete.
 
 A turn paused for approval releases its partial text only after the same
-check. A resumed turn (`execute_resume_turn`) gets the final check whenever
-the policy has guards or release is buffered; without either it behaves as
-before.
+check. A resumed turn (`execute_resume_turn`) always gets the final output
+check, like a normal turn, with or without guards; in stream mode its done
+event carries the verdict, in buffered mode its text is held until it passes.
 
 Not covered: deliberation panel events (`deliberation_*`) carry the agents'
 own proposals and are filtered by scope, not by guards.

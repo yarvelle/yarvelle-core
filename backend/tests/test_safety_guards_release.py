@@ -243,7 +243,38 @@ async def test_resumed_buffered_turn_releases_only_checked_text() -> None:
 
 
 @pytest.mark.asyncio
-async def test_resume_without_guards_or_buffering_is_unchanged() -> None:
+async def test_resumed_turn_is_checked_even_without_guards() -> None:
     events = await _resume(RefuseLeak(), LEAK, "rel-resume-plain")
     done = _done(events)
-    assert done["refused"] is False and done["fullText"] == LEAK
+    assert done["refused"] is True and done["refusalReason"] == "policy:leak"
+    assert done["fullText"] != LEAK
+    # Streamed as before (stream mode); the done event carries the verdict.
+    assert "".join(_tokens(events)) == LEAK
+
+
+@pytest.mark.asyncio
+async def test_resumed_turn_without_guards_allows_a_normal_answer() -> None:
+    events = await _resume(NeutralSafetyPolicy(), ANSWER, "rel-resume-neutral")
+    done = _done(events)
+    assert done["refused"] is False and done["fullText"] == ANSWER
+    assert done.get("boundaryWarning") in (False, None)
+
+
+class SoftLeak(NeutralSafetyPolicy):
+    def check_output(self, text: Optional[str], ctx: Optional[SafetyContext] = None) -> SafetyVerdict:
+        return SafetyVerdict(refused=bool(text), reason="soft:note", is_hard=False)
+
+    def is_hard_refusal_reason(self, reason: str) -> bool:
+        return not reason.startswith("soft:")
+
+
+@pytest.mark.asyncio
+async def test_resumed_soft_refusal_keeps_the_answer_with_a_warning() -> None:
+    done = _done(await _resume(SoftLeak(), ANSWER, "rel-resume-soft"))
+    assert done["refused"] is False and done["fullText"] == ANSWER and done["boundaryWarning"] is True
+
+
+@pytest.mark.asyncio
+async def test_normal_turn_without_guards_is_unchanged() -> None:
+    events = await _turn(_service(RefuseLeak(), _graph(ANSWER, stream_model=True)), "rel-normal-plain")
+    assert "".join(_tokens(events)) == ANSWER and _done(events)["refused"] is False
