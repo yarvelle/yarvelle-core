@@ -21,7 +21,7 @@ from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
 from fastapi.testclient import TestClient
 import pytest
 from sqlalchemy import create_engine
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from yarvelle_core.api.deps import get_current_user
@@ -32,6 +32,7 @@ from yarvelle_core.config import settings
 from yarvelle_core.db.models import Base, Profile, ProfileAccess, ScopeGrant, User
 from yarvelle_core.db.session import get_db
 from yarvelle_core.pack.spec import RouterContribution
+from yarvelle_core.testing.fixtures import UserFactory, create_test_session_factory
 
 USERS = ("owner", "reader", "writer", "expired", "stranger")
 
@@ -51,8 +52,7 @@ def _pack_router() -> APIRouter:
 
 
 def _profile_user(user_id: str) -> UserProfile:
-    now = datetime.now(timezone.utc)
-    return UserProfile(id=user_id, email=f"{user_id}@example.test", username=user_id, created_at=now, updated_at=now)
+    return UserFactory.build_principal(id=user_id, email=f"{user_id}@example.test", username=user_id)
 
 
 @pytest.fixture
@@ -97,10 +97,13 @@ def _app(db_file: Path, *, fake_auth: bool = True) -> FastAPI:
     app.include_router(api, prefix="/api/v1")
 
     async def _db() -> AsyncIterator[AsyncSession]:
-        engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
-            yield session
-        await engine.dispose()
+        async with create_test_session_factory(
+            f"sqlite+aiosqlite:///{db_file}",
+            session_class=AsyncSession,
+            create_tables=False,
+        ) as (_engine, factory):
+            async with factory() as session:
+                yield session
 
     app.dependency_overrides[get_db] = _db
     if fake_auth:

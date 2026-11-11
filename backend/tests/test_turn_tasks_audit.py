@@ -27,13 +27,13 @@ import pytest
 import sqlalchemy as sa
 from alembic import command
 from langchain_core.messages import AIMessage
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 
 import yarvelle_core.audit.logger as audit_logger
 from tests.test_hybrid_routing import ScriptedModel, Sink, _spec, _task_call, _turn, _write_agent
 from yarvelle_core.agents import AgentRegistry
 from yarvelle_core.audit import AuditWriteError, best_effort_failure_count, record_audit
-from yarvelle_core.db.models import AuditEventRecord, Base, TurnTask
+from yarvelle_core.db.models import AuditEventRecord, TurnTask
 from yarvelle_core.db.schema_catalog import SYSTEM_DENYLIST_TABLES
 from yarvelle_core.db.session import get_alembic_config
 from yarvelle_core.engine.orchestration import HybridRouter
@@ -41,6 +41,7 @@ from yarvelle_core.engine.orchestration.runtime import build_turn_tasks, store_t
 from yarvelle_core.engine.orchestration.task_guard import OrchestrationAuditError
 from yarvelle_core.schemas.audit import AuditEvent
 from yarvelle_core.schemas.orchestration import TurnTaskRecord
+from yarvelle_core.testing.fixtures import create_test_session_factory
 
 H1 = hashlib.sha256(b"in").hexdigest()
 H2 = hashlib.sha256(b"out").hexdigest()
@@ -56,16 +57,9 @@ def registry(tmp_path: Path) -> AgentRegistry:
 
 
 @pytest.fixture()
-def factory() -> Any:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
-
-    async def _create() -> None:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-
-    asyncio.run(_create())
-    yield async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
-    asyncio.run(engine.dispose())
+async def factory() -> Any:
+    async with create_test_session_factory(session_class=AsyncSession) as (_engine, session_factory):
+        yield session_factory
 
 
 def _broken_factory() -> Any:
@@ -127,7 +121,7 @@ def test_failed_turn_task_write_stops_the_turn() -> None:
     asyncio.run(store_turn_tasks(None, [row]))  # no sink: nothing to do
 
 
-def test_default_sink_writes_turn_task_rows(factory: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_default_sink_writes_turn_task_rows(factory: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     import yarvelle_core.db.session as db_session
     from yarvelle_core.engine.builder import _store_turn_tasks
 
@@ -136,13 +130,10 @@ def test_default_sink_writes_turn_task_rows(factory: Any, monkeypatch: pytest.Mo
         turn_id="turn-1", task_id="call-1", thread_id="th", agent_id="trip-organizer", agent_title="Trip Organizer",
         state="completed", input_hash=H1, output_hash=H2, started_at="2026-11-04T10:00:00+00:00", duration_ms=40,
     )
-    asyncio.run(_store_turn_tasks([row]))
+    await _store_turn_tasks([row])
 
-    async def _read() -> List[TurnTask]:
-        async with factory() as session:
-            return list((await session.execute(sa.select(TurnTask))).scalars())
-
-    (saved,) = asyncio.run(_read())
+    async with factory() as session:
+        (saved,) = list((await session.execute(sa.select(TurnTask))).scalars())
     assert (saved.turn_id, saved.task_id, saved.agent_id, saved.state) == ("turn-1", "call-1", "trip-organizer", "completed")
     assert saved.output_hash == H2 and saved.duration_ms == 40 and saved.started_at is not None
     assert saved.scope
@@ -158,12 +149,12 @@ def test_strict_audit_write_failure_raises(tmp_path: Path) -> None:
         asyncio.run(record_audit(event, log_path=tmp_path / "a.jsonl", session_factory=_broken_factory))
 
 
-def test_strict_audit_file_failure_raises(tmp_path: Path, factory: Any) -> None:
+async def test_strict_audit_file_failure_raises(tmp_path: Path, factory: Any) -> None:
     blocked = tmp_path / "blocked"
     blocked.mkdir()  # a directory, so the JSONL append fails
     event = AuditEvent(event="task.started", agent_id="trip-organizer", task_id="t1")
     with pytest.raises(AuditWriteError):
-        asyncio.run(record_audit(event, log_path=blocked, session_factory=factory))
+        await record_audit(event, log_path=blocked, session_factory=factory)
 
 
 def test_best_effort_failure_is_counted_not_raised(tmp_path: Path) -> None:
@@ -181,18 +172,15 @@ def test_mode_overrides_event_durability(tmp_path: Path) -> None:
     assert audit_logger.AuditWriteError is AuditWriteError
 
 
-def test_audit_record_keeps_turn_and_task_fields(tmp_path: Path, factory: Any) -> None:
+async def test_audit_record_keeps_turn_and_task_fields(tmp_path: Path, factory: Any) -> None:
     event = AuditEvent(
         event="task.completed", agent_id="trip-organizer", turn_id="turn-1", task_id="call-1",
         parent_task_id="call-0", input_hash=H1, output_hash=H2, error_code="none",
     )
-    asyncio.run(record_audit(event, log_path=tmp_path / "a.jsonl", session_factory=factory))
+    await record_audit(event, log_path=tmp_path / "a.jsonl", session_factory=factory)
 
-    async def _read() -> AuditEventRecord:
-        async with factory() as session:
-            return (await session.execute(sa.select(AuditEventRecord))).scalars().one()
-
-    saved = asyncio.run(_read())
+    async with factory() as session:
+        saved = (await session.execute(sa.select(AuditEventRecord))).scalars().one()
     assert (saved.turn_id, saved.task_id, saved.parent_task_id) == ("turn-1", "call-1", "call-0")
     assert (saved.input_hash, saved.output_hash, saved.error_code) == (H1, H2, "none")
 

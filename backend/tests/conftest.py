@@ -13,16 +13,15 @@
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
-from typing import AsyncGenerator
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from yarvelle_core.config import settings
-import yarvelle_core.db.models as _all_models
-from yarvelle_core.db.models import Base
-from yarvelle_core.db.scoped_session import ScopedAsyncSession
+from yarvelle_core.testing.fixtures import (  # noqa: F401
+    async_db_engine_and_factory,
+    async_db_session,
+    auth_client,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -53,17 +52,3 @@ def temp_workspace(tmp_path: Path) -> Path:
     (ws / "notes").mkdir(parents=True, exist_ok=True)
     (ws / "skills").mkdir(parents=True, exist_ok=True)
     return ws
-
-
-@pytest.fixture
-async def async_db_session(tmp_path: Path) -> AsyncGenerator[AsyncSession, None]:
-    """Provides an isolated AsyncSession backed by an in-memory SQLite database."""
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    session_factory = async_sessionmaker(engine, expire_on_commit=False, class_=ScopedAsyncSession)
-    async with session_factory() as session:
-        yield session
-
-    await engine.dispose()

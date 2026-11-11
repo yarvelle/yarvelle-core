@@ -45,10 +45,11 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from yarvelle_core.api.approvals import consume_approval_atomic
-from yarvelle_core.db.models import Approval, Base, Profile
+from yarvelle_core.db.models import Approval, Profile
+from yarvelle_core.testing.fixtures import create_test_session_factory
 from yarvelle_core.engine.tool_exec import (
     PolicyDecision,
     SqlApprovalStore,
@@ -191,51 +192,33 @@ def test_adversarial_child_under_13_hard_block_overrides_panel_approval():
 @pytest.mark.asyncio
 async def test_adversarial_token_replay_rejected():
     """Adversarial attack: Replaying a consumed approval token must fail closed."""
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-    session_factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    async with create_test_session_factory(session_class=AsyncSession) as (_engine, session_factory):
+        tool_args = {"action": "deploy_step", "index": 42}
+        payload_h = compute_payload_hash(tool_args)
+        now = datetime.now(timezone.utc)
+        app_id = "app_replay_target"
 
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    tool_args = {"action": "deploy_step", "index": 42}
-    payload_h = compute_payload_hash(tool_args)
-    now = datetime.now(timezone.utc)
-    app_id = "app_replay_target"
-
-    async with session_factory() as session:
-        session.add(
-            Approval(
-                id=app_id,
-                profile_id="prof_replay",
-                run_id="run_1",
-                agent_id="specialist_ops",
-                tool_name="deploy_tool",
-                args_redacted=json.dumps(tool_args),
-                payload_hash=payload_h,
-                risk_tier="write_local",
-                status="approved",
-                expires_at=now + timedelta(minutes=10),
-                created_at=now,
+        async with session_factory() as session:
+            session.add(
+                Approval(
+                    id=app_id,
+                    profile_id="prof_replay",
+                    run_id="run_1",
+                    agent_id="specialist_ops",
+                    tool_name="deploy_tool",
+                    args_redacted=json.dumps(tool_args),
+                    payload_hash=payload_h,
+                    risk_tier="write_local",
+                    status="approved",
+                    expires_at=now + timedelta(minutes=10),
+                    created_at=now,
+                )
             )
-        )
-        await session.commit()
+            await session.commit()
 
-    # First consumption: SUCCESS
-    async with session_factory() as session:
-        consumed = await consume_approval_atomic(
-            session,
-            app_id,
-            tool_args,
-            profile_id="prof_replay",
-            tool_name="deploy_tool",
-            agent_id="specialist_ops",
-        )
-        assert consumed == app_id
-
-    # Second consumption (Replay 1): MUST FAIL
-    async with session_factory() as session:
-        with pytest.raises(ValueError, match="cannot consume|already been consumed"):
-            await consume_approval_atomic(
+        # First consumption: SUCCESS
+        async with session_factory() as session:
+            consumed = await consume_approval_atomic(
                 session,
                 app_id,
                 tool_args,
@@ -243,305 +226,288 @@ async def test_adversarial_token_replay_rejected():
                 tool_name="deploy_tool",
                 agent_id="specialist_ops",
             )
+            assert consumed == app_id
 
-    # Third consumption (Replay 2): MUST FAIL
-    async with session_factory() as session:
-        with pytest.raises(ValueError, match="cannot consume|already been consumed"):
-            await consume_approval_atomic(
-                session,
-                app_id,
-                tool_args,
-                profile_id="prof_replay",
-                tool_name="deploy_tool",
-                agent_id="specialist_ops",
-            )
+        # Second consumption (Replay 1): MUST FAIL
+        async with session_factory() as session:
+            with pytest.raises(ValueError, match="cannot consume|already been consumed"):
+                await consume_approval_atomic(
+                    session,
+                    app_id,
+                    tool_args,
+                    profile_id="prof_replay",
+                    tool_name="deploy_tool",
+                    agent_id="specialist_ops",
+                )
 
-    await engine.dispose()
+        # Third consumption (Replay 2): MUST FAIL
+        async with session_factory() as session:
+            with pytest.raises(ValueError, match="cannot consume|already been consumed"):
+                await consume_approval_atomic(
+                    session,
+                    app_id,
+                    tool_args,
+                    profile_id="prof_replay",
+                    tool_name="deploy_tool",
+                    agent_id="specialist_ops",
+                )
 
 
 @pytest.mark.asyncio
 async def test_adversarial_concurrent_double_spend_race_condition():
     """Adversarial attack: 20 concurrent tasks attempting to consume the same approval token simultaneously."""
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-    session_factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    async with create_test_session_factory(session_class=AsyncSession) as (_engine, session_factory):
+        tool_args = {"claim_id": "c-999"}
+        payload_h = compute_payload_hash(tool_args)
+        now = datetime.now(timezone.utc)
+        app_id = "app_race_target"
 
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    tool_args = {"claim_id": "c-999"}
-    payload_h = compute_payload_hash(tool_args)
-    now = datetime.now(timezone.utc)
-    app_id = "app_race_target"
-
-    async with session_factory() as session:
-        session.add(
-            Approval(
-                id=app_id,
-                profile_id="prof_race",
-                run_id="run_race",
-                agent_id="specialist_race",
-                tool_name="race_tool",
-                args_redacted=json.dumps(tool_args),
-                payload_hash=payload_h,
-                risk_tier="write_local",
-                status="approved",
-                expires_at=now + timedelta(minutes=10),
-                created_at=now,
-            )
-        )
-        await session.commit()
-
-    async def _try_consume():
         async with session_factory() as session:
-            return await consume_approval_atomic(
-                session,
-                app_id,
-                tool_args,
-                profile_id="prof_race",
-                tool_name="race_tool",
-                agent_id="specialist_race",
+            session.add(
+                Approval(
+                    id=app_id,
+                    profile_id="prof_race",
+                    run_id="run_race",
+                    agent_id="specialist_race",
+                    tool_name="race_tool",
+                    args_redacted=json.dumps(tool_args),
+                    payload_hash=payload_h,
+                    risk_tier="write_local",
+                    status="approved",
+                    expires_at=now + timedelta(minutes=10),
+                    created_at=now,
+                )
             )
+            await session.commit()
 
-    results = await asyncio.gather(*[_try_consume() for _ in range(20)], return_exceptions=True)
+        async def _try_consume():
+            async with session_factory() as session:
+                return await consume_approval_atomic(
+                    session,
+                    app_id,
+                    tool_args,
+                    profile_id="prof_race",
+                    tool_name="race_tool",
+                    agent_id="specialist_race",
+                )
 
-    successes = [r for r in results if isinstance(r, str)]
-    failures = [r for r in results if isinstance(r, Exception)]
+        results = await asyncio.gather(*[_try_consume() for _ in range(20)], return_exceptions=True)
 
-    # Invariant: EXACTLY 1 caller succeeds; all other 19 callers get rejected!
-    assert len(successes) == 1
-    assert len(failures) == 19
-    for exc in failures:
-        assert isinstance(exc, ValueError)
+        successes = [r for r in results if isinstance(r, str)]
+        failures = [r for r in results if isinstance(r, Exception)]
 
-    await engine.dispose()
+        # Invariant: EXACTLY 1 caller succeeds; all other 19 callers get rejected!
+        assert len(successes) == 1
+        assert len(failures) == 19
+        for exc in failures:
+            assert isinstance(exc, ValueError)
 
 
 @pytest.mark.asyncio
 async def test_adversarial_argument_tampering_variations():
     """Adversarial attack: Test multiple mutations of tool arguments against payload hash."""
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-    session_factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    async with create_test_session_factory(session_class=AsyncSession) as (_engine, session_factory):
+        base_args = {"alpha": 100, "beta": ["x", "y"], "gamma": {"nested": True}}
+        payload_h = compute_payload_hash(base_args)
+        now = datetime.now(timezone.utc)
+        app_id = "app_args_tamper"
 
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    base_args = {"alpha": 100, "beta": ["x", "y"], "gamma": {"nested": True}}
-    payload_h = compute_payload_hash(base_args)
-    now = datetime.now(timezone.utc)
-    app_id = "app_args_tamper"
-
-    async with session_factory() as session:
-        session.add(
-            Approval(
-                id=app_id,
-                profile_id="prof_args",
-                run_id="run_1",
-                agent_id="spec_1",
-                tool_name="t_args",
-                args_redacted=json.dumps(base_args),
-                payload_hash=payload_h,
-                risk_tier="write_local",
-                status="approved",
-                expires_at=now + timedelta(minutes=10),
-                created_at=now,
-            )
-        )
-        await session.commit()
-
-    mutations = [
-        {"alpha": 101, "beta": ["x", "y"], "gamma": {"nested": True}},  # Value modified
-        {"alpha": 100, "gamma": {"nested": True}},  # Key omitted
-        {"alpha": 100, "beta": ["x", "y"], "gamma": {"nested": True}, "extra": 1},  # Key injected
-        {"alpha": "100", "beta": ["x", "y"], "gamma": {"nested": True}},  # Type confusion (int -> str)
-        {"alpha": 100, "beta": ["y", "x"], "gamma": {"nested": True}},  # Array order changed
-        {"alpha": 100, "beta": ["x", "y"], "gamma": {"nested": False}},  # Nested value modified
-    ]
-
-    for tampered in mutations:
         async with session_factory() as session:
-            with pytest.raises(ValueError, match="Payload hash mismatch"):
-                await consume_approval_atomic(
-                    session,
-                    app_id,
-                    tampered,
+            session.add(
+                Approval(
+                    id=app_id,
                     profile_id="prof_args",
-                    tool_name="t_args",
+                    run_id="run_1",
                     agent_id="spec_1",
+                    tool_name="t_args",
+                    args_redacted=json.dumps(base_args),
+                    payload_hash=payload_h,
+                    risk_tier="write_local",
+                    status="approved",
+                    expires_at=now + timedelta(minutes=10),
+                    created_at=now,
                 )
+            )
+            await session.commit()
 
-    # BUT permutation of dictionary keys produces identical canonical JSON and matches!
-    reordered_keys = {"gamma": {"nested": True}, "alpha": 100, "beta": ["x", "y"]}
-    async with session_factory() as session:
-        consumed_id = await consume_approval_atomic(
-            session,
-            app_id,
-            reordered_keys,
-            profile_id="prof_args",
-            tool_name="t_args",
-            agent_id="spec_1",
-        )
-        assert consumed_id == app_id
+        mutations = [
+            {"alpha": 101, "beta": ["x", "y"], "gamma": {"nested": True}},  # Value modified
+            {"alpha": 100, "gamma": {"nested": True}},  # Key omitted
+            {"alpha": 100, "beta": ["x", "y"], "gamma": {"nested": True}, "extra": 1},  # Key injected
+            {"alpha": "100", "beta": ["x", "y"], "gamma": {"nested": True}},  # Type confusion (int -> str)
+            {"alpha": 100, "beta": ["y", "x"], "gamma": {"nested": True}},  # Array order changed
+            {"alpha": 100, "beta": ["x", "y"], "gamma": {"nested": False}},  # Nested value modified
+        ]
 
-    await engine.dispose()
+        for tampered in mutations:
+            async with session_factory() as session:
+                with pytest.raises(ValueError, match="Payload hash mismatch"):
+                    await consume_approval_atomic(
+                        session,
+                        app_id,
+                        tampered,
+                        profile_id="prof_args",
+                        tool_name="t_args",
+                        agent_id="spec_1",
+                    )
+
+        # BUT permutation of dictionary keys produces identical canonical JSON and matches!
+        reordered_keys = {"gamma": {"nested": True}, "alpha": 100, "beta": ["x", "y"]}
+        async with session_factory() as session:
+            consumed_id = await consume_approval_atomic(
+                session,
+                app_id,
+                reordered_keys,
+                profile_id="prof_args",
+                tool_name="t_args",
+                agent_id="spec_1",
+            )
+            assert consumed_id == app_id
 
 
 @pytest.mark.asyncio
 async def test_adversarial_agent_identity_spoofing():
     """Adversarial attack: Specialist B attempts to consume an approval issued to Specialist A."""
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-    session_factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    async with create_test_session_factory(session_class=AsyncSession) as (_engine, session_factory):
+        tool_args = {"note": "confidential"}
+        payload_h = compute_payload_hash(tool_args)
+        now = datetime.now(timezone.utc)
+        app_id = "app_spoof_target"
 
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+        async with session_factory() as session:
+            session.add(
+                Approval(
+                    id=app_id,
+                    profile_id="prof_spoof",
+                    run_id="run_1",
+                    agent_id="specialist_authorized",
+                    tool_name="note_tool",
+                    args_redacted=json.dumps(tool_args),
+                    payload_hash=payload_h,
+                    risk_tier="write_local",
+                    status="approved",
+                    expires_at=now + timedelta(minutes=10),
+                    created_at=now,
+                )
+            )
+            await session.commit()
 
-    tool_args = {"note": "confidential"}
-    payload_h = compute_payload_hash(tool_args)
-    now = datetime.now(timezone.utc)
-    app_id = "app_spoof_target"
+        # Attacker 1: spoofed agent name
+        async with session_factory() as session:
+            with pytest.raises(ValueError, match="different agent"):
+                await consume_approval_atomic(
+                    session,
+                    app_id,
+                    tool_args,
+                    profile_id="prof_spoof",
+                    tool_name="note_tool",
+                    agent_id="specialist_adversary",
+                )
 
-    async with session_factory() as session:
-        session.add(
-            Approval(
-                id=app_id,
+        # Attacker 2: trailing whitespace injection
+        async with session_factory() as session:
+            with pytest.raises(ValueError, match="different agent"):
+                await consume_approval_atomic(
+                    session,
+                    app_id,
+                    tool_args,
+                    profile_id="prof_spoof",
+                    tool_name="note_tool",
+                    agent_id="specialist_authorized ",
+                )
+
+        # Authorized consumer succeeds
+        async with session_factory() as session:
+            res = await consume_approval_atomic(
+                session,
+                app_id,
+                tool_args,
                 profile_id="prof_spoof",
-                run_id="run_1",
+                tool_name="note_tool",
                 agent_id="specialist_authorized",
-                tool_name="note_tool",
-                args_redacted=json.dumps(tool_args),
-                payload_hash=payload_h,
-                risk_tier="write_local",
-                status="approved",
-                expires_at=now + timedelta(minutes=10),
-                created_at=now,
             )
-        )
-        await session.commit()
-
-    # Attacker 1: spoofed agent name
-    async with session_factory() as session:
-        with pytest.raises(ValueError, match="different agent"):
-            await consume_approval_atomic(
-                session,
-                app_id,
-                tool_args,
-                profile_id="prof_spoof",
-                tool_name="note_tool",
-                agent_id="specialist_adversary",
-            )
-
-    # Attacker 2: trailing whitespace injection
-    async with session_factory() as session:
-        with pytest.raises(ValueError, match="different agent"):
-            await consume_approval_atomic(
-                session,
-                app_id,
-                tool_args,
-                profile_id="prof_spoof",
-                tool_name="note_tool",
-                agent_id="specialist_authorized ",
-            )
-
-    # Authorized consumer succeeds
-    async with session_factory() as session:
-        res = await consume_approval_atomic(
-            session,
-            app_id,
-            tool_args,
-            profile_id="prof_spoof",
-            tool_name="note_tool",
-            agent_id="specialist_authorized",
-        )
-        assert res == app_id
-
-    await engine.dispose()
+            assert res == app_id
 
 
 @pytest.mark.asyncio
 async def test_adversarial_expired_and_unapproved_states():
     """Adversarial stress: Tokens in pending, rejected, or expired states cannot be consumed."""
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-    session_factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    async with create_test_session_factory(session_class=AsyncSession) as (_engine, session_factory):
+        tool_args = {"data": "test"}
+        payload_h = compute_payload_hash(tool_args)
+        now = datetime.now(timezone.utc)
 
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    tool_args = {"data": "test"}
-    payload_h = compute_payload_hash(tool_args)
-    now = datetime.now(timezone.utc)
-
-    async with session_factory() as session:
-        # Pending token
-        session.add(
-            Approval(
-                id="app_pending",
-                profile_id="p1",
-                run_id="r1",
-                agent_id="a1",
-                tool_name="t1",
-                args_redacted=json.dumps(tool_args),
-                payload_hash=payload_h,
-                risk_tier="write_local",
-                status="pending",
-                expires_at=now + timedelta(minutes=10),
-                created_at=now,
+        async with session_factory() as session:
+            # Pending token
+            session.add(
+                Approval(
+                    id="app_pending",
+                    profile_id="p1",
+                    run_id="r1",
+                    agent_id="a1",
+                    tool_name="t1",
+                    args_redacted=json.dumps(tool_args),
+                    payload_hash=payload_h,
+                    risk_tier="write_local",
+                    status="pending",
+                    expires_at=now + timedelta(minutes=10),
+                    created_at=now,
+                )
             )
-        )
-        # Rejected token
-        session.add(
-            Approval(
-                id="app_rejected",
-                profile_id="p1",
-                run_id="r1",
-                agent_id="a1",
-                tool_name="t1",
-                args_redacted=json.dumps(tool_args),
-                payload_hash=payload_h,
-                risk_tier="write_local",
-                status="rejected",
-                expires_at=now + timedelta(minutes=10),
-                created_at=now,
+            # Rejected token
+            session.add(
+                Approval(
+                    id="app_rejected",
+                    profile_id="p1",
+                    run_id="r1",
+                    agent_id="a1",
+                    tool_name="t1",
+                    args_redacted=json.dumps(tool_args),
+                    payload_hash=payload_h,
+                    risk_tier="write_local",
+                    status="rejected",
+                    expires_at=now + timedelta(minutes=10),
+                    created_at=now,
+                )
             )
-        )
-        # Expired token
-        session.add(
-            Approval(
-                id="app_expired",
-                profile_id="p1",
-                run_id="r1",
-                agent_id="a1",
-                tool_name="t1",
-                args_redacted=json.dumps(tool_args),
-                payload_hash=payload_h,
-                risk_tier="write_local",
-                status="approved",
-                expires_at=now - timedelta(minutes=5),  # in past!
-                created_at=now - timedelta(minutes=15),
+            # Expired token
+            session.add(
+                Approval(
+                    id="app_expired",
+                    profile_id="p1",
+                    run_id="r1",
+                    agent_id="a1",
+                    tool_name="t1",
+                    args_redacted=json.dumps(tool_args),
+                    payload_hash=payload_h,
+                    risk_tier="write_local",
+                    status="approved",
+                    expires_at=now - timedelta(minutes=5),  # in past!
+                    created_at=now - timedelta(minutes=15),
+                )
             )
-        )
-        await session.commit()
+            await session.commit()
 
-    # Pending cannot consume
-    async with session_factory() as session:
-        with pytest.raises(ValueError, match="status 'pending'"):
-            await consume_approval_atomic(session, "app_pending", tool_args, profile_id="p1", tool_name="t1", agent_id="a1")
+        # Pending cannot consume
+        async with session_factory() as session:
+            with pytest.raises(ValueError, match="status 'pending'"):
+                await consume_approval_atomic(session, "app_pending", tool_args, profile_id="p1", tool_name="t1", agent_id="a1")
 
-    # Rejected cannot consume
-    async with session_factory() as session:
-        with pytest.raises(ValueError, match="status 'rejected'"):
-            await consume_approval_atomic(session, "app_rejected", tool_args, profile_id="p1", tool_name="t1", agent_id="a1")
+        # Rejected cannot consume
+        async with session_factory() as session:
+            with pytest.raises(ValueError, match="status 'rejected'"):
+                await consume_approval_atomic(session, "app_rejected", tool_args, profile_id="p1", tool_name="t1", agent_id="a1")
 
-    # Expired token raises error and updates status to expired
-    async with session_factory() as session:
-        with pytest.raises(ValueError, match="has expired"):
-            await consume_approval_atomic(session, "app_expired", tool_args, profile_id="p1", tool_name="t1", agent_id="a1")
+        # Expired token raises error and updates status to expired
+        async with session_factory() as session:
+            with pytest.raises(ValueError, match="has expired"):
+                await consume_approval_atomic(session, "app_expired", tool_args, profile_id="p1", tool_name="t1", agent_id="a1")
 
-    # Verify status changed in DB to expired
-    async with session_factory() as session:
-        rec = await session.get(Approval, "app_expired")
-        assert rec is not None
-        assert rec.status == "expired"
-
-    await engine.dispose()
+        # Verify status changed in DB to expired
+        async with session_factory() as session:
+            rec = await session.get(Approval, "app_expired")
+            assert rec is not None
+            assert rec.status == "expired"
 
 
 # ============================================================================

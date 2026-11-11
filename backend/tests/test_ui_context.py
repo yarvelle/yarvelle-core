@@ -14,47 +14,20 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
-from fastapi import FastAPI
-import httpx
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from yarvelle_core.api.deps import get_current_user
-from yarvelle_core.api.router import api_router
-from yarvelle_core.auth.adapters.disabled_adapter import DEFAULT_STEWARD_USER
 from yarvelle_core.auth.ports import UserProfile
-from yarvelle_core.db.models import Base, Profile, ProfileAccess, ProfileUiPreference, ScopeGrant, User
-from yarvelle_core.db.scoped_session import ScopedAsyncSession
-from yarvelle_core.db.session import get_db
+from yarvelle_core.db.models import Profile, ProfileAccess, ScopeGrant
+from yarvelle_core.testing.fixtures import create_auth_client, create_test_session_factory
 
 
 @pytest.fixture
 async def test_app_and_client():
     """Sets up an in-memory SQLite DB, FastAPI application with api_router, and httpx client."""
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    session_factory = async_sessionmaker(engine, expire_on_commit=False, class_=ScopedAsyncSession)
-
-    app = FastAPI()
-    app.include_router(api_router, prefix="/api/v1")
-
-    async def override_get_db():
-        async with session_factory() as session:
-            yield session
-
-    async def override_get_user():
-        return DEFAULT_STEWARD_USER
-
-    app.dependency_overrides[get_db] = override_get_db
-    app.dependency_overrides[get_current_user] = override_get_user
-
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-        yield client, session_factory
-
-    await engine.dispose()
+    async with create_test_session_factory() as (_engine, session_factory):
+        async with create_auth_client(session_factory) as client:
+            yield client, session_factory
 
 
 @pytest.mark.asyncio
