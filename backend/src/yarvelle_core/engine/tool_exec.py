@@ -63,14 +63,8 @@ from yarvelle_core.schemas.tool import ToolResult as BaseToolResult
 
 logger = logging.getLogger("yarvelle_core.engine.tool_exec")
 
-try:
-    from connectors.base import (
-        ToolContext as ConnectorToolContext,
-        ToolSpec as ConnectorToolSpec,
-    )
-except ImportError:
-    ConnectorToolContext = ()  # type: ignore
-    ConnectorToolSpec = ()  # type: ignore
+ConnectorToolContext: Any = ()
+ConnectorToolSpec: Any = ()
 
 AutonomyLevel = Literal["A0", "A1", "A2", "A3"]
 

@@ -62,7 +62,7 @@ class DataFlows:
 
     allowed_hosts: Tuple[str, ...] = field(default_factory=tuple)
     allowed_methods: Tuple[str, ...] = ("GET", "POST")
-    data_sensitivity: str = "internal"  # "public", "internal", "confidential", "phi", "pii"
+    data_sensitivity: str = "internal"  # "public", "internal", "confidential", "restricted", "pii"
 
     def __post_init__(self) -> None:
         if not isinstance(self.allowed_hosts, tuple):
@@ -299,14 +299,14 @@ def _make_builtin_specs() -> List[ToolSpec]:
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": 'Filename or path of attachment (e.g. "blood_work.txt", "benefits.pdf").',
+                    "description": 'Filename or path of attachment (e.g. "report.txt", "statement.pdf").',
                 }
             },
             "required": ["path"],
         },
         risk_tier="read",
         trust="trusted",
-        data_flows=DataFlows(allowed_hosts=(), data_sensitivity="phi"),
+        data_flows=DataFlows(allowed_hosts=(), data_sensitivity="restricted"),
         executor=_exec_attach_read,
     )
 
@@ -412,7 +412,7 @@ def _make_builtin_specs() -> List[ToolSpec]:
 
     spec_sanitize_pii = ToolSpec(
         name="sanitize_pii",
-        description="Mask direct PII (SSN, MRN, phone, address, email) in text before processing.",
+        description="Mask direct PII (SSN, record IDs, phone, address, email) in text before processing.",
         parameters={
             "type": "object",
             "properties": {
@@ -442,13 +442,13 @@ def _make_builtin_specs() -> List[ToolSpec]:
             "type": "object",
             "properties": {
                 "text": {"type": "string", "description": "Sanitized document text."},
-                "schema_type": {"type": "string", "description": "'insurance', 'records', or 'generic'."},
+                "schema_type": {"type": "string", "description": "'document', 'records', or 'generic'."},
             },
             "required": ["text"],
         },
         risk_tier="read",
         trust="trusted",
-        data_flows=DataFlows(allowed_hosts=(), data_sensitivity="phi"),
+        data_flows=DataFlows(allowed_hosts=(), data_sensitivity="restricted"),
         executor=_exec_extract_structured_data,
     )
 
@@ -473,7 +473,7 @@ def _make_builtin_specs() -> List[ToolSpec]:
         },
         risk_tier="read",
         trust="trusted",
-        data_flows=DataFlows(allowed_hosts=(), data_sensitivity="phi"),
+        data_flows=DataFlows(allowed_hosts=(), data_sensitivity="restricted"),
         executor=_exec_validate_grounding,
     )
 
@@ -490,12 +490,12 @@ def _make_builtin_specs() -> List[ToolSpec]:
             "properties": {
                 "file_path": {"type": "string", "description": "Relative path in attachments/."},
                 "document_text": {"type": "string", "description": "Raw document text if loaded."},
-                "dossier_type": {"type": "string", "description": "'insurance', 'records', or 'generic'."},
+                "dossier_type": {"type": "string", "description": "'document', 'records', or 'generic'."},
             },
         },
         risk_tier="read",
         trust="trusted",
-        data_flows=DataFlows(allowed_hosts=(), data_sensitivity="phi"),
+        data_flows=DataFlows(allowed_hosts=(), data_sensitivity="restricted"),
         executor=_exec_extract_document_dossier,
     )
 
@@ -526,7 +526,7 @@ def _make_builtin_specs() -> List[ToolSpec]:
                 },
                 "source": {
                     "type": "string",
-                    "description": "Optional filter by record source ('clinical_note', 'upload', 'note', 'connector', 'external').",
+                    "description": "Optional filter by record source ('note', 'upload', 'document', 'connector', 'external').",
                     "default": None,
                 },
             },
@@ -534,7 +534,7 @@ def _make_builtin_specs() -> List[ToolSpec]:
         },
         risk_tier="read",
         trust="trusted",
-        data_flows=DataFlows(allowed_hosts=(), data_sensitivity="phi"),
+        data_flows=DataFlows(allowed_hosts=(), data_sensitivity="restricted"),
         executor=_exec_search_records,
     )
 
@@ -583,7 +583,7 @@ def _make_builtin_specs() -> List[ToolSpec]:
         },
         risk_tier="write_local",
         trust="trusted",
-        data_flows=DataFlows(allowed_hosts=(), data_sensitivity="phi"),
+        data_flows=DataFlows(allowed_hosts=(), data_sensitivity="restricted"),
         executor=_exec_create_reminder,
         metadata={
             "action": "create_reminder",
@@ -638,7 +638,7 @@ def _make_builtin_specs() -> List[ToolSpec]:
         },
         risk_tier="read",
         trust="trusted",
-        data_flows=DataFlows(allowed_hosts=(), data_sensitivity="phi"),
+        data_flows=DataFlows(allowed_hosts=(), data_sensitivity="restricted"),
         executor=_exec_list_reminders,
         metadata={
             "action": "list_reminders",
@@ -654,8 +654,8 @@ def _make_builtin_specs() -> List[ToolSpec]:
     spec_web_search = ToolSpec(
         name="web_search",
         description=(
-            "Execute a privacy-preserving, PHI-sanitised web search via allowlisted SearXNG "
-            "or Brave Search endpoints. Automatically strips user names, DOB, SSN, MRN, "
+            "Execute a privacy-preserving, PII-sanitised web search via allowlisted SearXNG "
+            "or Brave Search endpoints. Automatically strips user names, DOB, SSN, record IDs, "
             "phone, email, and address before any outbound request and marks results untrusted."
         ),
         parameters={
@@ -663,7 +663,7 @@ def _make_builtin_specs() -> List[ToolSpec]:
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "Search query string (will be sanitised of PHI/PII before sending).",
+                    "description": "Search query string (will be sanitised of sensitive PII before sending).",
                 },
                 "provider": {
                     "type": "string",
@@ -700,12 +700,25 @@ def _make_builtin_specs() -> List[ToolSpec]:
         },
     )
 
+    def _build_connector_ctx(ctx: Any, connector_id: str) -> Any:
+        from yarvelle_core.connectors.base import ToolContext as ConnectorToolContext
+
+        if isinstance(ctx, ConnectorToolContext):
+            return ctx
+        return ConnectorToolContext(
+            user_id=str(getattr(ctx, "user_id", "") or ""),
+            profile_id=str(getattr(ctx, "profile_id", "") or ""),
+            connector_id=connector_id,
+        )
+
     async def _exec_calendar_suggest_slots(args: Dict[str, Any], ctx: Any = None) -> Any:
-        from connectors.starters.calendar import GoogleCalendarConnector
+        from yarvelle_core.connectors.starters.calendar import GoogleCalendarConnector
+
         connector = GoogleCalendarConnector()
+        conn_ctx = _build_connector_ctx(ctx, "google-calendar")
         for t in connector.tools():
             if t.name == "calendar_suggest_slots" and t.handler is not None:
-                return await t.handler(args or {}, ctx)
+                return await t.handler(conn_ctx, args or {})
         return {"slots": []}
 
     spec_calendar_suggest_slots = ToolSpec(
@@ -738,27 +751,29 @@ def _make_builtin_specs() -> List[ToolSpec]:
 
     # 28. calendar_create_event (AU-55 / E4.3)
     async def _exec_calendar_create_event(args: Dict[str, Any], ctx: Any = None) -> Any:
-        from connectors.starters.calendar import GoogleCalendarConnector
+        from yarvelle_core.connectors.starters.calendar import GoogleCalendarConnector
+
         connector = GoogleCalendarConnector()
+        conn_ctx = _build_connector_ctx(ctx, "google-calendar")
         for t in connector.tools():
             if t.name == "calendar_create_event" and t.handler is not None:
-                return await t.handler(args or {}, ctx)
+                return await t.handler(conn_ctx, args or {})
         return {"status": "created"}
 
     spec_calendar_create_event = ToolSpec(
         name="calendar_create_event",
         description=(
             "Create an external calendar event on Google Calendar or CalDAV. "
-            "Always requires human approval in A0/A1 autonomy modes and strips PHI from titles by default."
+            "Always requires human approval in A0/A1 autonomy modes and strips sensitive details from titles by default."
         ),
         parameters={
             "type": "object",
             "properties": {
-                "title": {"type": "string", "description": "Event title (PHI stripped by default)."},
+                "title": {"type": "string", "description": "Event title (sensitive details stripped by default)."},
                 "start_time": {"type": "string", "description": "ISO-8601 start timestamp."},
                 "end_time": {"type": "string", "description": "ISO-8601 end timestamp."},
                 "location": {"type": "string", "description": "Optional location or address."},
-                "strip_phi": {"type": "boolean", "default": True},
+                "strip_sensitive": {"type": "boolean", "default": True},
             },
             "required": ["title", "start_time", "end_time"],
         },
@@ -795,7 +810,7 @@ def _make_builtin_specs() -> List[ToolSpec]:
                 "body_markdown": {"type": "string", "description": "Draft body content."},
                 "context_type": {
                     "type": "string",
-                    "enum": ["visit_request", "records_request", "school_form", "appeal", "general"],
+                    "enum": ["scheduling_request", "records_request", "form_submission", "appeal", "general"],
                     "default": "general",
                 },
             },
@@ -803,7 +818,7 @@ def _make_builtin_specs() -> List[ToolSpec]:
         },
         risk_tier="write_local",
         trust="trusted",
-        data_flows=DataFlows(allowed_hosts=(), data_sensitivity="phi"),
+        data_flows=DataFlows(allowed_hosts=(), data_sensitivity="restricted"),
         executor=_exec_create_email_draft,
         metadata={
             "action": "create_email_draft",
@@ -813,24 +828,68 @@ def _make_builtin_specs() -> List[ToolSpec]:
         },
     )
 
-    async def _exec_gmail_list_messages(args: Dict[str, Any], ctx: Any = None) -> Any:
+    async def _invoke_gmail_mcp(tool_name: str, args: Dict[str, Any], ctx: Any = None) -> Any:
+        from yarvelle_core.connectors.errors import ConnectorNotConfiguredError
+        from yarvelle_core.engine.tool_exec import TaintFlag, UntrustedResult
+
         if ctx is None or not getattr(ctx, "profile_id", None):
             raise ValueError("Missing profile_id in ToolContext")
-        return {"messages": [], "trust": "untrusted"}
+
+        extra = getattr(ctx, "extra", None)
+        mcp_client = getattr(ctx, "mcp_client", None) or (
+            extra.get("mcp_client") if isinstance(extra, Mapping) else None
+        )
+        if mcp_client is None:
+            raise ConnectorNotConfiguredError(
+                f"Remote MCP connector 'google-workspace-gmail' is not configured or attached for tool '{tool_name}'."
+            )
+
+        call_fn = getattr(mcp_client, "call_tool", None)
+        if callable(call_fn):
+            raw = call_fn(tool_name, dict(args or {}))
+        elif callable(mcp_client):
+            raw = mcp_client(tool_name, dict(args or {}))
+        else:
+            raise ConnectorNotConfiguredError(
+                f"Attached MCP client for 'google-workspace-gmail' does not implement 'call_tool' for '{tool_name}'."
+            )
+
+        if inspect.isawaitable(raw):
+            raw = await raw
+
+        taint_attr = getattr(ctx, "taint", None)
+        if taint_attr is not None and hasattr(taint_attr, "set"):
+            taint_attr.set()
+        else:
+            try:
+                setattr(ctx, "taint", TaintFlag(True))
+            except Exception:
+                pass
+
+        if isinstance(raw, UntrustedResult):
+            return raw
+        return UntrustedResult(
+            data=raw,
+            taint=True,
+            source=f"mcp:google-workspace-gmail:{tool_name}",
+        )
+
+    async def _exec_gmail_list_messages(args: Dict[str, Any], ctx: Any = None) -> Any:
+        return await _invoke_gmail_mcp("gmail_list_messages", args or {}, ctx)
 
     spec_gmail_list_messages = ToolSpec(
         name="gmail_list_messages",
         description=(
-            "List read-only Gmail messages filtered by consented label ('appointments', "
-            "'school-summaries', 'healthcare') via the curated Google Workspace remote MCP bridge."
+            "List read-only Gmail messages filtered by consented label ('INBOX', "
+            "'IMPORTANT', 'STARRED', 'UPDATES') via the curated Google Workspace remote MCP bridge."
         ),
         parameters={
             "type": "object",
             "properties": {
                 "label": {
                     "type": "string",
-                    "enum": ["appointments", "school-summaries", "healthcare", "INBOX"],
-                    "default": "appointments",
+                    "enum": ["INBOX", "IMPORTANT", "STARRED", "UPDATES"],
+                    "default": "INBOX",
                 },
                 "query": {"type": "string"},
                 "max_results": {"type": "integer", "default": 20, "minimum": 1, "maximum": 50},
@@ -841,7 +900,7 @@ def _make_builtin_specs() -> List[ToolSpec]:
         trust="untrusted",
         data_flows=DataFlows(
             allowed_hosts=("workspace-mcp.spectrayan.com", "gmail.googleapis.com"),
-            data_sensitivity="phi",
+            data_sensitivity="restricted",
         ),
         executor=_exec_gmail_list_messages,
         metadata={
@@ -853,9 +912,7 @@ def _make_builtin_specs() -> List[ToolSpec]:
     )
 
     async def _exec_gmail_send_message(args: Dict[str, Any], ctx: Any = None) -> Any:
-        if ctx is None or not getattr(ctx, "profile_id", None):
-            raise ValueError("Missing profile_id in ToolContext")
-        return {"status": "sent_via_approved_mcp", "risk_tier": "irreversible"}
+        return await _invoke_gmail_mcp("gmail_send_message", args or {}, ctx)
 
     spec_gmail_send_message = ToolSpec(
         name="gmail_send_message",
@@ -877,7 +934,7 @@ def _make_builtin_specs() -> List[ToolSpec]:
         trust="untrusted",
         data_flows=DataFlows(
             allowed_hosts=("workspace-mcp.spectrayan.com", "gmail.googleapis.com"),
-            data_sensitivity="phi",
+            data_sensitivity="restricted",
         ),
         executor=_exec_gmail_send_message,
         metadata={
@@ -930,17 +987,9 @@ CORE_TOOL_NAMES: Tuple[str, ...] = (
     "gmail_send_message",
 )
 
-HEALTH_TOOL_NAMES: Tuple[str, ...] = ()
-
-
 def _make_core_builtin_specs() -> List[ToolSpec]:
     """Generates the 18 domain-neutral core ToolSpecs."""
     return _make_builtin_specs()
-
-
-def _make_health_builtin_specs() -> List[ToolSpec]:
-    """Generates domain-specific pack ToolSpecs (empty in core)."""
-    return []
 
 
 def create_default_registry(enabled_packs: Optional[Sequence[str]] = None) -> ToolSpecRegistry:
@@ -961,13 +1010,11 @@ def create_default_registry(enabled_packs: Optional[Sequence[str]] = None) -> To
 __all__ = [
     "CORE_TOOL_NAMES",
     "DataFlows",
-    "HEALTH_TOOL_NAMES",
     "RiskTier",
     "ToolSpec",
     "ToolSpecRegistry",
     "TrustLevel",
     "_make_builtin_specs",
     "_make_core_builtin_specs",
-    "_make_health_builtin_specs",
     "create_default_registry",
 ]

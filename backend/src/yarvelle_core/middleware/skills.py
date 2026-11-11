@@ -17,31 +17,25 @@ import logging
 from pathlib import Path
 from typing import Any, Optional, Sequence, Union
 
+from yarvelle_core.resources.loader import get_resource_loader
+
 logger = logging.getLogger(__name__)
 
-SKILLS_SYSTEM_PROMPT = """\
-## Yarvelle Core Skill Catalog
 
-⚠ **SAFETY BOUNDARY**: You are a specialized task assistant.
-You do NOT provide formal medical diagnoses, prescribe medications, adjust dosages, or replace emergency triage.
-For acute life-threatening emergencies (e.g., crushing chest pain, acute stroke, severe dyspnea, anaphylaxis), immediately direct the user to call 911 / 988 or seek emergency medical care.
+def compose_skills_system_prompt(
+    *,
+    safety_boundary_notice: Optional[str] = None,
+    pack_id: Optional[str] = None,
+) -> str:
+    """Renders the SkillsMiddleware system prompt from ``skills_middleware.hbs``."""
+    return get_resource_loader().render_template(
+        "skills_middleware",
+        {"safety_boundary_notice": (safety_boundary_notice or "").strip()},
+        pack_id=pack_id,
+    )
 
-### Skill Progressive Disclosure Protocol
-1. Review the catalog below — each skill contains a `name`, `description`, and allowed tools.
-2. When a user inquiry matches a skill's scope, retrieve its full instructions on-demand:
-   `read_file("{{path}}")` (e.g. `read_file("skills/<skill-name>/SKILL.md")`)
-3. Follow the structured protocols defined inside `SKILL.md`. If specialized guidelines or reference templates are cited, retrieve them on-demand:
-   `read_file("skills/<skill-name>/references/<document>.md")`
-4. Never extrapolate advice or execute workflows beyond what the loaded skill's verified documentation explicitly permits.
 
-### Skill Sources
-{skills_locations}
-
-### Catalog
-{skills_list}
-
-{skills_load_warnings}
-"""
+SKILLS_SYSTEM_PROMPT = compose_skills_system_prompt()
 
 try:
     from deepagents.backends.filesystem import FilesystemBackend
@@ -61,8 +55,18 @@ class YarvelleSkillsMiddleware(SkillsMiddleware):
         backend: Any,
         sources: Sequence[Any],
         system_prompt: Optional[str] = None,
+        safety_boundary_notice: Optional[str] = None,
+        pack_id: Optional[str] = None,
     ) -> None:
-        prompt = system_prompt if system_prompt is not None else SKILLS_SYSTEM_PROMPT
+        if system_prompt is not None:
+            prompt = system_prompt
+        elif safety_boundary_notice or pack_id:
+            prompt = compose_skills_system_prompt(
+                safety_boundary_notice=safety_boundary_notice,
+                pack_id=pack_id,
+            )
+        else:
+            prompt = SKILLS_SYSTEM_PROMPT
         super().__init__(
             backend=backend,
             sources=sources,
@@ -92,6 +96,8 @@ def create_yarvelle_skills_middleware(
     backend: Optional[Any] = None,
     sources: Optional[Sequence[Any]] = None,
     system_prompt: Optional[str] = None,
+    safety_boundary_notice: Optional[str] = None,
+    pack_id: Optional[str] = None,
 ) -> Any:
     """Factory creating Yarvelle Core SkillsMiddleware initialized with the safety prompt template."""
     if FilesystemBackend is None:
@@ -138,7 +144,9 @@ def create_yarvelle_skills_middleware(
     return YarvelleSkillsMiddleware(
         backend=backend,
         sources=sources,
-        system_prompt=system_prompt or SKILLS_SYSTEM_PROMPT,
+        system_prompt=system_prompt,
+        safety_boundary_notice=safety_boundary_notice,
+        pack_id=pack_id,
     )
 
 
@@ -147,6 +155,7 @@ create_skills_middleware = create_yarvelle_skills_middleware
 __all__ = [
     "SKILLS_SYSTEM_PROMPT",
     "YarvelleSkillsMiddleware",
+    "compose_skills_system_prompt",
     "create_yarvelle_skills_middleware",
     "create_skills_middleware",
 ]

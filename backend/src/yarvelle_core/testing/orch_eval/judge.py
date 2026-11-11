@@ -181,8 +181,11 @@ def build_judge_prompt(
     answer: str,
     trace_summary: Mapping[str, Any],
     conversation: Optional[Sequence[Mapping[str, str]]] = None,
+    pack_id: Optional[str] = None,
 ) -> str:
     """Build the user prompt that asks for structured JSON."""
+    from yarvelle_core.resources.loader import get_resource_loader
+
     conv_lines: List[str] = []
     for turn in conversation or []:
         role = turn.get("role") or turn.get("speaker") or "user"
@@ -190,19 +193,17 @@ def build_judge_prompt(
         conv_lines.append(f"{role}: {text}")
     conv_block = "\n".join(conv_lines) if conv_lines else "(none)"
     summary = json.dumps(dict(trace_summary), indent=2, sort_keys=True, default=str)
-    return (
-        "You are an evaluation judge. Score the assistant answer against the "
-        "rubric and criteria. Reply with ONLY a JSON object of this shape:\n"
-        '{"score": <1-5 integer>, "verdict": "pass"|"fail", '
-        '"reasons": ["..."], "evidence_quotes": ["..."]}\n'
-        "Do not wrap the JSON in markdown. score 4 or 5 should be verdict "
-        '"pass"; 1-3 should be "fail" unless the rubric says otherwise.\n\n'
-        f"## Rubric\n{rubric_md.strip()}\n\n"
-        f"## Criteria for this turn\n{criteria.strip()}\n\n"
-        f"## Conversation so far\n{conv_block}\n\n"
-        f"## User message\n{user}\n\n"
-        f"## Assistant answer\n{answer}\n\n"
-        f"## Trace summary (agents, route, notices; no secrets)\n{summary}\n"
+    return get_resource_loader().render_template(
+        "orch_eval_judge",
+        {
+            "rubric_md": rubric_md.strip(),
+            "criteria": criteria.strip(),
+            "conv_block": conv_block,
+            "user": user,
+            "answer": answer,
+            "summary": summary,
+        },
+        pack_id=pack_id,
     )
 
 
@@ -223,14 +224,12 @@ def _message_text(response: Any) -> str:
     return str(content)
 
 
-def invoke_judge_model(model: Any, prompt: str) -> str:
+def invoke_judge_model(model: Any, prompt: str, *, pack_id: Optional[str] = None) -> str:
     """Call a LangChain chat model once and return its text content."""
     from langchain_core.messages import HumanMessage, SystemMessage
+    from yarvelle_core.resources.loader import get_resource_loader
 
-    system = (
-        "You score answers for an orchestration eval harness. "
-        "Return only valid JSON with keys score, verdict, reasons, evidence_quotes."
-    )
+    system = get_resource_loader().render_template("orch_eval_judge_system", {}, pack_id=pack_id)
     response = model.invoke(
         [SystemMessage(content=system), HumanMessage(content=prompt)]
     )

@@ -111,8 +111,10 @@ DEFAULT_ROUTING_HINTS = [
 def compose_tier1_classifier_prompt(
     hints: Optional[Sequence[RoutingHints]] = None,
     product_name: str = "Yarvelle Core",
+    *,
+    pack_id: Optional[str] = None,
 ) -> str:
-    """Composes the Tier-1 Domain Classifier prompt dynamically from RoutingHints."""
+    """Composes the Tier-1 Domain Classifier prompt dynamically from RoutingHints via Handlebars."""
     active_hints = list(hints) if hints is not None else DEFAULT_ROUTING_HINTS
     domains = [h.domain for h in active_hints]
     domains_quoted = ", ".join(f"'{d}'" for d in domains)
@@ -127,17 +129,15 @@ def compose_tier1_classifier_prompt(
 
     domains_text = "\n\n".join(domain_blocks)
 
-    return (
-        f"You are the {product_name} Tier-1 Intent and Domain Classifier.\n"
-        "Your objective is to analyze the user inquiry and conversation context, then classify it into "
-        "exactly one primary domain and an appropriate dot-notated subcategory.\n\n"
-        "## Domains:\n"
-        f"{domains_text}\n\n"
-        "## Output Instructions:\n"
-        f"- Set 'domain' to one of: {domains_quoted}.\n"
-        "- Set 'category' to a dot-notated category matching the user's inquiry (e.g., 'operations.tasks', 'analytics.metrics').\n"
-        "- Set 'reasoning' to a concise rationale explaining why the query belongs in this domain and category.\n"
-        "Never attempt to answer domain questions directly; classify strictly for downstream specialist routing."
+    return get_resource_loader().render_template(
+        "tier1_domain_classifier",
+        {
+            "product_name": product_name,
+            "domains_text": domains_text,
+            "domains_quoted": domains_quoted,
+            "domains": domains,
+        },
+        pack_id=pack_id,
     )
 
 
@@ -170,7 +170,7 @@ class OrchestratorDecision(BaseModel):
     )
     required_docs: List[str] = Field(
         default_factory=list,
-        description="Specific reference doc filenames (e.g. ['symptom_log_template.md', 'checklist.md']) needed by the specialist to address the user request.",
+        description="Specific reference doc filenames (e.g. ['activity_log_template.md', 'checklist.md']) needed by the specialist to address the user request.",
     )
 
 

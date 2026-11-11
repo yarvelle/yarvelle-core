@@ -153,22 +153,17 @@ async def run_peer_critiques(
             and all(is_same_domain(cleaned_scopes[0], s) for s in cleaned_scopes[1:])
         )
         is_cross_domain = not is_same_panel
-        system_prompt = (
-            "You are a deliberation moderator analyzing specialist proposals using "
-            "the Disagree-or-Commit peer review protocol.\n"
-            "Generate a JSON array of PeerCritique objects reviewing all peer interactions.\n"
-            "Requirements:\n"
-            "- Stances: 'endorse', 'complement', 'amend', 'conflict'.\n"
-            "- Issue types: 'resource_overbudget', 'contraindication', 'dependency_order', 'synergy', 'risk_exposure'.\n"
-            "- reviewer_agent_id and target_agent_id must be different (no self-critique).\n"
-            "- If stance is 'endorse', critique MUST contain substantive supporting rationale (no bare agreement).\n"
-            "- If stance is 'amend' or 'conflict', critique and proposed_resolution MUST be non-empty."
+        ctx = dict(context or {})
+        system_prompt = get_resource_loader().render_template(
+            "deliberation_critique",
+            {
+                "is_batched": True,
+                "is_cross_domain": is_cross_domain,
+                "round_num": round_num,
+                "pack_instructions": str(ctx.get("pack_instructions") or "").strip(),
+            },
+            pack_id=ctx.get("pack_id"),
         )
-        if is_cross_domain:
-            system_prompt += (
-                "\n- Cross-domain interactions may reference ONLY exported typed claims and shared constraints. "
-                "Free-text summaries and recommendations are withheld across domain boundaries."
-            )
 
         formatted_props = []
         for p in prop_list:
@@ -192,7 +187,6 @@ async def run_peer_critiques(
             ),
         ]
 
-        ctx = dict(context or {})
         moderator_scope = ctx.get("scope", "moderator")
         moderator_actor = ctx.get("moderator_id", "deliberation_moderator")
         if moderator_scope:
@@ -312,16 +306,15 @@ async def run_peer_critiques(
                 if not peers:
                     continue
 
-                system_prompt = (
-                    f"You are specialist agent '{reviewer.agent_id}' conducting peer review in Round {round_num}.\n"
-                    "Evaluate peer proposals under Disagree-or-Commit:\n"
-                    "- Stances: 'endorse', 'complement', 'amend', 'conflict'.\n"
-                    "- Issue types: 'resource_overbudget', 'contraindication', 'dependency_order', 'synergy', 'risk_exposure'.\n"
-                    "- Endorsements require substantive supporting points (bare 'agree' is rejected).\n"
-                    "- Amendments/Conflicts require non-empty critique and proposed_resolution.\n"
-                    "- When reviewing cross-domain peers, critique ONLY exported typed claims and shared constraints; "
-                    "free-text proposals and recommendations are withheld across domain boundaries (ADR 0001 §2.3).\n"
-                    "Output a JSON array of PeerCritique objects."
+                system_prompt = get_resource_loader().render_template(
+                    "deliberation_critique",
+                    {
+                        "is_batched": False,
+                        "reviewer_agent_id": reviewer.agent_id,
+                        "round_num": round_num,
+                        "pack_instructions": str(ctx.get("pack_instructions") or "").strip(),
+                    },
+                    pack_id=ctx.get("pack_id"),
                 )
                 formatted_peer_blocks = []
                 for p in peers:

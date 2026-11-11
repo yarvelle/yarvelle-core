@@ -34,9 +34,14 @@ class ManifestValidationError(ConnectorError, ValueError):
     """Raised when a connector manifest fails schema validation."""
 
 
+class ConnectorNotConfiguredError(ConnectorError):
+    """Raised when a tool requires an external connector or MCP client that is not configured or attached."""
+
+
 __all__ = [
     "AuthExpiredError",
     "ConnectorError",
+    "ConnectorNotConfiguredError",
     "EgressBlockedError",
     "ManifestValidationError",
 ]

@@ -13,25 +13,6 @@
 
 from __future__ import annotations
 
-import sys as _sys
-
-# Register 'connectors' top-level alias pointing to yarvelle_core.connectors
-_sys.modules.setdefault("connectors", _sys.modules[__name__])
-
-from yarvelle_core.connectors import base as _base
-from yarvelle_core.connectors import errors as _errors
-from yarvelle_core.connectors import http as _http
-from yarvelle_core.connectors import manifest as _manifest
-from yarvelle_core.connectors import starters as _starters
-from yarvelle_core.connectors import loader as _loader
-
-_sys.modules.setdefault("connectors.base", _base)
-_sys.modules.setdefault("connectors.errors", _errors)
-_sys.modules.setdefault("connectors.http", _http)
-_sys.modules.setdefault("connectors.manifest", _manifest)
-_sys.modules.setdefault("connectors.starters", _starters)
-_sys.modules.setdefault("connectors.loader", _loader)
-
 from yarvelle_core.connectors.base import (
     Connector,
     NormalisedRecord,
@@ -43,6 +24,7 @@ from yarvelle_core.connectors.base import (
 from yarvelle_core.connectors.errors import (
     AuthExpiredError,
     ConnectorError,
+    ConnectorNotConfiguredError,
     EgressBlockedError,
     ManifestValidationError,
 )
@@ -92,6 +74,7 @@ __all__ = [
     "AuthExpiredError",
     "Connector",
     "ConnectorError",
+    "ConnectorNotConfiguredError",
     "ConnectorManifest",
     "ConnectorRegistry",
     "DataFlowSpec",

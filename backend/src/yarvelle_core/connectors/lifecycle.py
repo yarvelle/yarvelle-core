@@ -53,7 +53,6 @@ from yarvelle_core.db.models import (
     utc_now,
 )
 from yarvelle_core.tools.web_search import DEFAULT_ALLOWED_SEARCH_HOSTS
-import connectors
 from yarvelle_core.connectors.manifest import ConnectorManifest
 
 UNDER_13_MONTHS: int = 13 * 12  # 156 months
@@ -86,7 +85,7 @@ _FALLBACK_STARTER_MANIFESTS: List[Dict[str, Any]] = [
         "name": "Google Calendar",
         "description": "Syncs busy blocks, suggests conflict-free appointment slots, and creates sanitized appointment events.",
         "categories": ["scheduling", "calendar"],
-        "entrypoint": "connectors.starters.calendar:GoogleCalendarConnector",
+        "entrypoint": "yarvelle_core.connectors.starters.calendar:GoogleCalendarConnector",
         "data_flows": {
             "allowed_hosts": ["www.googleapis.com", "oauth2.googleapis.com", "accounts.google.com"],
             "allowed_schemes": ["https"],
@@ -618,7 +617,7 @@ async def get_profile_data_flows(
     - `profile_id`: Care profile identifier
     - `model_provider`: Active LLM provider name, host, `base_url`, `is_local`, and local-default policy
     - `search_provider`: Built-in `web_search` provider (`searxng` / `brave`), allowlisted hosts,
-      and outbound PHI query sanitiser status (`enabled: True`)
+      and outbound sensitive-query sanitiser status (`enabled: True`)
     - `connections`: List of profile connections with their `connector_id`, `status`, consented
       `categories`, `allowed_hosts`, `purpose`, `terms_version`, and `last_sync_at`.
     """
@@ -663,8 +662,8 @@ async def get_profile_data_flows(
     search_provider_info: Dict[str, Any] = {
         "provider": search_provider_name,
         "allowed_hosts": list(DEFAULT_ALLOWED_SEARCH_HOSTS),
-        "phi_sanitiser_enabled": True,
-        "outbound_phi_sanitiser": {
+        "sensitive_sanitiser_enabled": True,
+        "outbound_query_sanitiser": {
             "enabled": True,
             "mode": "fail_closed",
         },

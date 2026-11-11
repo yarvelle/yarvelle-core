@@ -67,18 +67,13 @@ from yarvelle_core.schemas.orchestration import (
     TurnTaskRecord,
 )
 
+from yarvelle_core.resources.loader import get_resource_loader
+
 logger = logging.getLogger(__name__)
 
 MAIN_AGENT_ID = "main-agent"
 
-MAIN_AGENT_PROMPT = (
-    "You coordinate a team of specialist agents. Answer directly when no "
-    "specialist is needed. Otherwise hand each part of the request to the best "
-    "matching agent with the task tool, then combine their answers into one "
-    "reply. Use only the listed agents. If an agent fails, times out or stops "
-    "early, say in the reply which part is missing. Refer to agents by their "
-    "titles, never by their ids."
-)
+MAIN_AGENT_PROMPT = get_resource_loader().render_template("main_agent_coordinator")
 
 _TERMINAL_EVENTS = {
     "task.completed": "completed",
@@ -116,6 +111,8 @@ def compose_main_prompt(
     base: Optional[str] = None,
     synthesis: Optional[SynthesisSpec] = None,
     delegation: Optional[DelegationSpec] = None,
+    *,
+    pack_id: Optional[str] = None,
 ) -> str:
     """Main agent system prompt: the base prompt plus the pack's delegation and synthesis instructions.
 
@@ -123,16 +120,15 @@ def compose_main_prompt(
     own heading, then the guidance on composing the reply. Empty sections are
     left out, so a pack without either gets the base prompt unchanged.
     """
-    prompt = base or MAIN_AGENT_PROMPT
-    sections = (
-        ("When to hand work to specialists:", delegation.instructions if delegation is not None else ""),
-        ("How to compose the reply:", synthesis.instructions if synthesis is not None else ""),
+    return get_resource_loader().render_template(
+        "main_agent_coordinator",
+        {
+            "base_prompt": base or "",
+            "delegation_instructions": (delegation.instructions if delegation is not None else "").strip(),
+            "synthesis_instructions": (synthesis.instructions if synthesis is not None else "").strip(),
+        },
+        pack_id=pack_id,
     )
-    for heading, text in sections:
-        text = (text or "").strip()
-        if text:
-            prompt = f"{prompt}\n\n{heading}\n{text}"
-    return prompt
 
 
 def build_provenance(

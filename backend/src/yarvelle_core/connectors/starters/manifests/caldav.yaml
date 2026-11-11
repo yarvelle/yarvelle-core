@@ -20,7 +20,7 @@ description: Standards-based CalDAV calendar connector for iCloud, Fastmail, and
 categories:
   - scheduling
   - calendar
-entrypoint: connectors.starters.calendar:CalDavConnector
+entrypoint: yarvelle_core.connectors.starters.calendar:CalDavConnector
 data_flows:
   allowed_hosts:
     - caldav.icloud.com
@@ -47,7 +47,7 @@ auth:
   scopes: []
 tools:
   - name: calendar_suggest_slots
-    description: Suggests conflict-free appointment slots during clinic hours (09:00-17:00).
+    description: Suggests conflict-free appointment slots during working hours (09:00-17:00).
     risk_class: read_only
   - name: calendar_create_event
     description: Creates a sanitized external calendar event for a confirmed appointment.

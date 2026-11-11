@@ -232,6 +232,74 @@ class ResourceLoader:
                 f"Provided parameters: {list(kwargs.keys())}"
             ) from err
 
+    def render_template(
+        self,
+        template_name: str,
+        context: Optional[Dict[str, Any]] = None,
+        *,
+        pack_id: Optional[str] = None,
+        custom_dir: Optional[Path] = None,
+    ) -> str:
+        """Renders a Handlebars prompt template with optional pack-level override resolution.
+
+        When ``pack_id`` is registered on this loader, searches the pack's resource
+        root (``resources/prompts/templates/<name>.hbs``, ``prompts/templates/<name>.hbs``,
+        and ``resources/templates/<name>.hbs``) with full ``PackResourceResolver`` containment
+        checks before falling back to core's ``resources/prompts/templates/``.
+        """
+        from yarvelle_core.templates.engine import TemplateEngine, get_template_engine
+
+        ctx: Dict[str, Any] = dict(context or {})
+        clean_name = str(template_name or "").strip()
+        if not clean_name or ".." in clean_name or "/" in clean_name or "\\" in clean_name:
+            raise ValueError(f"Invalid template name: {template_name!r}")
+
+        stem = clean_name
+        for suffix in (".hbs", ".handlebars"):
+            if stem.endswith(suffix):
+                stem = stem[: -len(suffix)]
+                break
+
+        default_templates_dir = (Path(__file__).parent / "prompts" / "templates").resolve()
+        active_templates_dir = (self.resources_dir / "prompts" / "templates").resolve()
+        engine = (
+            get_template_engine()
+            if active_templates_dir == default_templates_dir
+            else TemplateEngine(active_templates_dir)
+        )
+
+        if custom_dir is not None:
+            return engine.render(stem, ctx, custom_dir=custom_dir)
+
+        if pack_id:
+            resolver = self._pack_resolvers.get(pack_id)
+            if resolver is not None:
+                for rel_dir in (
+                    "resources/prompts/templates",
+                    "prompts/templates",
+                    "resources/templates",
+                ):
+                    for ext in (".hbs", ".handlebars"):
+                        candidate = f"{rel_dir}/{stem}{ext}"
+                        try:
+                            resolved_path = resolver.resolve_path(candidate)
+                        except PackResourceError:
+                            continue
+                        if resolved_path.is_file():
+                            size = resolved_path.stat().st_size
+                            if size > resolver.max_bytes:
+                                raise PackResourceError(
+                                    f"Pack template '{candidate}' exceeds max size "
+                                    f"{resolver.max_bytes} bytes (got {size})"
+                                )
+                            return engine.render(
+                                resolved_path.name,
+                                ctx,
+                                custom_dir=resolved_path.parent,
+                            )
+
+        return engine.render(stem, ctx)
+
     def get_errors(self) -> Dict[str, Any]:
         """Loads and returns error dictionary from errors.yaml."""
         return self.load_yaml("errors.yaml")
@@ -397,48 +465,39 @@ class ResourceLoader:
     # =========================================================================
 
     def _resolve_building_blocks(self) -> Dict[str, str]:
-        """Resolves building blocks by substituting <TAG> references in topological order."""
+        """Resolves building blocks by substituting <TAG> references until fixed-point convergence."""
         raw = self.get_refusal_patterns()
         blocks = dict(raw.get("building_blocks", {}))
 
-        # Handle list-to-pipe-joined string for common conditions
-        cond_list = blocks.get("common_conditions_list", [])
-        if isinstance(cond_list, list):
-            common_conditions = "|".join(cond_list)
-        else:
-            common_conditions = str(cond_list)
-
-        resolved: Dict[str, str] = {
-            "COMMON_CONDITIONS": common_conditions,
-        }
-
-        # Resolution dependency order
-        keys_order = [
-            "single_num",
-            "fraction_or_num",
-            "numeric_quantity",
-            "provider_role",
-            "disclaimer_med_target",
-            "all_cessation_drugs",
-            "all_kinships",
-            "kinship_modifier",
-            "caregiver_recipient",
-            "dosing_recipient",
-            "family_possessive_determiners",
-            "diagnostic_subjects",
-            "confirm_subjects",
-            "subject_qualifier",
-            "dosing_units",
-            "condition_tail",
-        ]
-
-        for k in keys_order:
-            val = blocks.get(k, "")
-            if not isinstance(val, str):
+        resolved: Dict[str, str] = {}
+        for key, raw_val in blocks.items():
+            tag_key = str(key).strip().upper()
+            if not tag_key:
                 continue
-            for tag_name, tag_val in resolved.items():
-                val = val.replace(f"<{tag_name}>", tag_val)
-            resolved[k.upper()] = val
+            if isinstance(raw_val, list):
+                joined = "|".join(str(item) for item in raw_val)
+                resolved[tag_key] = joined
+                if tag_key.endswith("_LIST") and len(tag_key) > 5:
+                    resolved[tag_key[:-5]] = joined
+            elif isinstance(raw_val, str):
+                resolved[tag_key] = raw_val
+
+        max_passes = max(len(resolved), 1)
+        for _ in range(max_passes):
+            changed = False
+            for tag_key, current_val in list(resolved.items()):
+                updated_val = current_val
+                for ref_name, ref_val in resolved.items():
+                    if ref_name == tag_key:
+                        continue
+                    placeholder = f"<{ref_name}>"
+                    if placeholder in updated_val:
+                        updated_val = updated_val.replace(placeholder, ref_val)
+                if updated_val != current_val:
+                    resolved[tag_key] = updated_val
+                    changed = True
+            if not changed:
+                break
 
         return resolved
 
@@ -625,7 +684,7 @@ class ResourceLoader:
         if not pool:
             pool = list(s_data.get("default_chips", [])) or [
                 "Can you explain this in simpler terms?",
-                "What questions should I ask my healthcare provider?",
+                "What next steps should I consider?",
                 "Help me save a note summarizing these points.",
             ]
 

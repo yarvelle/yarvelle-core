@@ -16,11 +16,11 @@
 id: google-calendar
 version: 0.1.0
 name: Google Calendar
-description: Syncs busy blocks, suggests conflict-free clinic appointment slots, and creates sanitized appointment events.
+description: Syncs busy blocks, suggests conflict-free appointment slots, and creates sanitized scheduled events.
 categories:
   - scheduling
   - calendar
-entrypoint: connectors.starters.calendar:GoogleCalendarConnector
+entrypoint: yarvelle_core.connectors.starters.calendar:GoogleCalendarConnector
 data_flows:
   allowed_hosts:
     - www.googleapis.com
@@ -46,12 +46,12 @@ auth:
     - scope: https://www.googleapis.com/auth/calendar.readonly
       description: Read calendar events and free/busy availability blocks
     - scope: https://www.googleapis.com/auth/calendar.events
-      description: Create sanitized medical appointment calendar events upon user approval
+      description: Create sanitized scheduled calendar events upon user approval
   authorization_url: https://accounts.google.com/o/oauth2/v2/auth
   token_url: https://oauth2.googleapis.com/token
 tools:
   - name: calendar_suggest_slots
-    description: Suggests conflict-free appointment slots during clinic hours (09:00-17:00).
+    description: Suggests conflict-free appointment slots during working hours (09:00-17:00).
     risk_class: read_only
   - name: calendar_create_event
     description: Creates a sanitized external calendar event for a confirmed appointment.

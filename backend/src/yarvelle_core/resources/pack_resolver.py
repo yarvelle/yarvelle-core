@@ -25,9 +25,13 @@ from typing import Any, Dict, FrozenSet, Iterable, Optional, Set, Union
 
 import yaml
 
-ALLOWED_RESOURCE_EXTENSIONS: FrozenSet[str] = frozenset({".yaml", ".yml", ".json", ".md", ".txt"})
+ALLOWED_RESOURCE_EXTENSIONS: FrozenSet[str] = frozenset(
+    {".yaml", ".yml", ".json", ".md", ".txt", ".hbs", ".handlebars"}
+)
 DEFAULT_MAX_RESOURCE_BYTES: int = 1_048_576  # 1 MiB
-DEFAULT_ALLOWED_PREFIXES: FrozenSet[str] = frozenset({"resources", "workflows", "agents", "skills", "schemas", "connectors"})
+DEFAULT_ALLOWED_PREFIXES: FrozenSet[str] = frozenset(
+    {"resources", "prompts", "workflows", "agents", "skills", "schemas", "connectors"}
+)
 
 
 class PackResourceError(PermissionError):

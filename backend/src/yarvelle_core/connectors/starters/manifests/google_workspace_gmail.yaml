@@ -16,13 +16,13 @@
 id: google-workspace-gmail
 version: 0.1.0
 name: Google Workspace Gmail (Curated Remote MCP)
-description: Curated remote HTTPS MCP bridge for label-filtered Gmail appointment confirmations, school notices, and irreversible approved email dispatch.
+description: Curated remote HTTPS MCP bridge for label-filtered Gmail messages, notifications, and irreversible approved email dispatch.
 kind: mcp
 mcp_endpoint: https://workspace-mcp.spectrayan.com/mcp
 categories:
   - email
-  - appointments
-  - school
+  - scheduling
+  - notifications
 data_flows:
   allowed_hosts:
     - workspace-mcp.spectrayan.com
