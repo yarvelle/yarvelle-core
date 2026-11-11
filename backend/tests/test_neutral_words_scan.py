@@ -11,8 +11,8 @@
 
 """Neutral Words Scan Test for Yarvelle Core Modules.
 
-Verifies that domain-specific health, finance, and education terms do not leak
-into domain-neutral core runtime files.
+Verifies that domain-specific health/clinical/PHI, finance, and education terms
+do not leak into domain-neutral core runtime files.
 """
 
 from __future__ import annotations
@@ -20,7 +20,6 @@ from __future__ import annotations
 from pathlib import Path
 import re
 from typing import List, Tuple
-import pytest
 
 import yarvelle_core
 
@@ -38,56 +37,23 @@ DISALLOWED_TERMS = [
     r"\bplaid\b",
     r"\bhomework\b",
     r"\bgradebook\b",
+    r"\bphi\b",
+    r"\bmrn\b",
+    r"\bhealthcare\b",
+    r"\bdosing_units\b",
+    r"\ball_cessation_drugs\b",
 ]
 
 PATTERN = re.compile("|".join(DISALLOWED_TERMS), re.IGNORECASE)
 
-# Explicitly audited allowlist for protocol and database backward compatibility
+# Historical Alembic migration revisions only; zero runtime source files are allowlisted.
 ALLOWLIST = {
-    # HKDF backward compatibility test check for legacy 'health' DEK path
-    "vault/dek.py": {"health"},
-    # Historical Alembic migrations preserving pre-split schema baseline
     "db/migrations/versions/0001_baseline_schema.py": {"clinical"},
     "db/migrations/versions/0005_clinical_domain_records.py": {"clinical", "clinic"},
     "db/migrations/versions/0006_preventive_and_school_forms.py": {"clinical"},
     "db/migrations/versions/0009_companion_and_handover.py": {"clinical"},
     "db/migrations/versions/0011_scopes.py": {"clinical"},
-    "db/session.py": {"clinical"},
-    # Dual-write backward compatibility for legacy profile access fields (PROJECT.md R2)
-    "db/models.py": {"clinical"},
-    "schemas/profiles.py": {"clinical"},
-    "scope/adapter.py": {"clinical"},
-    "api/profiles.py": {"clinical"},
-    "api/connections.py": {"clinical"},
-    "api/reminders.py": {"clinical"},
-    "api/email_drafts.py": {"clinical"},
-    "api/attachments.py": {"clinical"},
-    "api/routines.py": {"clinical"},
-    "api/chat.py": {"clinical"},
-    "api/skills.py": {"clinical"},
-    "schemas/chat.py": {"clinical"},
-    "schemas/manifest.py": {"clinical"},
-    "constants/agents.py": {"clinical"},
-    "engine/service.py": {"clinical"},
-    "engine/runner.py": {"clinical"},
-    "engine/safety_policy.py": {"clinical"},
-    "engine/job_runner.py": {"clinical"},
-    "engine/tool_registry.py": {"clinical"},
-    "loaders/agent_loader.py": {"clinical"},
-    "workflows/nodes/input_guardrail_node.py": {"clinical"},
-    "workflows/nodes/agent_execution_node.py": {"clinical"},
-    "workflows/state.py": {"clinical", "diagnosis"},
-    # Transitional tool & search modules before Step C3 health pack split (M4)
-    "search/chunker.py": {"clinical"},
-    "search/adapters/spector.py": {"clinical"},
-    "search/adapters/sqlite.py": {"clinical"},
-    "search/__init__.py": {"clinical"},
-    "tools/registry.py": {"clinical"},
-    "tools/web_search.py": {"clinical"},
-    "platform/email_drafts.py": {"clinical"},
-    "connectors/base.py": {"patient", "clinical"},
-    "connectors/manifest.py": {"clinical"},
-    "connectors/starters/calendar.py": {"clinic", "clinical", "doctor"},
+    "db/migrations/versions/0014_neutralize_profile_columns.py": {"clinical"},
 }
 
 
@@ -111,7 +77,7 @@ def test_yarvelle_core_neutral_words():
     violations: List[Tuple[str, int, str, List[str]]] = []
 
     for py_file in sorted(core_root.rglob("*.py")):
-        rel_path = str(py_file.relative_to(core_root))
+        rel_path = py_file.relative_to(core_root).as_posix()
         # Skip conformance fixtures since they intentionally model domain test doubles
         if "conformance/fixtures" in rel_path:
             continue
@@ -124,13 +90,17 @@ def test_yarvelle_core_neutral_words():
                 continue
 
             tokenized = split_tokens(line)
-            matches = [m.group(0) for m in PATTERN.finditer(tokenized)]
+            matches = sorted(
+                {
+                    m.group(0).lower()
+                    for m in (*PATTERN.finditer(tokenized), *PATTERN.finditer(line))
+                }
+            )
             if matches:
-                # Check allowlist
                 allowed = False
                 for allow_path, terms in ALLOWLIST.items():
-                    if rel_path.endswith(allow_path):
-                        if all(m.lower() in terms for m in matches):
+                    if rel_path == allow_path:
+                        if all(m in terms for m in matches):
                             allowed = True
                             break
                 if not allowed:
