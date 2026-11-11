@@ -16,16 +16,18 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from yarvelle_core.api.deps import get_current_user, resolve_owner_user_id
+from yarvelle_core.api.errors import ProblemDetailsRoute
 from yarvelle_core.auth.adapters.disabled_adapter import DEFAULT_STEWARD_USER
 from yarvelle_core.auth.ports import UserProfile
 from yarvelle_core.config import settings
 from yarvelle_core.db.models import Profile, ProfileAccess, ProfileUiPreference, ScopeGrant, utc_now
 from yarvelle_core.db.session import get_db
+from yarvelle_core.errors.base import YarvelleError
 from yarvelle_core.schemas.profiles import (
     AudienceBand,
     ProfileUiContextResponse,
@@ -34,7 +36,7 @@ from yarvelle_core.schemas.profiles import (
 )
 from yarvelle_core.scope.context import DEFAULT_HEALTH_GRANTED_SCOPES
 
-router = APIRouter()
+router = APIRouter(route_class=ProblemDetailsRoute)
 
 
 def _compute_audience(profile: Profile) -> AudienceBand:
@@ -82,8 +84,9 @@ async def _resolve_target_profile(
         res = await db.execute(select(Profile).where(Profile.id == profile_id))
         profile = res.scalar_one_or_none()
         if profile is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+            raise YarvelleError(
+                "YRV-500-002",
+                context={"profile_id": profile_id},
                 detail=f"Profile '{profile_id}' not found",
             )
         # Validate authorization if user is not steward/admin
@@ -97,8 +100,9 @@ async def _resolve_target_profile(
                     )
                 )
                 if access_res.scalar_one_or_none() is None:
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
+                    raise YarvelleError(
+                        "YRV-300-007",
+                        context={"profile_id": profile_id},
                         detail="Access to profile denied",
                     )
         return profile
@@ -132,8 +136,8 @@ async def _resolve_target_profile(
         profile = any_res.scalars().first()
 
     if profile is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+        raise YarvelleError(
+            "YRV-500-002",
             detail="No profile found for current user",
         )
     return profile

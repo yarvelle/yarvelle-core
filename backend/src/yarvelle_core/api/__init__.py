@@ -11,6 +11,20 @@
 
 """Re-export API package components."""
 
+from yarvelle_core.api.app import create_app
+from yarvelle_core.api.errors import (
+    PROBLEM_JSON_MEDIA_TYPE,
+    ProblemDetailsRoute,
+    register_error_handlers,
+    yarvelle_error_handler,
+)
 from yarvelle_core.api.router import api_router
 
-__all__ = ["api_router"]
+__all__ = [
+    "PROBLEM_JSON_MEDIA_TYPE",
+    "ProblemDetailsRoute",
+    "api_router",
+    "create_app",
+    "register_error_handlers",
+    "yarvelle_error_handler",
+]

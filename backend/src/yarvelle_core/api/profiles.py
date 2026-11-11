@@ -20,13 +20,14 @@ import shutil
 from typing import Any, Dict, List, Literal, Optional
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from pydantic import Field
 from sqlalchemy import delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from yarvelle_core.api.deps import get_current_user, resolve_owner_user_id
+from yarvelle_core.api.errors import ProblemDetailsRoute
 from yarvelle_core.auth.adapters.disabled_adapter import DEFAULT_STEWARD_USER
 from yarvelle_core.auth.ports import UserProfile
 from yarvelle_core.config import settings
@@ -40,6 +41,7 @@ from yarvelle_core.db.models import (
 )
 from yarvelle_core.db.base import Base
 from yarvelle_core.db.session import get_db
+from yarvelle_core.errors import YarvelleError
 from yarvelle_core.i18n.locale import (
     DEFAULT_LOCALE,
     canonicalize_locale,
@@ -106,7 +108,7 @@ class ProfileDetailResponse(_BaseProfileDetailResponse):
 
 logger = get_logger("yarvelle_core.api.profiles")
 
-router = APIRouter()
+router = APIRouter(route_class=ProblemDetailsRoute)
 
 
 async def get_user_profile_access(
@@ -295,8 +297,9 @@ async def create_profile(
         try:
             resolved_locale = canonicalize_locale(payload.preferred_locale, strict=True)
         except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            raise YarvelleError(
+                "YRV-100-009",
+                cause=exc,
                 detail=str(exc),
             ) from exc
 
@@ -400,13 +403,13 @@ async def accept_viewer_invite(
     invite = res.scalar_one_or_none()
 
     if invite is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+        raise YarvelleError(
+            "YRV-500-011",
             detail="Invalid invitation code.",
         )
     if invite.accepted_at is not None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        raise YarvelleError(
+            "YRV-100-005",
             detail="Invitation has already been accepted.",
         )
     now = datetime.now(timezone.utc)
@@ -414,8 +417,8 @@ async def accept_viewer_invite(
     if exp.tzinfo is None:
         exp = exp.replace(tzinfo=timezone.utc)
     if exp < now:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        raise YarvelleError(
+            "YRV-100-005",
             detail="Invitation code has expired.",
         )
 
@@ -424,16 +427,17 @@ async def accept_viewer_invite(
     p_res = await db.execute(p_stmt)
     profile = p_res.scalar_one_or_none()
     if profile is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+        raise YarvelleError(
+            "YRV-500-002",
+            context={"profile_id": invite.profile_id},
             detail="Target profile no longer exists.",
         )
 
     owner_id = resolve_owner_user_id(user)
     effective_user_id = owner_id or user.id
     if profile.user_id is not None and profile.user_id == effective_user_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        raise YarvelleError(
+            "YRV-100-005",
             detail="You are already the owner of this profile.",
         )
 
@@ -589,15 +593,13 @@ async def list_viewer_invites(
         profile = res.scalar_one_or_none()
 
     if profile is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Profile '{profile_id}' not found.",
-        )
+        raise YarvelleError("YRV-500-002", context={"profile_id": profile_id})
 
     access = await get_user_profile_access(profile, user, db)
     if access != "manage":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise YarvelleError(
+            "YRV-300-007",
+            context={"profile_id": profile.id},
             detail="Forbidden: management privileges required to list invitations.",
         )
 
@@ -649,15 +651,13 @@ async def create_viewer_invite(
         profile = res.scalar_one_or_none()
 
     if profile is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Profile '{profile_id}' not found.",
-        )
+        raise YarvelleError("YRV-500-002", context={"profile_id": profile_id})
 
     access = await get_user_profile_access(profile, user, db)
     if access != "manage":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise YarvelleError(
+            "YRV-300-007",
+            context={"profile_id": profile.id},
             detail="Forbidden: management privileges required to create invitations.",
         )
 
@@ -726,15 +726,13 @@ async def revoke_viewer_invite(
         profile = res.scalar_one_or_none()
 
     if profile is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Profile '{profile_id}' not found.",
-        )
+        raise YarvelleError("YRV-500-002", context={"profile_id": profile_id})
 
     access = await get_user_profile_access(profile, user, db)
     if access != "manage":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise YarvelleError(
+            "YRV-300-007",
+            context={"profile_id": profile.id},
             detail="Forbidden: management privileges required to revoke invitations.",
         )
 
@@ -745,9 +743,9 @@ async def revoke_viewer_invite(
     res = await db.execute(stmt)
     invite = res.scalar_one_or_none()
     if invite is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Invitation not found.",
+        raise YarvelleError(
+            "YRV-500-011",
+            context={"invite_id": invite_id, "profile_id": profile.id},
         )
 
     await db.delete(invite)
@@ -783,15 +781,13 @@ async def get_profile(
         profile = res.scalar_one_or_none()
 
     if profile is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Profile '{profile_id}' not found.",
-        )
+        raise YarvelleError("YRV-500-002", context={"profile_id": profile_id})
 
     access_level = await get_user_profile_access(profile, user, db)
     if access_level is None:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise YarvelleError(
+            "YRV-300-007",
+            context={"profile_id": profile.id},
             detail="Access denied: you do not have permission to view this profile.",
         )
 
@@ -875,15 +871,13 @@ async def update_profile(
         profile = res.scalar_one_or_none()
 
     if profile is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Profile '{profile_id}' not found.",
-        )
+        raise YarvelleError("YRV-500-002", context={"profile_id": profile_id})
 
     access_level = await get_user_profile_access(profile, user, db)
     if access_level != "manage":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise YarvelleError(
+            "YRV-300-007",
+            context={"profile_id": profile.id},
             detail="Forbidden: management privileges required to update this profile.",
         )
 
@@ -891,8 +885,9 @@ async def update_profile(
         try:
             profile.preferred_locale = canonicalize_locale(payload.preferred_locale, strict=True)
         except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            raise YarvelleError(
+                "YRV-100-009",
+                cause=exc,
                 detail=str(exc),
             ) from exc
 
@@ -950,25 +945,24 @@ async def delete_profile(
     profile = res.scalar_one_or_none()
 
     if profile is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Profile '{profile_id}' not found.",
-        )
+        raise YarvelleError("YRV-500-002", context={"profile_id": profile_id})
 
     owner_id = resolve_owner_user_id(user)
     is_owner = (profile.user_id is None) if owner_id is None else (profile.user_id == owner_id)
     access_level = await get_user_profile_access(profile, user, db)
 
     if not (is_owner or access_level == "manage"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise YarvelleError(
+            "YRV-300-007",
+            context={"profile_id": profile.id},
             detail="Forbidden: only the account owner or authorized manager can delete this profile.",
         )
 
     # Primary 'Me' profile deletion protection
     if profile.is_primary:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        raise YarvelleError(
+            "YRV-100-005",
+            context={"profile_id": profile.id},
             detail="Cannot delete primary 'Me' profile.",
         )
 
@@ -995,10 +989,12 @@ async def delete_profile(
     except Exception as db_err:
         await db.rollback()
         logger.exception("database_cascade_delete_failed", profile_id=target_id, error=str(db_err))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        raise YarvelleError(
+            "YRV-500-013",
+            cause=db_err,
+            context={"profile_id": target_id},
             detail="Failed to delete profile records; no data was removed.",
-        )
+        ) from db_err
 
     # Phase 2 (post-commit, best effort): CAS and upload directories. The DEK is
     # already gone, so any residual ciphertext is unrecoverable.
@@ -1074,15 +1070,13 @@ async def list_profile_access(
         profile = res.scalar_one_or_none()
 
     if profile is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Profile '{profile_id}' not found.",
-        )
+        raise YarvelleError("YRV-500-002", context={"profile_id": profile_id})
 
     access_level = await get_user_profile_access(profile, user, db)
     if access_level != "manage":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise YarvelleError(
+            "YRV-300-007",
+            context={"profile_id": profile.id},
             detail="Forbidden: management privileges required.",
         )
 
@@ -1122,15 +1116,13 @@ async def grant_profile_access(
         profile = res.scalar_one_or_none()
 
     if profile is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Profile '{profile_id}' not found.",
-        )
+        raise YarvelleError("YRV-500-002", context={"profile_id": profile_id})
 
     access_level = await get_user_profile_access(profile, user, db)
     if access_level != "manage":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise YarvelleError(
+            "YRV-300-007",
+            context={"profile_id": profile.id},
             detail="Forbidden: management privileges required.",
         )
 
@@ -1145,8 +1137,9 @@ async def grant_profile_access(
 
     target_user_id = target_user.id if target_user else payload.user_id
     if not target_user_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+        raise YarvelleError(
+            "YRV-500-003",
+            context={"user_id": payload.user_id or payload.email or ""},
             detail="Target user not found.",
         )
 
@@ -1214,21 +1207,20 @@ async def revoke_profile_access(
         profile = res.scalar_one_or_none()
 
     if profile is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Profile '{profile_id}' not found.",
-        )
+        raise YarvelleError("YRV-500-002", context={"profile_id": profile_id})
 
     access_level = await get_user_profile_access(profile, user, db)
     if access_level != "manage":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise YarvelleError(
+            "YRV-300-007",
+            context={"profile_id": profile.id},
             detail="Forbidden: management privileges required.",
         )
 
     if profile.user_id is not None and target_user_id == profile.user_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        raise YarvelleError(
+            "YRV-100-005",
+            context={"profile_id": profile.id, "user_id": target_user_id},
             detail="Cannot revoke access for profile owner.",
         )
 
@@ -1260,15 +1252,13 @@ async def get_profile_consent(
         profile = res.scalar_one_or_none()
 
     if profile is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Profile '{profile_id}' not found.",
-        )
+        raise YarvelleError("YRV-500-002", context={"profile_id": profile_id})
 
     access_level = await get_user_profile_access(profile, user, db)
     if access_level is None:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise YarvelleError(
+            "YRV-300-007",
+            context={"profile_id": profile.id},
             detail="Access denied.",
         )
 
@@ -1311,15 +1301,13 @@ async def update_profile_consent(
         profile = res.scalar_one_or_none()
 
     if profile is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Profile '{profile_id}' not found.",
-        )
+        raise YarvelleError("YRV-500-002", context={"profile_id": profile_id})
 
     access_level = await get_user_profile_access(profile, user, db)
     if access_level != "manage":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise YarvelleError(
+            "YRV-300-007",
+            context={"profile_id": profile.id},
             detail="Forbidden: management privileges required to update consent.",
         )
 
