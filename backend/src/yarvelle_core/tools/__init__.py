@@ -21,6 +21,13 @@ from yarvelle_core.tools.registry import (
     get_all_tool_definitions,
     get_closed_tool,
 )
+from yarvelle_core.tools.spec_loader import (
+    BoundDeclarativeTool,
+    ToolSpecLoader,
+    ToolSpecValidationError,
+    get_tool_spec_loader,
+    register_pack_tool_manifest,
+)
 from yarvelle_core.tools.extraction_tools import (
     ExtractStructuredDataInput,
     ExtractStructuredDataTool,
@@ -47,6 +54,11 @@ __all__ = [
     "execute_tool",
     "get_all_tool_definitions",
     "get_closed_tool",
+    "BoundDeclarativeTool",
+    "ToolSpecLoader",
+    "ToolSpecValidationError",
+    "get_tool_spec_loader",
+    "register_pack_tool_manifest",
     "ExtractStructuredDataInput",
     "ExtractStructuredDataTool",
     "SanitizePIIInput",
