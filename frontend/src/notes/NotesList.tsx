@@ -53,7 +53,7 @@ export function NotesList({
             className={cn(
               'yc-NotesList-item flex flex-col text-start rounded-lg border p-3 transition-colors duration-fast shadow-1',
               isSelected
-                ? 'border-primary bg-primary-subtle/20'
+                ? 'border-primary bg-primary-soft/20'
                 : 'border-border bg-surface hover:bg-surface-2'
             )}
           >
