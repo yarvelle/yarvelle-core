@@ -28,12 +28,7 @@ metadata:
   version: 0.1.0
   author: Yarvelle Contributor
   tools: []
-  forbidden:
-  - diagnose
-  - prescribe
-  - dose
-  - replace_emergency_care
-  - instruct_stop_medication
+  forbidden: []
   evals: evals/golden.jsonl
 ---
 
@@ -42,10 +37,9 @@ metadata:
 Replace this heading and text with the prompt instructions for your skill. This Markdown content serves as the operational system prompt provided to the model when the skill is active.
 
 ## Intended Use & Safety Disclosures
-Every skill MUST contain these three statements verbatim (the core skill loader checks for them):
-- Not a clinician and not emergency care
-- If this is an emergency, contact local emergency services
-- Do not change medication without the prescribing clinician
+Include any pack-required intended-use and boundary disclosures here (validated by the skill loader when configured by your active domain pack):
+- Informational and organizational assistance only; verify critical decisions against primary sources.
+- Never fabricate facts, identifiers, or external tool completions.
 
 ## Skill Overview & Guidelines
 Describe what your skill accomplishes, when an agent should invoke it, and what domain it addresses (e.g., household planning, document organization, learning support).
@@ -57,7 +51,7 @@ Describe what your skill accomplishes, when an agent should invoke it, and what 
    - `workspace-note`: Writes notes to `workspace/notes/<title>.md`.
    - `skill-docs`: Loads reference documents from `skills/<skill_id>/references/<doc>`.
    Any other tool declared in `yarvelle_core.yaml` will fail runtime validation.
-3. **Mandatory Forbidden Intents**: The core safety policy blocks clinical diagnosis, prescription dosing, emergency care triage diversion, and instructions to stop or alter prescribed medications.
+3. **Pack Forbidden Intents**: When a domain pack configures `SafetyPolicy` rules, declared `forbidden` intents are enforced automatically before and after model execution.
 
 ## References (Optional)
 If your skill uses documentation stored in `references/`, describe available files here and instruct the model to retrieve them using `skill-docs`.

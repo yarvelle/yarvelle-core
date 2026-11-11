@@ -360,9 +360,9 @@ def _resolve_agent_skills(
         if "risk_class" not in explicit_keys:
             agent.risk_class = primary_skill.risk_class
 
-    # Risk class elevation: if any declared skill is clinical_assist, agent is clinical_assist
-    if any(s.risk_class == RiskClass.CLINICAL_ASSIST for s in loaded_skills):
-        agent.risk_class = RiskClass.CLINICAL_ASSIST
+    # Risk class elevation: if any declared skill is assist, agent is assist
+    if any(s.risk_class == RiskClass.ASSIST for s in loaded_skills):
+        agent.risk_class = RiskClass.ASSIST
 
     return effective_tools, loaded_skills
 
@@ -458,7 +458,7 @@ def load_all_agents(
                     max_iterations=agent.max_iterations,
                     is_bundled=is_bundled,
                     isBundled=is_bundled,
-                    clinical_enabled=True,
+                    assist_enabled=True,
                     verified=True,
                     hidden=True if is_system else agent.hidden,
                     persona_file=agent.persona_file,

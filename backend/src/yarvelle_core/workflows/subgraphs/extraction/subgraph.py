@@ -13,7 +13,7 @@
 
 Coordinates:
 - Ingestion of attachments from attachments/
-- Direct PII sanitization (SSN, MRN, phone, address)
+- Direct PII sanitization (SSN, record ID, phone, address)
 - Structured schema extraction into typed Pydantic dossiers
 - Grounding verification of numerical data against raw text
 - AgentState['document_dossiers'] population and verified summary generation

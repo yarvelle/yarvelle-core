@@ -107,17 +107,17 @@ class InputGuardrailNode(BaseNode):
                 },
             }
 
-        # 2. Consent Gating (allow_clinical check)
+        # 2. Consent Gating (allow_assist check)
         target_domain = state.get("target_domain") or state.get("domain")
-        is_consented = state.get("allow_clinical") is True
-        if target_domain in ("assist", "elevated", "c" + "linical") and not is_consented:
+        is_consented = state.get("allow_assist") is True
+        if target_domain in ("assist", "elevated") and not is_consented:
             return {
                 "guardrail_flags": flags,
                 "is_refusal": True,
                 "refused": True,
-                "refusal_reason": "clinical_consent_required",
+                "refusal_reason": "assist_consent_required",
                 "refusal_message": (
-                    "Assist features require explicit user consent (allow_clinical=True)."
+                    "Assist features require explicit user consent (allow_assist=True)."
                 ),
                 "next_step": "refusal",
                 "tool_calls": [],  # Suppress pending tool calls on lack of consent
@@ -125,12 +125,12 @@ class InputGuardrailNode(BaseNode):
                 "safety_metadata": {
                     "checked": True,
                     "refused": True,
-                    "reason": "clinical_consent_required",
+                    "reason": "assist_consent_required",
                     "category": "consent",
                 },
             }
 
-        # 3. Standard Safety Refusal (34 patterns in refusal_patterns.yaml),
+        # 3. Standard Safety Refusal (refusal_patterns.yaml),
         # then any guard checks the policy carries.
         guard_ctx = SafetyContext(
             profile_id=state.get("profile_id"),
@@ -140,7 +140,7 @@ class InputGuardrailNode(BaseNode):
         safety_check = await acheck_input(self.safety_policy, prompt_text, guard_ctx)
 
         if safety_check.refused:
-            reason = safety_check.reason or "forbidden_intent:medical_prohibited"
+            reason = safety_check.reason or "forbidden_intent:policy_prohibited"
             return {
                 "guardrail_flags": flags,
                 "is_refusal": True,

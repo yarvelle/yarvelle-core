@@ -36,6 +36,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from yarvelle_core.resources.loader import get_resource_loader
 from yarvelle_core.schemas.plan import SharedConstraint
 from yarvelle_core.scope.context import ScopeContext, scope_context
 from yarvelle_core.workflows.deliberation.blackboard import BlackboardManager, is_same_domain

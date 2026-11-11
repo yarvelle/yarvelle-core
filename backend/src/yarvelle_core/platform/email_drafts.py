@@ -36,7 +36,7 @@ logger = logging.getLogger("yarvelle_core.platform.email_drafts")
 
 VALID_DRAFT_CATEGORIES = ("appointment", "school", "insurance", "general")
 NO_AUTO_SEND_NOTICE = "Draft saved locally. Yarvelle Core never sends emails automatically in v1."
-NON_CLINICAL_EMAIL_HEADER_NOTE = (
+AUTOMATED_DRAFT_EMAIL_HEADER_NOTE = (
     "Prepared locally by Yarvelle Core as an administrative aid. "
     "Review and verify all details before sending."
 )
@@ -72,7 +72,7 @@ def export_draft_as_eml(draft: EmailDraft) -> str:
         f"Subject: {subject_header}",
         "X-Unsent: 1",
         f"X-Yarvelle Core-Notice: {NO_AUTO_SEND_NOTICE}",
-        f"X-Yarvelle Core-Disclaimer: {NON_CLINICAL_EMAIL_HEADER_NOTE}",
+        f"X-Yarvelle Core-Disclaimer: {AUTOMATED_DRAFT_EMAIL_HEADER_NOTE}",
         "MIME-Version: 1.0",
         'Content-Type: text/plain; charset="utf-8"',
         "Content-Transfer-Encoding: 8bit",
@@ -80,7 +80,7 @@ def export_draft_as_eml(draft: EmailDraft) -> str:
         body_text,
         "",
         "-- ",
-        f"[Note: {NON_CLINICAL_EMAIL_HEADER_NOTE}]",
+        f"[Note: {AUTOMATED_DRAFT_EMAIL_HEADER_NOTE}]",
     ]
     return "\r\n".join(lines) + "\r\n"
 
@@ -281,7 +281,7 @@ async def execute_create_email_draft(args: Dict[str, Any], ctx: Any = None) -> D
 
 
 __all__ = [
-    "NON_CLINICAL_EMAIL_HEADER_NOTE",
+    "AUTOMATED_DRAFT_EMAIL_HEADER_NOTE",
     "NO_AUTO_SEND_NOTICE",
     "VALID_DRAFT_CATEGORIES",
     "build_mailto_uri",

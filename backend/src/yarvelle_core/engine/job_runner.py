@@ -1238,7 +1238,7 @@ async def handle_index_doc_job(
                         "title": note.title or "",
                         "slug": note.slug or "",
                         "type": note.type or "scratchpad",
-                        "source": "clinical_note",
+                        "source": "workspace_note",
                         "doc_type": "note",
                         "created_at": note.created_at.isoformat() if hasattr(note.created_at, "isoformat") else str(note.created_at),
                         "updated_at": note.updated_at.isoformat() if hasattr(note.updated_at, "isoformat") else str(note.updated_at),

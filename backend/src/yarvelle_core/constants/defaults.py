@@ -136,14 +136,8 @@ PHASE_0_TOOLS: FrozenSet[str] = frozenset({
 
 
 # ============================================================================
-# 8. Clinical Safety Classifier Defaults
+# 8. Safety Classifier Defaults
 # ============================================================================
 
 FORBIDDEN_INTENT_PREFIX: str = "forbidden_intent:"
-DEFAULT_FORBIDDEN_INTENTS: Tuple[str, ...] = (
-    "diagnose",
-    "prescribe",
-    "dose",
-    "replace_emergency_care",
-    "instruct_stop_medication",
-)
+DEFAULT_FORBIDDEN_INTENTS: Tuple[str, ...] = ()

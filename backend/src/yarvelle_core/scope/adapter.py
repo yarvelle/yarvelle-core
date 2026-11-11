@@ -48,7 +48,7 @@ class DualWriteAdapter:
         grant_time = access.granted_at
         if access.access_level == "manage":
             targets = [("health.*", "write"), ("health.*", "approve")]
-        elif access.access_level == "view_records" or access.access_level == "view_clinical":
+        elif access.access_level == "view_records":
             targets = [("health.records", "read"), ("health.paperwork", "read")]
         elif access.access_level == "view_paperwork":
             targets = [("health.paperwork", "read")]
@@ -85,13 +85,13 @@ class DualWriteAdapter:
 
     @classmethod
     def sync_profile_consent_to_scope_grants(cls, session: Session, consent: ProfileConsent) -> None:
-        """Translates ProfileConsent allow_clinical toggle into ScopeGrant records."""
+        """Translates ProfileConsent allow_assist toggle into ScopeGrant records."""
         if not consent.profile_id:
             return
 
         from yarvelle_core.db.models import ScopeGrant
 
-        if consent.allow_clinical:
+        if consent.allow_assist:
             stmt = select(ScopeGrant).where(
                 ScopeGrant.profile_id == consent.profile_id,
                 ScopeGrant.user_id.is_(None),

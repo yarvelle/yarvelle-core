@@ -47,10 +47,6 @@ class DocumentChunk:
             self.document_id = self.chunk_id.split("#", 1)[0]
 
 
-# Backward-compatible alias for existing tests and search adapters
-ClinicalChunk = DocumentChunk
-
-
 @runtime_checkable
 class Chunker(Protocol):
     """Protocol defining document chunking and token counting."""
@@ -354,118 +350,8 @@ class StructuralChunker:
         return chunks
 
 
-class ClinicalChunker(StructuralChunker):
-    """Semantic section chunker partitioning structured narratives and records into bounded chunks.
-
-    Attributes:
-        min_tokens: Minimum token threshold for coalescing (default: 500).
-        max_tokens: Maximum token ceiling before chunk subdivision (default: 800).
-        overlap_tokens: Sliding window token overlap between consecutive chunks (default: 100).
-        target_tokens: Target window size for chunking (default: 600 or max_tokens).
-        coalesce_sections: Whether to coalesce adjacent small sections by default (default: False).
-    """
-
-    SECTIONS: Tuple[str, ...] = (
-        "CHIEF COMPLAINT",
-        "REASON FOR VISIT",
-        "REASON FOR ENCOUNTER",
-        "CC",
-        "HISTORY OF PRESENT ILLNESS",
-        "HPI",
-        "PAST MEDICAL HISTORY",
-        "PMH",
-        "PAST SURGICAL HISTORY",
-        "PSH",
-        "CURRENT MEDICATIONS",
-        "MEDICATIONS",
-        "MEDS",
-        "ALLERGIES",
-        "DRUG ALLERGIES",
-        "METRIC SIGNS",
-        "METRICS",
-        "PHYSICAL EXAMINATION",
-        "PHYSICAL EXAM",
-        "PE",
-        "REVIEW OF SYSTEMS",
-        "ROS",
-        "LABORATORY RESULTS",
-        "LABORATORY DATA",
-        "LAB RESULTS",
-        "LABS",
-        "DIAGNOSTIC STUDIES",
-        "IMAGING",
-        "RADIOLOGY",
-        "ASSESSMENT AND PLAN",
-        "ASSESSMENT & PLAN",
-        "ASSESSMENT / PLAN",
-        "ASSESSMENT/PLAN",
-        "ASSESSMENT",
-        "PLAN",
-        "IMPRESSION",
-        "RECOMMENDATIONS",
-        "SUBJECTIVE",
-        "OBJECTIVE",
-        "A/P",
-        "DISCHARGE SUMMARY",
-        "DISCHARGE INSTRUCTIONS",
-        "DISCHARGE",
-        "FOLLOW-UP",
-        "FOLLOW UP",
-    )
-
-    def _split_into_sections(self, text: str) -> List[Tuple[Optional[str], str]]:
-        """Parses structured document into section blocks tagged with normalized section headers."""
-        lines = text.split("\n")
-        section_blocks: List[Tuple[Optional[str], str]] = []
-        current_section: Optional[str] = None
-        curr_lines: List[str] = []
-
-        for line in lines:
-            trimmed = line.strip()
-            upper = trimmed.upper()
-            matched_sec = None
-
-            # Detect Markdown, bold, or colon headers
-            clean_hdr = re.sub(r"^[#*\s]+|[:\-*\s]+$", "", upper).strip()
-
-            for sec in self.SECTIONS:
-                # Check exact match on cleaned header, or startswith with delimiter
-                if clean_hdr == sec:
-                    matched_sec = sec
-                    break
-                if upper.startswith(f"{sec}:") or upper.startswith(f"{sec} -") or upper.startswith(f"{sec}\n"):
-                    matched_sec = sec
-                    break
-                if upper.startswith(f"## {sec}") or upper.startswith(f"### {sec}") or upper.startswith(f"# {sec}"):
-                    matched_sec = sec
-                    break
-                if upper == sec:
-                    matched_sec = sec
-                    break
-
-            if matched_sec:
-                if curr_lines:
-                    block_content = "\n".join(curr_lines).strip()
-                    if block_content:
-                        section_blocks.append((current_section, block_content))
-                    curr_lines = []
-                current_section = matched_sec
-                curr_lines.append(line)
-            else:
-                curr_lines.append(line)
-
-        if curr_lines:
-            block_content = "\n".join(curr_lines).strip()
-            if block_content:
-                section_blocks.append((current_section, block_content))
-
-        return section_blocks
-
-
 __all__ = [
     "Chunker",
     "DocumentChunk",
-    "ClinicalChunk",
     "StructuralChunker",
-    "ClinicalChunker",
 ]

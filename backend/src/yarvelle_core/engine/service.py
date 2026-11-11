@@ -799,7 +799,7 @@ class AgentExecutionService:
         attachments: Optional[List[str]] = None,
         agent_id: Optional[str] = None,
         messages: Optional[List[Union[ChatMessage, BaseMessage, Dict[str, Any]]]] = None,
-        allow_clinical: bool = True,
+        allow_assist: bool = True,
         model: Optional[Any] = None,
         provider: Optional[str] = None,
         model_name: Optional[str] = None,
@@ -843,7 +843,7 @@ class AgentExecutionService:
             else (ws_root / LOGS_DIR / DEFAULT_AUDIT_LOG_FILE)
         )
 
-        # 1. Load agent and verify clinical risk class gating
+        # 1. Load agent and verify risk class gating
         try:
             agent, effective_tools, skills = load_agent(agent_dir, skills_dir)
         except Exception as err:
@@ -861,17 +861,17 @@ class AgentExecutionService:
                 yield refusal
                 return
 
-        if agent.risk_class == RiskClass.CLINICAL_ASSIST and not allow_clinical:
+        if agent.risk_class == RiskClass.ASSIST and not allow_assist:
             err_msg = (
-                f"Agent '{effective_agent_id}' is classified as clinical_assist. "
-                "Execution is forbidden without explicit consent (allow_clinical=True)."
+                f"Agent '{effective_agent_id}' is classified as assist. "
+                "Execution is forbidden without explicit consent (allow_assist=True)."
             )
             await record_audit(
                 AuditEvent(
                     agent_id=agent.id,
                     event="refuse",
                     allowed=False,
-                    reason="forbidden_risk_class:clinical_assist_unauthorized",
+                    reason="forbidden_risk_class:assist_unauthorized",
                     duration_ms=(time.time() - start_time) * 1000,
                 ),
                 log_path=resolved_log_path,
@@ -1013,7 +1013,7 @@ class AgentExecutionService:
             **turn_reset_values(),
             "document_dossiers": [],
             "store_bodies": effective_store_bodies,
-            "allow_clinical": allow_clinical,
+            "allow_assist": allow_assist,
             "attachments": attachments or [],
             "notes": [],
             "execution_plan": kwargs.get("execution_plan"),
@@ -1274,7 +1274,7 @@ class AgentExecutionService:
             SafetyContext(agent_id=agent.id, metadata={"prompt": prompt, "thread_id": thread_id}),
         )
         is_refusal_candidate = refusal_triggered or output_safety.refused
-        reason = refusal_reason or (output_safety.reason if output_safety.refused else None) or "forbidden_intent:medical_prohibited"
+        reason = refusal_reason or (output_safety.reason if output_safety.refused else None) or "forbidden_intent:policy_prohibited"
         is_hard = refusal_triggered or (output_safety.refused and self.safety_policy.is_hard_refusal_reason(reason))
 
         if is_refusal_candidate and is_hard:
@@ -1411,7 +1411,7 @@ class AgentExecutionService:
             prompt = request.prompt
             messages = request.messages
             attachments = request.attachments
-            allow_clinical = request.allow_clinical
+            allow_assist = request.allow_assist
             thread_id = request.get_thread_id() or f"thread_{agent_id}_{uuid.uuid4().hex[:12]}"
             provider = request.get_provider()
             model_name = request.model
@@ -1422,7 +1422,7 @@ class AgentExecutionService:
             prompt = request.get("prompt", "")
             messages = request.get("messages", [])
             attachments = request.get("attachments", [])
-            allow_clinical = bool(request.get("allow_clinical", False))
+            allow_assist = bool(request.get("allow_assist", False))
             thread_id = (
                 request.get("thread_id")
                 or request.get("threadId")
@@ -1440,7 +1440,7 @@ class AgentExecutionService:
             attachments=attachments,
             agent_id=agent_id,
             messages=messages,
-            allow_clinical=allow_clinical,
+            allow_assist=allow_assist,
             provider=provider,
             model_name=model_name,
             api_key=api_key,

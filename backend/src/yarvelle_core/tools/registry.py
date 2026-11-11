@@ -92,7 +92,7 @@ CLOSED_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
                 },
                 "source": {
                     "type": "string",
-                    "description": "Optional filter by record source ('clinical_note', 'upload', 'note', 'connector', 'external').",
+                    "description": "Optional filter by record source ('workspace_note', 'upload', 'note', 'connector', 'external').",
                 },
             },
             "required": ["query"],

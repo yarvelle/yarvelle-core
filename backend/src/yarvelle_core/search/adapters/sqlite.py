@@ -29,7 +29,7 @@ from yarvelle_core.constants.defaults import (
 )
 from yarvelle_core.scope.context import DEFAULT_SCOPE
 from yarvelle_core.search.base import SearchIndex, SearchResult
-from yarvelle_core.search.chunker import ClinicalChunker
+from yarvelle_core.search.chunker import Chunker, StructuralChunker
 
 logger = logging.getLogger("yarvelle_core.search.adapters.sqlite")
 
@@ -52,7 +52,7 @@ class SqliteSearchIndex(SearchIndex):
         self,
         db_path: Optional[Union[str, Path]] = None,
         timeout: float = SQLITE_CONNECT_TIMEOUT_SECONDS,
-        chunker: Optional[ClinicalChunker] = None,
+        chunker: Optional[Chunker] = None,
     ) -> None:
         if db_path is None:
             try:
@@ -68,7 +68,7 @@ class SqliteSearchIndex(SearchIndex):
 
         self._db_path = str(db_path)
         self._timeout = timeout
-        self._chunker = chunker or ClinicalChunker()
+        self._chunker = chunker or StructuralChunker()
         self._conn: Optional[aiosqlite.Connection] = None
         self._lock = asyncio.Lock()
 

@@ -114,7 +114,7 @@ class RiskClass(ExtensibleStrEnum):
 RiskClass.WELLNESS = RiskClass.register("wellness")
 RiskClass.ADMIN = RiskClass.register("admin")
 RiskClass.EDUCATION = RiskClass.register("education")
-RiskClass.CLINICAL_ASSIST = RiskClass.register("clinical_assist")
+RiskClass.ASSIST = RiskClass.register("assist")
 
 
 class AgentDomain(ExtensibleStrEnum):
@@ -321,7 +321,7 @@ class AgentSummary(BaseModel):
     is_bundled: bool = False
     isBundled: bool = False
     type: str = "bundled"
-    clinical_enabled: bool = True
+    assist_enabled: bool = True
     verified: bool = True
     hidden: bool = False
     persona_file: Optional[str] = None
@@ -378,7 +378,7 @@ class AgentDetailResponse(BaseModel):
     is_bundled: bool = False
     isBundled: bool = False
     type: str = "bundled"
-    clinical_requires_flag: bool = False
+    assist_requires_flag: bool = False
     readmeText: Optional[str] = None
 
 
@@ -433,7 +433,7 @@ class SkillCreateRequest(BaseModel):
     description: str = ""
     domain: AgentDomain = AgentDomain.GENERAL
     category: str = "general"
-    risk_class: RiskClass = RiskClass.CLINICAL_ASSIST
+    risk_class: RiskClass = RiskClass.ASSIST
     tags: List[str] = Field(default_factory=list)
     tools: List[str] = Field(default_factory=list)
     instructions: str = ""
@@ -473,7 +473,7 @@ class AgentCreateRequest(BaseModel):
     starters: List[str] = Field(default_factory=list)
     domain: AgentDomain = AgentDomain.GENERAL
     category: str = "general"
-    risk_class: RiskClass = RiskClass.CLINICAL_ASSIST
+    risk_class: RiskClass = RiskClass.ASSIST
     tags: List[str] = Field(default_factory=list)
     icon: str = "Bot"
     can_delegate: bool = False

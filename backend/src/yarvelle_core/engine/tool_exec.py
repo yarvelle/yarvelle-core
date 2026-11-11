@@ -63,6 +63,7 @@ from yarvelle_core.schemas.tool import ToolResult as BaseToolResult
 
 logger = logging.getLogger("yarvelle_core.engine.tool_exec")
 
+# Sentinel tuple overridden lazily in execute_tool so importing tool_exec never loads connectors
 ConnectorToolContext: Any = ()
 ConnectorToolSpec: Any = ()
 

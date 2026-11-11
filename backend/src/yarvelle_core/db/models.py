@@ -1026,7 +1026,7 @@ class ProfileAccess(Base):
         String(32),
         default="manage",
         nullable=False,
-        doc="Access level: manage, view_clinical, view_paperwork",
+        doc="Access level: manage, view_records, view_paperwork",
     )
     allowed_sections_json: Mapped[Optional[str]] = mapped_column(
         Text,
@@ -1093,7 +1093,7 @@ class ProfileConsent(Base):
         nullable=False,
         doc="Consent terms version string",
     )
-    allow_clinical: Mapped[bool] = mapped_column(
+    allow_assist: Mapped[bool] = mapped_column(
         Boolean,
         default=False,
         nullable=False,
@@ -1123,7 +1123,7 @@ class ProfileConsent(Base):
     profile: Mapped[Profile] = relationship("Profile", back_populates="consent")
 
     def __repr__(self) -> str:
-        return f"<ProfileConsent profile_id={self.profile_id!r} allow_clinical={self.allow_clinical}>"
+        return f"<ProfileConsent profile_id={self.profile_id!r} allow_assist={self.allow_assist}>"
 
 
 class ProfileUiPreference(Base):
@@ -1293,7 +1293,7 @@ class ViewerInvite(Base):
         nullable=False,
         doc="Access role to grant upon acceptance: viewer",
     )
-    view_clinical: Mapped[bool] = mapped_column(
+    view_records: Mapped[bool] = mapped_column(
         Boolean,
         default=True,
         nullable=False,
@@ -1395,7 +1395,7 @@ class Note(ScopedMixin, Base):
         default="scratchpad",
         nullable=False,
         index=True,
-        doc="Note category: scratchpad, clinical_prep, visit_summary, general",
+        doc="Note category: scratchpad, prep, summary, general",
     )
     user_id: Mapped[Optional[str]] = mapped_column(
         String(36),

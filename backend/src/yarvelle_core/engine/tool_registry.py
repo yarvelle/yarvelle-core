@@ -708,7 +708,7 @@ def _make_builtin_specs() -> List[ToolSpec]:
         return ConnectorToolContext(
             user_id=str(getattr(ctx, "user_id", "") or ""),
             profile_id=str(getattr(ctx, "profile_id", "") or ""),
-            connector_id=connector_id,
+            run_id=str(getattr(ctx, "run_id", "") or connector_id),
         )
 
     async def _exec_calendar_suggest_slots(args: Dict[str, Any], ctx: Any = None) -> Any:

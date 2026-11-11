@@ -9,12 +9,12 @@
 #
 # Required Notice: Copyright 2026 Spectrayan (https://spectrayan.com)
 
-"""Sandboxed Web Search Tool & Outbound PHI Query Sanitiser (AU-37 / E9.1).
+"""Sandboxed Web Search Tool & Outbound PII Query Sanitiser (AU-37 / E9.1).
 
 Enforces:
-- Outbound PHI/PII query stripping (profile names, household names, DOB, dates,
-  SSN, MRN, phone numbers, email addresses, street addresses, and ZIP+4 codes).
-- Fail-closed blocking when a query is empty or contains only PHI/PII (< 3 chars remain).
+- Outbound sensitive PII query stripping (profile names, household names, DOB, dates,
+  SSN, record identifiers, phone numbers, email addresses, street addresses, and ZIP+4 codes).
+- Fail-closed blocking when a query is empty or contains only PII (< 3 chars remain).
 - Host allowlist verification (`DEFAULT_ALLOWED_SEARCH_HOSTS`) before any network I/O.
 - Preview-before-send payload generation (`preview_only=True`).
 - HTML tag stripping, 400-character snippet truncation, `"trust": "untrusted"` tagging,
@@ -50,15 +50,15 @@ DEFAULT_ALLOWED_SEARCH_HOSTS: Tuple[str, ...] = (
 
 MAX_SNIPPET_LENGTH: int = 400
 
-# Precompiled PHI/PII patterns for search query sanitization
+# Precompiled PII patterns for search query sanitization
 _EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 _SSN_LABELED_RE = re.compile(
     r"(?i)(?:\b(?:ssn|social\s*security(?:\s*number)?|soc\s*sec)\b[:\s#-]*)\d{3}[-\s.]?\d{2}[-\s.]?\d{4}\b"
 )
 _SSN_RE = re.compile(r"(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)")
 _SSN_NINE_DIGIT_RE = re.compile(r"(?<!\d)\d{9}(?!\d)")
-_MRN_RE = re.compile(
-    r"(?i)\b(?:mrn|medical\s*record(?:\s*number|\s*no\.?)?)[:\s#-]*[A-Z0-9][A-Z0-9-]{2,}\b"
+_RECORD_ID_RE = re.compile(
+    r"(?i)\b(?:record\s*(?:id|number|no\.?)|account\s*(?:id|number|no\.?)|member\s*(?:id|number|no\.?))[:\s#-]*[A-Z0-9][A-Z0-9-]{2,}\b"
 )
 _DATE_ISO_RE = re.compile(r"\b(?:dob[:\s#-]*)?\d{4}[-/]\d{2}[-/]\d{2}\b", re.IGNORECASE)
 _DATE_US_RE = re.compile(r"\b(?:dob[:\s#-]*)?\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b", re.IGNORECASE)
@@ -73,15 +73,15 @@ _STREET_ADDRESS_RE = re.compile(
 )
 _ZIP_PLUS_4_RE = re.compile(r"\b\d{5}-\d{4}\b")
 _ZIP_LABELED_RE = re.compile(r"(?i)\b(?:zip(?:\s*code)?|postal(?:\s*code)?)[:\s#-]*\d{5}(?:-\d{4})?\b")
-_STANDALONE_PHI_LABELS_RE = re.compile(
-    r"(?i)\b(?:ssn|mrn|dob|date\s+of\s+birth|social\s+security)\b[:\s#-]*"
+_STANDALONE_PII_LABELS_RE = re.compile(
+    r"(?i)\b(?:ssn|dob|date\s+of\s+birth|social\s+security|record\s+id|account\s+id|member\s+id)\b[:\s#-]*"
 )
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
-# Common clinical/medical/query words that should not be accidentally stripped as name tokens
-_PROTECTED_CLINICAL_TOKENS = frozenset({
+# Common short query/unit tokens that should not be accidentally stripped as name tokens
+_PROTECTED_DOMAIN_TOKENS = frozenset({
     "in", "on", "at", "to", "for", "of", "by", "or", "and", "the", "is", "as",
-    "mg", "ml", "dl", "bp", "hr", "er", "ct", "iv", "gi", "cv", "rx", "dr",
+    "id", "no", "am", "pm", "km", "kg", "lb", "oz", "dr", "st", "rd", "ct",
 })
 
 
@@ -99,7 +99,7 @@ def sanitize_search_query(
     profile_names: Optional[Sequence[str]] = None,
     profile_dob: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Strips user PHI/PII from an outbound web search query and fails closed if unsafe.
+    """Strips user PII from an outbound web search query and fails closed if unsafe.
 
     Args:
         query: Raw search query string proposed by an agent or user.
@@ -109,8 +109,8 @@ def sanitize_search_query(
     Returns:
         Dictionary containing:
         - original_query: Raw input query
-        - sanitized_query: Cleaned query with PHI removed
-        - redacted_items: List of redacted PHI substrings
+        - sanitized_query: Cleaned query with PII removed
+        - redacted_items: List of redacted PII substrings
         - is_safe: Boolean (True if len(sanitized_query) >= 3)
 
     Raises:
@@ -146,12 +146,12 @@ def sanitize_search_query(
             full_names.append(clean_name)
             for tok in re.split(r"[\s,._-]+", clean_name):
                 tok_clean = tok.strip()
-                if len(tok_clean) >= 2 and tok_clean.lower() not in _PROTECTED_CLINICAL_TOKENS:
+                if len(tok_clean) >= 2 and tok_clean.lower() not in _PROTECTED_DOMAIN_TOKENS:
                     name_tokens.append(tok_clean)
 
         # Sort longest first so full names match before sub-tokens
         for fname in sorted(set(full_names), key=len, reverse=True):
-            if len(fname) >= 2 and fname.lower() not in _PROTECTED_CLINICAL_TOKENS:
+            if len(fname) >= 2 and fname.lower() not in _PROTECTED_DOMAIN_TOKENS:
                 pat = re.compile(rf"(?i)\b{re.escape(fname)}(?:'s)?\b")
                 working = _sub_and_record(pat, working)
 
@@ -163,19 +163,19 @@ def sanitize_search_query(
     working = _sub_and_record(_DATE_ISO_RE, working)
     working = _sub_and_record(_DATE_US_RE, working)
 
-    # 4. SSNs, MRNs, Phone numbers, Emails, Street addresses, ZIP+4
+    # 4. SSNs, Record IDs, Phone numbers, Emails, Street addresses, ZIP+4
     working = _sub_and_record(_EMAIL_RE, working)
     working = _sub_and_record(_SSN_LABELED_RE, working)
     working = _sub_and_record(_SSN_RE, working)
     working = _sub_and_record(_SSN_NINE_DIGIT_RE, working)
-    working = _sub_and_record(_MRN_RE, working)
+    working = _sub_and_record(_RECORD_ID_RE, working)
     working = _sub_and_record(_PHONE_RE, working)
     working = _sub_and_record(_STREET_ADDRESS_RE, working)
     working = _sub_and_record(_ZIP_LABELED_RE, working)
     working = _sub_and_record(_ZIP_PLUS_4_RE, working)
 
-    # Strip leftover standalone PHI labels (e.g., "SSN:", "MRN:", "DOB:")
-    working = _STANDALONE_PHI_LABELS_RE.sub(" ", working)
+    # Strip leftover standalone PII labels (e.g., "SSN:", "RECORD ID:", "DOB:")
+    working = _STANDALONE_PII_LABELS_RE.sub(" ", working)
 
     # Remove [REDACTED] markers and collapse whitespace / stray punctuation
     cleaned = re.sub(r"\[REDACTED\]", " ", working, flags=re.IGNORECASE)
@@ -189,7 +189,7 @@ def sanitize_search_query(
 
     if not is_safe:
         raise ValueError(
-            "Search query blocked: query is empty or contains only PHI/PII after sanitization."
+            "Search query blocked: query is empty or contains only sensitive PII after sanitization."
         )
 
     return {
@@ -200,7 +200,7 @@ def sanitize_search_query(
     }
 
 
-async def _load_profile_phi_context(
+async def _load_profile_pii_context(
     profile_id: str,
     user_id: Optional[str] = None,
     session_factory: Any = None,
@@ -231,7 +231,7 @@ async def _load_profile_phi_context(
                         if getattr(member, "short_name", None) and member.short_name not in names:
                             names.append(member.short_name)
     except Exception as exc:
-        logger.debug("Could not load profile PHI context from DB (using inline context): %s", exc)
+        logger.debug("Could not load profile PII context from DB (using inline context): %s", exc)
     return names, dob
 
 
@@ -343,7 +343,7 @@ def _mark_context_tainted(ctx: Any) -> None:
 
 
 async def execute_web_search(args: Dict[str, Any], ctx: Any = None) -> Dict[str, Any]:
-    """Executes sandboxed, PHI-sanitized web search with host allowlisting and taint tracking.
+    """Executes sandboxed, PII-sanitized web search with host allowlisting and taint tracking.
 
     Args:
         args: Tool input dictionary (`query`, optional `provider`, `preview_only`, `max_results`).
@@ -369,11 +369,11 @@ async def execute_web_search(args: Dict[str, Any], ctx: Any = None) -> Dict[str,
     # 2. Verify provider and target host allowlist before any network activity
     provider, target_url, target_host = _resolve_provider_and_url(args)
 
-    # 3. Collect profile PHI context (names + DOB) from DB and optional context/args
+    # 3. Collect profile PII context (names + DOB) from DB and optional context/args
     session_factory = getattr(ctx, "session_factory", None) or (
         ctx.extra.get("session_factory") if isinstance(getattr(ctx, "extra", None), dict) else None
     )
-    db_names, db_dob = await _load_profile_phi_context(
+    db_names, db_dob = await _load_profile_pii_context(
         clean_profile_id,
         user_id=user_id,
         session_factory=session_factory,

@@ -499,12 +499,7 @@ class SkillGeneratorNode(BaseNode):
                         f"risk_class: admin\n"
                         f"tools:\n"
                         f"  - skill-docs\n"
-                        f"forbidden:\n"
-                        f"  - diagnose\n"
-                        f"  - prescribe\n"
-                        f"  - dose\n"
-                        f"  - replace_emergency_care\n"
-                        f"  - instruct_stop_medication\n"
+                        f"forbidden: []\n"
                     )
                     (skill_folder / YARVELLE_YAML_FILENAME).write_text(cf_yaml, encoding="utf-8")
 
@@ -517,9 +512,8 @@ class SkillGeneratorNode(BaseNode):
                         f"# {skill_data.get('name', sid)}\n\n"
                         f"{skill_data.get('instructions', '')}\n\n"
                         f"## Intended Use & Safety Disclosures\n"
-                        f"- Not a clinician and not emergency care\n"
-                        f"- If this is an emergency, contact local emergency services\n"
-                        f"- Do not change medication without the prescribing clinician\n"
+                        f"- Informational and organizational assistance only; verify critical decisions against primary sources.\n"
+                        f"- Never fabricate facts, identifiers, or external tool completions.\n"
                     )
                     (skill_folder / "SKILL.md").write_text(skill_md, encoding="utf-8")
 
