@@ -15,7 +15,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import HTTPException
 import pytest
 from sqlalchemy import func, select
 
@@ -23,6 +22,7 @@ from yarvelle_core.api import profiles as profiles_api
 from yarvelle_core.auth.adapters.disabled_adapter import DEFAULT_STEWARD_USER
 from yarvelle_core.config import settings
 from yarvelle_core.db.models import Note, Profile, ProfileKey, ScopeGrant
+from yarvelle_core.errors import YarvelleError
 from yarvelle_core.scope.context import scope_context
 
 PROFILE_ID = "prof-delete-1"
@@ -106,10 +106,11 @@ async def test_db_failure_leaves_keys_and_files_intact(async_db_session, monkeyp
 
     monkeypatch.setattr(profiles_api, "purge_profile_rows", _boom)
 
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(YarvelleError) as exc_info:
         await profiles_api.delete_profile(PROFILE_ID, DEFAULT_STEWARD_USER, async_db_session)
 
     assert exc_info.value.status_code == 500
+    assert exc_info.value.code == "YRV-500-013"
     assert "simulated" not in str(exc_info.value.detail)
     assert await async_db_session.get(Profile, PROFILE_ID) is not None
     assert await _count(async_db_session, ProfileKey) == 1
