@@ -57,6 +57,9 @@ def test_wheel_contains_all_content_and_entry_points(tmp_path: Path):
             "yarvelle_core/_content/schemas/pack.schema.json",
             "yarvelle_core/_content/schemas/agent.schema.json",
             "yarvelle_core/_content/schemas/skill.schema.json",
+            "yarvelle_core/_content/schemas/tool_spec.schema.json",
+            "yarvelle_core/schemas/tool_spec.schema.json",
+            "yarvelle_core/resources/tools/workspace.yaml",
         ]
 
         missing = [f for f in required_content_files if f not in names]
