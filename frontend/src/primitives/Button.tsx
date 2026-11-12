@@ -33,7 +33,7 @@ const variantStyles: Record<ButtonVariant, string> = {
   outline:
     'bg-transparent hover:bg-surface-2 active:bg-surface-3 text-fg border border-border-strong',
   danger:
-    'bg-danger-bg hover:bg-danger-fg text-danger-fg hover:text-white border border-danger-border',
+    'bg-danger-bg hover:bg-danger-fg text-danger-fg hover:text-fg-on-primary border border-danger-border',
 };
 
 const sizeStyles: Record<ButtonSize, string> = {

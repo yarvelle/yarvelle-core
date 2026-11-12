@@ -90,7 +90,7 @@ export const Chip: React.FC<ChipProps> = ({
             e.stopPropagation();
             onRemove();
           }}
-          className="yc-Chip-remove ms-1.5 inline-flex items-center justify-center rounded-full p-0.5 hover:bg-black/10 focus:outline-none"
+          className="yc-Chip-remove ms-1.5 inline-flex items-center justify-center rounded-full p-0.5 hover:bg-fg/10 focus:outline-none"
         >
           <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

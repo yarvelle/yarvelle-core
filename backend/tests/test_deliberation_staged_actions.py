@@ -30,10 +30,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from langchain_core.messages import AIMessage
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from yarvelle_core.api.approvals import consume_approval_atomic
-from yarvelle_core.db.models import Approval, Base
+from yarvelle_core.db.models import Approval
+from yarvelle_core.testing.fixtures import create_test_session_factory
 from yarvelle_core.engine.tool_exec import (
     PolicyDecision,
     SqlApprovalStore,
@@ -408,53 +409,35 @@ def test_child_under_13_precedence_over_panel_approval():
 @pytest.mark.asyncio
 async def test_single_use_cryptographic_binding_atomic():
     """Verify single-use token consumption binding agent_id, tool_name, profile_id, and payload hash."""
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-    session_factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    async with create_test_session_factory(session_class=AsyncSession) as (_engine, session_factory):
+        tool_args = {"doc_id": "doc-100", "operation": "stage"}
+        payload_h = compute_payload_hash(tool_args)
+        action_binding_h = compute_action_binding_hash("specialist_alpha", "store_record", tool_args)
+        assert len(action_binding_h) == 64
 
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+        # 1. Create approval in DB
+        now = datetime.now(timezone.utc)
+        app_id = "app_test_atomic_1"
+        async with session_factory() as session:
+            app = Approval(
+                id=app_id,
+                profile_id="profile_main",
+                run_id="run_1",
+                agent_id="specialist_alpha",
+                tool_name="store_record",
+                args_redacted=json.dumps(tool_args),
+                payload_hash=payload_h,
+                risk_tier="write_local",
+                status="approved",
+                expires_at=now + timedelta(minutes=15),
+                created_at=now,
+            )
+            session.add(app)
+            await session.commit()
 
-    tool_args = {"doc_id": "doc-100", "operation": "stage"}
-    payload_h = compute_payload_hash(tool_args)
-    action_binding_h = compute_action_binding_hash("specialist_alpha", "store_record", tool_args)
-    assert len(action_binding_h) == 64
-
-    # 1. Create approval in DB
-    now = datetime.now(timezone.utc)
-    app_id = "app_test_atomic_1"
-    async with session_factory() as session:
-        app = Approval(
-            id=app_id,
-            profile_id="profile_main",
-            run_id="run_1",
-            agent_id="specialist_alpha",
-            tool_name="store_record",
-            args_redacted=json.dumps(tool_args),
-            payload_hash=payload_h,
-            risk_tier="write_local",
-            status="approved",
-            expires_at=now + timedelta(minutes=15),
-            created_at=now,
-        )
-        session.add(app)
-        await session.commit()
-
-    # 2. Consumption with identical parameters succeeds
-    async with session_factory() as session:
-        consumed_id = await consume_approval_atomic(
-            session,
-            app_id,
-            tool_args,
-            profile_id="profile_main",
-            tool_name="store_record",
-            agent_id="specialist_alpha",
-        )
-        assert consumed_id == app_id
-
-    # 3. Second consumption attempt fails (single-use token invariant)
-    async with session_factory() as session:
-        with pytest.raises(ValueError, match="cannot consume|already been consumed"):
-            await consume_approval_atomic(
+        # 2. Consumption with identical parameters succeeds
+        async with session_factory() as session:
+            consumed_id = await consume_approval_atomic(
                 session,
                 app_id,
                 tool_args,
@@ -462,69 +445,80 @@ async def test_single_use_cryptographic_binding_atomic():
                 tool_name="store_record",
                 agent_id="specialist_alpha",
             )
+            assert consumed_id == app_id
 
-    # 4. Agent mismatch fails closed
-    app_id_2 = "app_test_atomic_2"
-    async with session_factory() as session:
-        app2 = Approval(
-            id=app_id_2,
-            profile_id="profile_main",
-            run_id="run_1",
-            agent_id="specialist_alpha",
-            tool_name="store_record",
-            args_redacted=json.dumps(tool_args),
-            payload_hash=payload_h,
-            risk_tier="write_local",
-            status="approved",
-            expires_at=now + timedelta(minutes=15),
-            created_at=now,
-        )
-        session.add(app2)
-        await session.commit()
+        # 3. Second consumption attempt fails (single-use token invariant)
+        async with session_factory() as session:
+            with pytest.raises(ValueError, match="cannot consume|already been consumed"):
+                await consume_approval_atomic(
+                    session,
+                    app_id,
+                    tool_args,
+                    profile_id="profile_main",
+                    tool_name="store_record",
+                    agent_id="specialist_alpha",
+                )
 
-    async with session_factory() as session:
-        with pytest.raises(ValueError, match="different agent"):
-            await consume_approval_atomic(
-                session,
-                app_id_2,
-                tool_args,
+        # 4. Agent mismatch fails closed
+        app_id_2 = "app_test_atomic_2"
+        async with session_factory() as session:
+            app2 = Approval(
+                id=app_id_2,
                 profile_id="profile_main",
-                tool_name="store_record",
-                agent_id="specialist_intruder",  # Spoofed agent
-            )
-
-    # 5. Modified arguments fail closed with payload hash mismatch
-    app_id_3 = "app_test_atomic_3"
-    async with session_factory() as session:
-        app3 = Approval(
-            id=app_id_3,
-            profile_id="profile_main",
-            run_id="run_1",
-            agent_id="specialist_alpha",
-            tool_name="store_record",
-            args_redacted=json.dumps(tool_args),
-            payload_hash=payload_h,
-            risk_tier="write_local",
-            status="approved",
-            expires_at=now + timedelta(minutes=15),
-            created_at=now,
-        )
-        session.add(app3)
-        await session.commit()
-
-    async with session_factory() as session:
-        tampered_args = {"doc_id": "doc-100", "operation": "tampered_write"}
-        with pytest.raises(ValueError, match="Payload hash mismatch"):
-            await consume_approval_atomic(
-                session,
-                app_id_3,
-                tampered_args,
-                profile_id="profile_main",
-                tool_name="store_record",
+                run_id="run_1",
                 agent_id="specialist_alpha",
+                tool_name="store_record",
+                args_redacted=json.dumps(tool_args),
+                payload_hash=payload_h,
+                risk_tier="write_local",
+                status="approved",
+                expires_at=now + timedelta(minutes=15),
+                created_at=now,
             )
+            session.add(app2)
+            await session.commit()
 
-    await engine.dispose()
+        async with session_factory() as session:
+            with pytest.raises(ValueError, match="different agent"):
+                await consume_approval_atomic(
+                    session,
+                    app_id_2,
+                    tool_args,
+                    profile_id="profile_main",
+                    tool_name="store_record",
+                    agent_id="specialist_intruder",  # Spoofed agent
+                )
+
+        # 5. Modified arguments fail closed with payload hash mismatch
+        app_id_3 = "app_test_atomic_3"
+        async with session_factory() as session:
+            app3 = Approval(
+                id=app_id_3,
+                profile_id="profile_main",
+                run_id="run_1",
+                agent_id="specialist_alpha",
+                tool_name="store_record",
+                args_redacted=json.dumps(tool_args),
+                payload_hash=payload_h,
+                risk_tier="write_local",
+                status="approved",
+                expires_at=now + timedelta(minutes=15),
+                created_at=now,
+            )
+            session.add(app3)
+            await session.commit()
+
+        async with session_factory() as session:
+            tampered_args = {"doc_id": "doc-100", "operation": "tampered_write"}
+            with pytest.raises(ValueError, match="Payload hash mismatch"):
+                await consume_approval_atomic(
+                    session,
+                    app_id_3,
+                    tampered_args,
+                    profile_id="profile_main",
+                    tool_name="store_record",
+                    agent_id="specialist_alpha",
+                )
 
 
 # ============================================================================

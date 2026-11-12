@@ -21,6 +21,7 @@ import pytest
 from yarvelle_core.pack.spec import PackManifest
 from yarvelle_core.schemas.generator import emit_canonical_schemas, generate_json_schema
 from yarvelle_core.schemas.manifest import AgentManifest, SkillFrontmatter
+from yarvelle_core.schemas.tool_spec import ToolSetManifest
 
 
 def test_generate_pack_schema():
@@ -67,8 +68,14 @@ def test_emit_canonical_schemas(tmp_path: Path):
     assert "pack.schema.json" in schemas
     assert "agent.schema.json" in schemas
     assert "skill.schema.json" in schemas
+    assert "tool_spec.schema.json" in schemas
 
-    for filename in ("pack.schema.json", "agent.schema.json", "skill.schema.json"):
+    for filename in (
+        "pack.schema.json",
+        "agent.schema.json",
+        "skill.schema.json",
+        "tool_spec.schema.json",
+    ):
         target_file = out_dir / filename
         assert target_file.exists()
         loaded = json.loads(target_file.read_text(encoding="utf-8"))
@@ -107,6 +114,12 @@ def test_canonical_schemas_committed_freshness():
             SkillFrontmatter,
             "Yarvelle Skill Frontmatter Schema",
             "https://schemas.yarvelle.org/v1/skill.schema.json",
+        ),
+        (
+            "tool_spec.schema.json",
+            ToolSetManifest,
+            "Yarvelle Declarative Tool Specification Schema (yarvelle.tools/v1)",
+            "https://schemas.yarvelle.org/v1/tool_spec.schema.json",
         ),
     ]
 

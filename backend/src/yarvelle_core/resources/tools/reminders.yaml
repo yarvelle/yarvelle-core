@@ -1,0 +1,101 @@
+# Yarvelle Core — Domain-Neutral AI Agent Runtime & Execution Engine
+# Copyright 2026 Spectrayan (https://spectrayan.com)
+#
+# Licensed under the PolyForm Noncommercial License 1.0.0 and the
+# Yarvelle Core Additional Terms (see LICENSE and ADDITIONAL-TERMS.md).
+# Personal and household local use only. Commercial use, hosted service
+# offering, rebranding, white-labeling, and redistribution of modified
+# forks are prohibited without a written commercial license from Spectrayan.
+#
+# Required Notice: Copyright 2026 Spectrayan (https://spectrayan.com)
+
+apiVersion: yarvelle.tools/v1
+kind: ToolSet
+pack_id: core
+tools:
+  - name: create_reminder
+    category: reminders
+    risk_tier: write_local
+    trust: trusted
+    data_sensitivity: confidential
+    context_params: [profile_id, user_id, scope, now]
+    description: >-
+      Create a scheduled reminder with optional RFC 5545 recurrence and enqueue
+      corresponding wall-clock Job execution.
+    input_schema:
+      type: object
+      properties:
+        title:
+          type: string
+          description: Reminder prompt or directive title.
+        next_due_at:
+          type: string
+          description: Scheduled ISO-8601 due timestamp.
+        description:
+          type: string
+          description: Detailed context, instructions, or guidelines.
+        category:
+          type: string
+          enum: [task, event, prep, general]
+          default: general
+          description: "Reminder category (default: 'general')."
+        rrule:
+          type: string
+          description: "Optional RFC 5545 recurrence rule string (e.g. 'FREQ=DAILY;INTERVAL=1')."
+        timezone:
+          type: string
+          default: UTC
+          description: "Local profile IANA timezone identifier (default: 'UTC')."
+      required:
+        - title
+        - next_due_at
+    metadata:
+      action: create_reminder
+      entity: reminder
+      undoable: true
+      risk: write_local
+    binding:
+      kind: handler
+      entrypoint: yarvelle_core.tools.builtin_handlers:exec_create_reminder
+
+  - name: list_reminders
+    category: reminders
+    risk_tier: read
+    trust: trusted
+    data_sensitivity: confidential
+    context_params: [profile_id, user_id, scope]
+    description: >-
+      List active or filtered reminders for a profile with optional status,
+      category, and due date filters.
+    input_schema:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [pending, snoozed, completed, missed, cancelled]
+          description: Optional status filter.
+        category:
+          type: string
+          enum: [task, event, prep, general]
+          description: Optional category filter.
+        due_before:
+          type: string
+          description: Filter reminders due on or before this ISO-8601 timestamp.
+        limit:
+          type: integer
+          default: 50
+          minimum: 1
+          maximum: 100
+          description: "Maximum number of reminders to retrieve (default: 50)."
+        offset:
+          type: integer
+          default: 0
+          minimum: 0
+          description: Pagination offset.
+    metadata:
+      action: list_reminders
+      entity: reminder
+      risk: read
+    binding:
+      kind: handler
+      entrypoint: yarvelle_core.tools.builtin_handlers:exec_list_reminders

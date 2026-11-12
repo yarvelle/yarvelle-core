@@ -10,4 +10,5 @@
 // Required Notice: Copyright 2026 Spectrayan (https://spectrayan.com)
 
 export type * from './names.js';
+export { yarvelleUiContentGlob } from './content-glob.js';
 export { yarvellePreset, default } from './tailwind-preset.js';

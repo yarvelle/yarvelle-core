@@ -13,10 +13,11 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Literal, Optional
+from typing import Any, Callable, Dict, Literal, Optional, Tuple, get_args
 from pydantic import BaseModel, Field
 
-ClosedToolName = Literal["attach-read", "workspace-note", "skill-docs"]
+ClosedToolName = Literal["attach-read", "workspace-note", "skill-docs", "search_records"]
+CLOSED_TOOL_NAMES: Tuple[str, ...] = tuple(get_args(ClosedToolName))
 
 
 class ToolResult(BaseModel):

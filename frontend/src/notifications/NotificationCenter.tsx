@@ -51,7 +51,7 @@ export function NotificationCenter({
             🔔
           </span>
           {unreadCount > 0 && (
-            <span className="absolute -top-1 -end-1 flex h-4 w-4 items-center justify-center rounded-full bg-danger-fg text-[10px] font-bold text-white">
+            <span className="absolute -top-1 -end-1 flex h-4 w-4 items-center justify-center rounded-full bg-danger-fg text-[10px] font-bold text-fg-on-primary">
               {unreadCount > 9 ? '9+' : unreadCount}
             </span>
           )}

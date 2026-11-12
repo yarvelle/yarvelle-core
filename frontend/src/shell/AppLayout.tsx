@@ -48,7 +48,7 @@ export function AppLayout({
     <div
       data-slot="app-layout"
       className={cn(
-        'yc-AppLayout-root flex h-screen w-screen overflow-hidden bg-bg text-fg',
+        'yc-AppLayout-root flex h-screen w-screen overflow-hidden bg-canvas text-fg',
         className
       )}
     >

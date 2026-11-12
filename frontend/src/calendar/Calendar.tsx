@@ -198,7 +198,7 @@ export function Calendar({
                         }}
                         className={cn(
                           'truncate rounded px-1 text-[11px] text-start font-medium',
-                          ev.conflict ? 'bg-danger-bg text-danger-fg' : 'bg-primary-subtle text-primary'
+                          ev.conflict ? 'bg-danger-bg text-danger-fg' : 'bg-primary-soft text-primary'
                         )}
                       >
                         {ev.title}

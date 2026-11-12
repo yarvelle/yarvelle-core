@@ -12,5 +12,34 @@
 """Test-support utilities shipped with yarvelle-core.
 
 Nothing in this package runs automatically. Each subpackage documents how it
-is opted into.
+is opted into. Shared async DB/entity/HTTP client factories are lazily
+re-exported from :mod:`yarvelle_core.testing.fixtures`.
 """
+
+from __future__ import annotations
+
+from typing import Any
+
+_FIXTURE_EXPORTS = {
+    "ConnectionFactory",
+    "ProfileFactory",
+    "SQLStatementCounter",
+    "UserFactory",
+    "async_db_engine_and_factory",
+    "async_db_session",
+    "auth_client",
+    "count_sql_statements",
+    "create_auth_client",
+    "create_test_session_factory",
+}
+
+
+def __getattr__(name: str) -> Any:
+    if name in _FIXTURE_EXPORTS:
+        from yarvelle_core.testing import fixtures
+
+        return getattr(fixtures, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+__all__ = sorted(_FIXTURE_EXPORTS)

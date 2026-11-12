@@ -17,11 +17,11 @@ never opens a socket; availability is probed on demand.
 
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
 import json
-import urllib.error
-import urllib.request
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from yarvelle_core.testing.orch_eval.backends import FREE, CostTable, Role
 from yarvelle_core.testing.orch_eval.defaults import (
@@ -63,15 +63,7 @@ class OllamaStatus:
         return False
 
 
-def probe_ollama(base_url: str = DEFAULT_OLLAMA_BASE_URL, timeout_s: float = 2.0) -> OllamaStatus:
-    """Asks the local daemon for its tags. Never raises; reports in the status."""
-    url = base_url.rstrip("/") + "/api/tags"
-    try:
-        req = urllib.request.Request(url, method="GET")
-        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as err:
-        return OllamaStatus(reachable=False, base_url=base_url, error=f"{type(err).__name__}: {err}")
+def _parse_ollama_tags_payload(base_url: str, payload: Mapping[str, Any]) -> OllamaStatus:
     models: List[str] = []
     digests: Dict[str, str] = {}
     for entry in payload.get("models") or []:
@@ -83,6 +75,45 @@ def probe_ollama(base_url: str = DEFAULT_OLLAMA_BASE_URL, timeout_s: float = 2.0
         if digest:
             digests[name] = str(digest)
     return OllamaStatus(reachable=True, base_url=base_url, models=models, digests=digests)
+
+
+async def aprobe_ollama(
+    base_url: str = DEFAULT_OLLAMA_BASE_URL,
+    timeout_s: float = 2.0,
+    *,
+    client: Optional[Any] = None,
+) -> OllamaStatus:
+    """Asynchronously asks the local daemon for its tags using httpx.AsyncClient. Never raises."""
+    import httpx
+
+    url = base_url.rstrip("/") + "/api/tags"
+    try:
+        if client is not None:
+            resp = await client.get(url, timeout=timeout_s)
+            resp.raise_for_status()
+            payload = resp.json()
+        else:
+            async with httpx.AsyncClient(timeout=timeout_s) as async_client:
+                resp = await async_client.get(url)
+                resp.raise_for_status()
+                payload = resp.json()
+    except (httpx.HTTPError, TimeoutError, json.JSONDecodeError, OSError, ValueError) as err:
+        return OllamaStatus(reachable=False, base_url=base_url, error=f"{type(err).__name__}: {err}")
+    if not isinstance(payload, dict):
+        return OllamaStatus(reachable=False, base_url=base_url, error="ValueError: expected JSON object")
+    return _parse_ollama_tags_payload(base_url, payload)
+
+
+def probe_ollama(base_url: str = DEFAULT_OLLAMA_BASE_URL, timeout_s: float = 2.0) -> OllamaStatus:
+    """Asks the local daemon for its tags via async httpx transport off any active event loop."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(aprobe_ollama(base_url=base_url, timeout_s=timeout_s))
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(asyncio.run, aprobe_ollama(base_url=base_url, timeout_s=timeout_s))
+        return future.result()
 
 
 def require_ollama_models(
@@ -191,6 +222,7 @@ __all__ = [
     "OllamaBackend",
     "OllamaStatus",
     "OllamaUnavailableError",
+    "aprobe_ollama",
     "probe_ollama",
     "require_ollama_models",
 ]

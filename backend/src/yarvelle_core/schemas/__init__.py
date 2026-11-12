@@ -32,9 +32,18 @@ from yarvelle_core.schemas.manifest import (
     SkillDetailResponse,
 )
 from yarvelle_core.schemas.tool import (
+    CLOSED_TOOL_NAMES,
     ClosedToolName,
     ToolResult,
     ToolCallRecord,
+)
+from yarvelle_core.schemas.tool_spec import (
+    API_VERSION_TOOLS_V1,
+    DeclarativeToolSpec,
+    KIND_TOOL_SET,
+    RESERVED_TOOL_CONTEXT_PARAMS,
+    ToolExecutionBinding,
+    ToolSetManifest,
 )
 from yarvelle_core.schemas.audit import (
     AuditEventType,
@@ -104,9 +113,16 @@ __all__ = [
     "AgentDetailResponse",
     "SkillSummary",
     "SkillDetailResponse",
+    "CLOSED_TOOL_NAMES",
     "ClosedToolName",
     "ToolResult",
     "ToolCallRecord",
+    "API_VERSION_TOOLS_V1",
+    "DeclarativeToolSpec",
+    "KIND_TOOL_SET",
+    "RESERVED_TOOL_CONTEXT_PARAMS",
+    "ToolExecutionBinding",
+    "ToolSetManifest",
     "AuditEventType",
     "AuditEvent",
     "AuditListResponse",
