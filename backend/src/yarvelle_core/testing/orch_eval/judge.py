@@ -20,10 +20,10 @@ the labelled calibration set is at least 80%.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import statistics
-import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence
@@ -236,6 +236,20 @@ def invoke_judge_model(model: Any, prompt: str, *, pack_id: Optional[str] = None
     return _message_text(response)
 
 
+async def ainvoke_judge_model(model: Any, prompt: str, *, pack_id: Optional[str] = None) -> str:
+    """Asynchronously call a LangChain chat model once and return its text content."""
+    from langchain_core.messages import HumanMessage, SystemMessage
+    from yarvelle_core.resources.loader import get_resource_loader
+
+    system = get_resource_loader().render_template("orch_eval_judge_system", {}, pack_id=pack_id)
+    messages = [SystemMessage(content=system), HumanMessage(content=prompt)]
+    if hasattr(model, "ainvoke"):
+        response = await model.ainvoke(messages)
+    else:
+        response = await asyncio.to_thread(model.invoke, messages)
+    return _message_text(response)
+
+
 def score_once(
     model: Any,
     *,
@@ -247,7 +261,7 @@ def score_once(
     conversation: Optional[Sequence[Mapping[str, str]]] = None,
     max_retries: int = MAX_PARSE_RETRIES,
 ) -> JudgeVerdict:
-    """One judge sample with parse retries; falls back on total failure."""
+    """One judge sample with parse retries; never blocks an active event loop."""
     prompt = build_judge_prompt(
         rubric_md=rubric_md,
         criteria=criteria,
@@ -265,14 +279,53 @@ def score_once(
             last_err = f"invoke failed: {err}"
             if attempt >= max_retries:
                 return parse_failure_fallback(detail=last_err)
-            time.sleep(0.05 * (attempt + 1))
             continue
         parsed = parse_judge_json(last_raw)
         if parsed is not None:
             return parsed
         last_err = "could not parse judge JSON"
-        if attempt < max_retries:
-            time.sleep(0.05 * (attempt + 1))
+    return parse_failure_fallback(raw=last_raw, detail=last_err)
+
+
+async def ascore_once(
+    model: Any,
+    *,
+    rubric_md: str,
+    criteria: str,
+    user: str,
+    answer: str,
+    trace_summary: Mapping[str, Any],
+    conversation: Optional[Sequence[Mapping[str, str]]] = None,
+    max_retries: int = MAX_PARSE_RETRIES,
+    retry_delay_s: float = 0.05,
+) -> JudgeVerdict:
+    """Async judge sample with non-blocking asyncio.sleep retry backoff."""
+    prompt = build_judge_prompt(
+        rubric_md=rubric_md,
+        criteria=criteria,
+        user=user,
+        answer=answer,
+        trace_summary=trace_summary,
+        conversation=conversation,
+    )
+    last_raw = ""
+    last_err = "parse failure"
+    for attempt in range(max_retries + 1):
+        try:
+            last_raw = await ainvoke_judge_model(model, prompt)
+        except Exception as err:  # network / model errors
+            last_err = f"invoke failed: {err}"
+            if attempt >= max_retries:
+                return parse_failure_fallback(detail=last_err)
+            if retry_delay_s > 0:
+                await asyncio.sleep(retry_delay_s * (attempt + 1))
+            continue
+        parsed = parse_judge_json(last_raw)
+        if parsed is not None:
+            return parsed
+        last_err = "could not parse judge JSON"
+        if attempt < max_retries and retry_delay_s > 0:
+            await asyncio.sleep(retry_delay_s * (attempt + 1))
     return parse_failure_fallback(raw=last_raw, detail=last_err)
 
 
@@ -385,6 +438,44 @@ def score_turn(
     )
 
 
+async def ascore_turn(
+    model: Any,
+    *,
+    rubric: str,
+    criteria: str,
+    min_score: int = 4,
+    user: str,
+    answer: str,
+    trace_summary: Mapping[str, Any],
+    conversation: Optional[Sequence[Mapping[str, str]]] = None,
+    samples: int = DEFAULT_JUDGE_SAMPLES,
+    rubrics_dir: Optional[Path] = None,
+    rubric_text: Optional[str] = None,
+    retry_delay_s: float = 0.05,
+) -> AggregatedJudgeResult:
+    """Asynchronously run ``samples`` judge calls and aggregate."""
+    n = max(1, int(samples))
+    roots = [rubrics_dir] if rubrics_dir is not None else None
+    rubric_md = rubric_text if rubric_text is not None else load_rubric(rubric, roots)
+    collected: List[JudgeVerdict] = []
+    for _ in range(n):
+        collected.append(
+            await ascore_once(
+                model,
+                rubric_md=rubric_md,
+                criteria=criteria,
+                user=user,
+                answer=answer,
+                trace_summary=trace_summary,
+                conversation=conversation,
+                retry_delay_s=retry_delay_s,
+            )
+        )
+    return aggregate_samples(
+        collected, rubric=rubric, criteria=criteria, min_score=min_score
+    )
+
+
 def trace_summary_from_turn(trace: Any) -> Dict[str, Any]:
     """Structured summary a judge may see (never raw keys or cassette secrets)."""
     return {
@@ -417,7 +508,10 @@ __all__ = [
     "RUBRICS_DIR",
     "SameModelJudgeError",
     "JudgeVerdict",
+    "ainvoke_judge_model",
     "aggregate_samples",
+    "ascore_once",
+    "ascore_turn",
     "assert_distinct_models",
     "build_judge_prompt",
     "can_enable_gate",

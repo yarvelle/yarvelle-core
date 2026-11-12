@@ -1,0 +1,210 @@
+# Yarvelle Core — Domain-Neutral AI Agent Runtime & Execution Engine
+# Copyright 2026 Spectrayan (https://spectrayan.com)
+#
+# Licensed under the PolyForm Noncommercial License 1.0.0 and the
+# Yarvelle Core Additional Terms (see LICENSE and ADDITIONAL-TERMS.md).
+# Personal and household local use only. Commercial use, hosted service
+# offering, rebranding, white-labeling, and redistribution of modified
+# forks are prohibited without a written commercial license from Spectrayan.
+#
+# Required Notice: Copyright 2026 Spectrayan (https://spectrayan.com)
+
+apiVersion: yarvelle.tools/v1
+kind: ToolSet
+pack_id: core
+tools:
+  - name: calendar_suggest_slots
+    category: calendar
+    risk_tier: read
+    trust: trusted
+    data_sensitivity: pii
+    allowed_hosts:
+      - www.googleapis.com
+      - caldav.icloud.com
+      - caldav.fastmail.com
+      - localhost
+    context_params: [profile_id, user_id]
+    description: >-
+      Query connected Google Calendar or CalDAV free/busy windows and suggest
+      conflict-free candidate appointment times without booking anything.
+    input_schema:
+      type: object
+      properties:
+        window_start:
+          type: string
+          description: ISO-8601 window start.
+        window_end:
+          type: string
+          description: ISO-8601 window end.
+        duration_minutes:
+          type: integer
+          default: 30
+          minimum: 5
+          maximum: 480
+    metadata:
+      action: calendar_suggest_slots
+      connector_id: google-calendar
+      risk: read
+    binding:
+      kind: handler
+      entrypoint: yarvelle_core.tools.builtin_handlers:exec_calendar_suggest_slots
+
+  - name: calendar_create_event
+    category: calendar
+    risk_tier: write_external
+    trust: trusted
+    data_sensitivity: pii
+    allowed_hosts:
+      - www.googleapis.com
+      - caldav.icloud.com
+      - caldav.fastmail.com
+      - localhost
+    context_params: [profile_id, user_id]
+    description: >-
+      Create an external calendar event on Google Calendar or CalDAV.
+      Always requires human approval in A0/A1 autonomy modes and strips sensitive
+      details from titles by default.
+    input_schema:
+      type: object
+      properties:
+        title:
+          type: string
+          description: Event title (sensitive details stripped by default).
+        start_time:
+          type: string
+          description: ISO-8601 start timestamp.
+        end_time:
+          type: string
+          description: ISO-8601 end timestamp.
+        location:
+          type: string
+          description: Optional location or address.
+        strip_sensitive:
+          type: boolean
+          default: true
+          description: Replace detailed title with a generic event label on external calendars.
+      required:
+        - title
+        - start_time
+        - end_time
+    metadata:
+      action: calendar_create_event
+      connector_id: google-calendar
+      risk: write_external
+    binding:
+      kind: handler
+      entrypoint: yarvelle_core.tools.builtin_handlers:exec_calendar_create_event
+
+  - name: create_email_draft
+    category: email
+    risk_tier: write_local
+    trust: trusted
+    data_sensitivity: restricted
+    context_params: [profile_id, user_id, scope]
+    description: >-
+      Create a local email draft (RFC 5322 .eml / mailto:) for user review and
+      sending from their own email client. Yarvelle Core never sends emails directly.
+    input_schema:
+      type: object
+      properties:
+        recipient_email:
+          type: string
+          description: Optional recipient email address.
+        recipient_name:
+          type: string
+          description: Optional recipient display name.
+        subject:
+          type: string
+          description: Email subject line.
+        body_markdown:
+          type: string
+          description: Draft body content.
+        context_type:
+          type: string
+          enum: [scheduling_request, records_request, form_submission, appeal, general]
+          default: general
+      required:
+        - subject
+        - body_markdown
+    metadata:
+      action: create_email_draft
+      entity: email_draft
+      undoable: true
+      risk: write_local
+    binding:
+      kind: handler
+      entrypoint: yarvelle_core.tools.builtin_handlers:exec_create_email_draft
+
+  - name: gmail_list_messages
+    category: email
+    risk_tier: read
+    trust: untrusted
+    data_sensitivity: restricted
+    allowed_hosts:
+      - workspace-mcp.spectrayan.com
+      - gmail.googleapis.com
+    context_params: [profile_id, user_id]
+    description: >-
+      List read-only Gmail messages filtered by consented label ('INBOX',
+      'IMPORTANT', 'STARRED', 'UPDATES') via the curated Google Workspace remote MCP bridge.
+    input_schema:
+      type: object
+      properties:
+        label:
+          type: string
+          enum: [INBOX, IMPORTANT, STARRED, UPDATES]
+          default: INBOX
+        query:
+          type: string
+        max_results:
+          type: integer
+          default: 20
+          minimum: 1
+          maximum: 50
+      required:
+        - label
+    metadata:
+      action: gmail_list_messages
+      connector_id: google-workspace-gmail
+      risk: read
+      taints_context: true
+    binding:
+      kind: handler
+      entrypoint: yarvelle_core.tools.builtin_handlers:exec_gmail_list_messages
+
+  - name: gmail_send_message
+    category: email
+    risk_tier: irreversible
+    trust: untrusted
+    data_sensitivity: restricted
+    allowed_hosts:
+      - workspace-mcp.spectrayan.com
+      - gmail.googleapis.com
+    context_params: [profile_id, user_id]
+    description: >-
+      Send an email draft via an approved Google Workspace MCP server.
+      Classified as 'irreversible' and unconditionally requires single-use human approval.
+    input_schema:
+      type: object
+      properties:
+        draft_id:
+          type: string
+        recipient:
+          type: string
+        subject:
+          type: string
+        body:
+          type: string
+      required:
+        - draft_id
+        - recipient
+        - subject
+        - body
+    metadata:
+      action: gmail_send_message
+      connector_id: google-workspace-gmail
+      risk: irreversible
+      taints_context: true
+    binding:
+      kind: handler
+      entrypoint: yarvelle_core.tools.builtin_handlers:exec_gmail_send_message

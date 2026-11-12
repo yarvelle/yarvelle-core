@@ -19,8 +19,9 @@ import uuid
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from yarvelle_core import identity
 from yarvelle_core.api.deps import get_current_user, get_db, resolve_owner_user_id
@@ -280,17 +281,32 @@ async def list_profile_connections(
     res = await db.execute(stmt)
     connections = list(res.scalars().all())
 
-    serialized_list: List[Dict[str, Any]] = []
-    for conn in connections:
-        run_stmt = (
-            select(SyncRun)
-            .where(SyncRun.connection_id == conn.id)
-            .order_by(SyncRun.started_at.desc())
-            .limit(1)
+    latest_runs_by_conn: Dict[str, SyncRun] = {}
+    if connections:
+        conn_ids = [conn.id for conn in connections]
+        rn_col = (
+            func.row_number()
+            .over(
+                partition_by=SyncRun.connection_id,
+                order_by=(SyncRun.started_at.desc(), SyncRun.id.desc()),
+            )
+            .label("rn")
         )
-        run_res = await db.execute(run_stmt)
-        latest_run = run_res.scalar_one_or_none()
-        serialized_list.append(_serialize_connection(conn, latest_sync_run=latest_run))
+        ranked_subq = (
+            select(SyncRun, rn_col)
+            .where(SyncRun.connection_id.in_(conn_ids))
+            .subquery()
+        )
+        latest_sync_alias = aliased(SyncRun, ranked_subq)
+        latest_stmt = select(latest_sync_alias).where(ranked_subq.c.rn == 1)
+        run_res = await db.execute(latest_stmt)
+        for run in run_res.scalars().all():
+            latest_runs_by_conn[run.connection_id] = run
+
+    serialized_list: List[Dict[str, Any]] = [
+        _serialize_connection(conn, latest_sync_run=latest_runs_by_conn.get(conn.id))
+        for conn in connections
+    ]
 
     return {
         "connections": serialized_list,

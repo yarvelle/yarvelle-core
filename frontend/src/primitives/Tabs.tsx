@@ -148,7 +148,7 @@ export const TabsContent = React.forwardRef<HTMLDivElement, TabsContentProps>(
         tabIndex={0}
         data-slot="content"
         className={cn(
-          'yc-Tabs-content mt-2 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2',
+          'yc-Tabs-content mt-2 ring-offset-focus-offset focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2',
           className
         )}
         {...props}

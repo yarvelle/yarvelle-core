@@ -42,23 +42,28 @@ export function App() {
 
 ### Tailwind CSS preset
 
-```js
-// tailwind.config.js
-import yarvellePreset from '@yarvelle/ui/tailwind-preset';
+`yarvellePreset` extends Tailwind's theme (`theme.extend`) with Yarvelle semantic `--ui-*` tokens while preserving Tailwind's built-in color palette and spacing scale. Use `yarvelleUiContentGlob()` from `@yarvelle/ui/tokens` so Tailwind always scans `@yarvelle/ui`'s compiled `dist/` bundles (including across npm, pnpm virtual stores, and monorepo workspaces):
+
+```ts
+// tailwind.config.ts
+import type { Config } from 'tailwindcss';
+import { yarvellePreset, yarvelleUiContentGlob } from '@yarvelle/ui/tokens';
 
 export default {
   presets: [yarvellePreset],
-  content: ['./src/**/*.{ts,tsx}', './node_modules/@yarvelle/ui/dist/**/*.js'],
-};
+  content: ['./src/**/*.{ts,tsx}', yarvelleUiContentGlob()],
+} satisfies Config;
 ```
+
+If your build resolves globs relative to an explicit application root directory rather than module location, pass `yarvelleUiContentGlob(rootDir)` (for example `yarvelleUiContentGlob(import.meta.dirname)`).
 
 ### Entry points
 
 | Import                           | Contents                                                      |
 | -------------------------------- | ------------------------------------------------------------- |
 | `@yarvelle/ui`                   | Components, provider, slots, tokens and helpers               |
-| `@yarvelle/ui/tokens`            | Design tokens                                                 |
-| `@yarvelle/ui/tailwind-preset`   | Tailwind CSS preset (default export)                          |
+| `@yarvelle/ui/tokens`            | Design tokens, `yarvellePreset`, and `yarvelleUiContentGlob`  |
+| `@yarvelle/ui/tailwind-preset`   | Tailwind CSS preset (default export) and `yarvelleUiContentGlob` |
 | `@yarvelle/ui/slots`             | Slot types and `SlotRenderer` for pack-contributed UI         |
 | `@yarvelle/ui/lib/*`             | Utilities such as `cn`, scoped storage, API, SSE, auth, i18n  |
 | `@yarvelle/ui/testing`           | Test helpers (mock profiles, chat messages, slot contributions) |

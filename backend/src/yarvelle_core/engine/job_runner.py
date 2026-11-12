@@ -23,11 +23,11 @@ import time
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Set, Tuple, Union
 import uuid
 
-from sqlalchemy import select, text
+from sqlalchemy import and_, func, literal, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from yarvelle_core.config import settings
-from yarvelle_core.db.models import Attachment, Job as DBJob, Note
+from yarvelle_core.db.models import Attachment, Job as DBJob, Note, Reminder
 from yarvelle_core.engine.tool_exec import ToolContext, ToolSpec, execute_tool_call
 from yarvelle_core.schemas.tool import ToolResult
 
@@ -140,6 +140,81 @@ def calculate_next_occurrence(
             pass
 
     return candidate
+
+
+async def sweep_overdue_reminders(
+    session: AsyncSession,
+    now_utc: Optional[Union[float, datetime]] = None,
+    *,
+    profile_id: Optional[str] = None,
+    overdue_seconds: float = REMINDER_OVERDUE_THRESHOLD_SECONDS,
+) -> int:
+    """Marks reminders (and their backing pending jobs) overdue past threshold as 'missed'.
+
+    Executes two bounded set-based SQL UPDATE statements so HTTP GET handlers
+    remain strictly read-only.
+    """
+    effective_now = _to_datetime(now_utc) or datetime.now(timezone.utc)
+    cutoff_dt = effective_now - timedelta(seconds=float(overdue_seconds))
+
+    reminder_overdue_cond = or_(
+        and_(Reminder.status == "pending", Reminder.next_due_at <= cutoff_dt),
+        and_(
+            Reminder.status == "snoozed",
+            func.coalesce(Reminder.snooze_until, Reminder.next_due_at) <= cutoff_dt,
+        ),
+    )
+    rem_criteria = [
+        Reminder.status.in_(("pending", "snoozed")),
+        reminder_overdue_cond,
+    ]
+    if profile_id is not None:
+        rem_criteria.append(Reminder.profile_id == profile_id)
+
+    rem_stmt = (
+        update(Reminder)
+        .where(*rem_criteria)
+        .values(status="missed", updated_at=effective_now)
+        .execution_options(include_all_scopes=True, synchronize_session=False)
+    )
+    rem_res = await session.execute(rem_stmt)
+    rem_count = int(rem_res.rowcount or 0)
+
+    missed_keys_subq = (
+        select(literal("reminder:").concat(Reminder.id))
+        .where(
+            Reminder.status == "missed",
+            *([Reminder.profile_id == profile_id] if profile_id is not None else []),
+        )
+        .execution_options(include_all_scopes=True)
+    )
+
+    job_criteria = [
+        DBJob.kind == "reminder",
+        DBJob.status == "pending",
+        or_(
+            DBJob.next_run_at <= cutoff_dt,
+            DBJob.idempotency_key.in_(missed_keys_subq),
+        ),
+    ]
+    if profile_id is not None:
+        job_criteria.append(DBJob.profile_id == profile_id)
+
+    job_stmt = (
+        update(DBJob)
+        .where(*job_criteria)
+        .values(
+            status="missed",
+            lease_owner=None,
+            lease_until=None,
+            updated_at=effective_now,
+        )
+        .execution_options(include_all_scopes=True, synchronize_session=False)
+    )
+    job_res = await session.execute(job_stmt)
+    job_count = int(job_res.rowcount or 0)
+
+    return max(rem_count, job_count)
 
 
 class JobRunner:
@@ -542,7 +617,6 @@ class JobRunner:
 
     async def _sweep_overdue_reminders(self, now: float) -> int:
         """Sweeps and marks reminders overdue by >24 hours as 'missed'."""
-        cutoff_dt = datetime.fromtimestamp(now - REMINDER_OVERDUE_THRESHOLD_SECONDS, tz=timezone.utc)
         now_dt = datetime.fromtimestamp(now, tz=timezone.utc)
 
         missed_count = 0
@@ -557,37 +631,14 @@ class JobRunner:
                     setattr(job, "lease_until", None)
                     missed_count += 1
 
-        # Database sweep
+        # Database sweep (set-based UPDATEs)
         if self.session_factory is not None:
             async with self.session_factory() as session:
-                stmt = text("""
-                    UPDATE jobs
-                    SET status = 'missed',
-                        lease_owner = NULL,
-                        lease_until = NULL,
-                        updated_at = :now
-                    WHERE kind = 'reminder'
-                      AND status = 'pending'
-                      AND next_run_at <= :cutoff
-                    RETURNING id;
-                """)
-                res = await session.execute(stmt, {"now": now_dt, "cutoff": cutoff_dt})
-                rows = res.fetchall()
-                missed_count += len(rows)
-
-                # Sync reminders table
-                stmt_rem = text("""
-                    UPDATE reminders
-                    SET status = 'missed',
-                        updated_at = :now
-                    WHERE status IN ('pending', 'snoozed')
-                      AND (
-                        (status = 'pending' AND next_due_at <= :cutoff)
-                        OR
-                        (status = 'snoozed' AND COALESCE(snooze_until, next_due_at) <= :cutoff)
-                      );
-                """)
-                await session.execute(stmt_rem, {"now": now_dt, "cutoff": cutoff_dt})
+                missed_count += await sweep_overdue_reminders(
+                    session,
+                    now_utc=now_dt,
+                    overdue_seconds=REMINDER_OVERDUE_THRESHOLD_SECONDS,
+                )
                 await session.commit()
 
         return missed_count

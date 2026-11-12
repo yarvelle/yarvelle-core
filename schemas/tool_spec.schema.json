@@ -1,0 +1,456 @@
+{
+  "$defs": {
+    "ComposeToolBinding": {
+      "additionalProperties": false,
+      "description": "Binds a declarative tool to a bounded sequence of composed tool invocations.",
+      "properties": {
+        "kind": {
+          "const": "compose",
+          "default": "compose",
+          "description": "Macro composition binding",
+          "title": "Kind",
+          "type": "string"
+        },
+        "steps": {
+          "description": "Ordered sequence of composed tool steps",
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "minItems": 1,
+          "title": "Steps",
+          "type": "array"
+        }
+      },
+      "required": [
+        "steps"
+      ],
+      "title": "ComposeToolBinding",
+      "type": "object"
+    },
+    "DeclarativeToolSpec": {
+      "additionalProperties": false,
+      "description": "Canonical language-neutral specification of a single MCP or built-in tool.",
+      "properties": {
+        "name": {
+          "description": "Unique canonical tool identifier (e.g. 'attach-read', 'list_reminders')",
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "description": "LLM-facing description explaining purpose, preconditions, and constraints",
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "category": {
+          "description": "Logical tool category or family (e.g. 'workspace', 'delegation', 'reminders')",
+          "minLength": 1,
+          "title": "Category",
+          "type": "string"
+        },
+        "risk_tier": {
+          "description": "4-tier execution gate classification ('read', 'write_local', 'write_external', 'irreversible')",
+          "enum": [
+            "read",
+            "write_local",
+            "write_external",
+            "irreversible"
+          ],
+          "title": "Risk Tier",
+          "type": "string"
+        },
+        "input_schema": {
+          "additionalProperties": true,
+          "description": "JSON Schema Draft 2020-12 object schema for LLM-supplied arguments",
+          "title": "Input Schema",
+          "type": "object"
+        },
+        "output_schema": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional JSON Schema Draft 2020-12 schema for structured tool output",
+          "title": "Output Schema"
+        },
+        "binding": {
+          "description": "Execution binding declaring how the runtime dispatches this tool",
+          "discriminator": {
+            "mapping": {
+              "compose": "#/$defs/ComposeToolBinding",
+              "handler": "#/$defs/HandlerToolBinding",
+              "http": "#/$defs/HttpToolBinding",
+              "mcp": "#/$defs/McpToolBinding",
+              "prompt": "#/$defs/PromptToolBinding",
+              "sql": "#/$defs/SqlToolBinding"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/HandlerToolBinding"
+            },
+            {
+              "$ref": "#/$defs/SqlToolBinding"
+            },
+            {
+              "$ref": "#/$defs/McpToolBinding"
+            },
+            {
+              "$ref": "#/$defs/HttpToolBinding"
+            },
+            {
+              "$ref": "#/$defs/PromptToolBinding"
+            },
+            {
+              "$ref": "#/$defs/ComposeToolBinding"
+            }
+          ],
+          "title": "Binding"
+        },
+        "pack_id": {
+          "default": "core",
+          "description": "Owning pack slug ('core' for built-in runtime tools)",
+          "minLength": 1,
+          "title": "Pack Id",
+          "type": "string"
+        },
+        "scopes": {
+          "description": "Domain scopes required or touched by this tool",
+          "items": {
+            "type": "string"
+          },
+          "title": "Scopes",
+          "type": "array"
+        },
+        "capabilities": {
+          "description": "Profile capability flags required to expose this tool",
+          "items": {
+            "type": "string"
+          },
+          "title": "Capabilities",
+          "type": "array"
+        },
+        "data_sensitivity": {
+          "default": "internal",
+          "description": "Data sensitivity classification driving redaction and egress policy",
+          "enum": [
+            "public",
+            "internal",
+            "confidential",
+            "restricted",
+            "pii"
+          ],
+          "title": "Data Sensitivity",
+          "type": "string"
+        },
+        "trust": {
+          "default": "trusted",
+          "description": "Output provenance classification ('trusted' vs 'untrusted' taint source)",
+          "enum": [
+            "trusted",
+            "untrusted"
+          ],
+          "title": "Trust",
+          "type": "string"
+        },
+        "allowed_hosts": {
+          "description": "Outbound network host allowlist enforced by ScopedHttp / EgressFirewall",
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowed Hosts",
+          "type": "array"
+        },
+        "allowed_methods": {
+          "description": "Allowed HTTP methods when outbound hosts are declared",
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowed Methods",
+          "type": "array"
+        },
+        "context_params": {
+          "description": "Server-bound context parameters injected by the runtime (never LLM-controlled)",
+          "items": {
+            "type": "string"
+          },
+          "title": "Context Params",
+          "type": "array"
+        },
+        "phase_0_closed": {
+          "default": false,
+          "description": "Whether this tool belongs to the Phase 0 default sandboxed closed tool set",
+          "title": "Phase 0 Closed",
+          "type": "boolean"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "description": "Additional policy and UI trace metadata (entity, action, undoable, connector_id)",
+          "title": "Metadata",
+          "type": "object"
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "category",
+        "risk_tier",
+        "binding"
+      ],
+      "title": "DeclarativeToolSpec",
+      "type": "object"
+    },
+    "HandlerToolBinding": {
+      "additionalProperties": false,
+      "description": "Binds a declarative tool to an async Python handler (`module:function`).",
+      "properties": {
+        "kind": {
+          "const": "handler",
+          "default": "handler",
+          "description": "Python async handler binding",
+          "title": "Kind",
+          "type": "string"
+        },
+        "entrypoint": {
+          "description": "Importable async callable reference in 'package.module:function_name' format",
+          "title": "Entrypoint",
+          "type": "string"
+        }
+      },
+      "required": [
+        "entrypoint"
+      ],
+      "title": "HandlerToolBinding",
+      "type": "object"
+    },
+    "HttpToolBinding": {
+      "additionalProperties": false,
+      "description": "Binds a declarative tool to a ScopedHttp allowlisted request template.",
+      "properties": {
+        "kind": {
+          "const": "http",
+          "default": "http",
+          "description": "Templated HTTP request binding",
+          "title": "Kind",
+          "type": "string"
+        },
+        "method": {
+          "default": "GET",
+          "description": "HTTP method",
+          "enum": [
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE"
+          ],
+          "title": "Method",
+          "type": "string"
+        },
+        "url_template": {
+          "description": "HTTPS URL template",
+          "minLength": 1,
+          "title": "Url Template",
+          "type": "string"
+        },
+        "headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Static or templated HTTP headers",
+          "title": "Headers",
+          "type": "object"
+        },
+        "body_template": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional JSON request body template",
+          "title": "Body Template"
+        }
+      },
+      "required": [
+        "url_template"
+      ],
+      "title": "HttpToolBinding",
+      "type": "object"
+    },
+    "McpToolBinding": {
+      "additionalProperties": false,
+      "description": "Binds a declarative tool to a remote or stdio MCP server tool.",
+      "properties": {
+        "kind": {
+          "const": "mcp",
+          "default": "mcp",
+          "description": "External MCP server tool binding",
+          "title": "Kind",
+          "type": "string"
+        },
+        "server_id": {
+          "description": "Configured MCP server identifier",
+          "minLength": 1,
+          "title": "Server Id",
+          "type": "string"
+        },
+        "remote_tool": {
+          "description": "Remote tool name exposed by the MCP server",
+          "minLength": 1,
+          "title": "Remote Tool",
+          "type": "string"
+        },
+        "expected_pin_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional cryptographic schema pin hash verifying tool contract integrity",
+          "title": "Expected Pin Hash"
+        }
+      },
+      "required": [
+        "server_id",
+        "remote_tool"
+      ],
+      "title": "McpToolBinding",
+      "type": "object"
+    },
+    "PromptToolBinding": {
+      "additionalProperties": false,
+      "description": "Binds a declarative tool to a structured sub-LLM prompt template.",
+      "properties": {
+        "kind": {
+          "const": "prompt",
+          "default": "prompt",
+          "description": "Prompt template execution binding",
+          "title": "Kind",
+          "type": "string"
+        },
+        "template": {
+          "description": "Prompt template identifier or body",
+          "minLength": 1,
+          "title": "Template",
+          "type": "string"
+        },
+        "system": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional system prompt override",
+          "title": "System"
+        },
+        "max_output_tokens": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Maximum output tokens for prompt execution",
+          "title": "Max Output Tokens"
+        }
+      },
+      "required": [
+        "template"
+      ],
+      "title": "PromptToolBinding",
+      "type": "object"
+    },
+    "SqlToolBinding": {
+      "additionalProperties": false,
+      "description": "Binds a declarative tool to a parameterized SQL statement.",
+      "properties": {
+        "kind": {
+          "const": "sql",
+          "default": "sql",
+          "description": "Parameterized SQL execution binding",
+          "title": "Kind",
+          "type": "string"
+        },
+        "source": {
+          "default": "yarvelle-db",
+          "description": "Configured SQL data source identifier",
+          "title": "Source",
+          "type": "string"
+        },
+        "statement": {
+          "description": "Parameterized SQL statement template",
+          "minLength": 1,
+          "title": "Statement",
+          "type": "string"
+        }
+      },
+      "required": [
+        "statement"
+      ],
+      "title": "SqlToolBinding",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Versioned declarative tool-set resource document (`apiVersion: yarvelle.tools/v1`).",
+  "properties": {
+    "apiVersion": {
+      "const": "yarvelle.tools/v1",
+      "default": "yarvelle.tools/v1",
+      "description": "Declarative tool specification API version",
+      "title": "Apiversion",
+      "type": "string"
+    },
+    "kind": {
+      "const": "ToolSet",
+      "default": "ToolSet",
+      "description": "Resource document kind discriminator",
+      "title": "Kind",
+      "type": "string"
+    },
+    "pack_id": {
+      "default": "core",
+      "description": "Default owning pack identifier for tools declared in this file",
+      "minLength": 1,
+      "title": "Pack Id",
+      "type": "string"
+    },
+    "tools": {
+      "description": "Declarative tool specifications defined in this manifest",
+      "items": {
+        "$ref": "#/$defs/DeclarativeToolSpec"
+      },
+      "title": "Tools",
+      "type": "array"
+    }
+  },
+  "title": "Yarvelle Declarative Tool Specification Schema (yarvelle.tools/v1)",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.yarvelle.org/v1/tool_spec.schema.json"
+}

@@ -20,6 +20,7 @@ from pydantic import BaseModel
 
 from yarvelle_core.pack.spec import PackManifest
 from yarvelle_core.schemas.manifest import AgentManifest, SkillFrontmatter
+from yarvelle_core.schemas.tool_spec import ToolSetManifest
 
 
 def generate_json_schema(model_cls: type[BaseModel], title: str, schema_id: str) -> Dict[str, Any]:
@@ -34,7 +35,7 @@ def generate_json_schema(model_cls: type[BaseModel], title: str, schema_id: str)
 def emit_canonical_schemas(
     target_dirs: List[Path],
 ) -> Dict[str, Dict[str, Any]]:
-    """Emits pack.schema.json, agent.schema.json, and skill.schema.json to target directories."""
+    """Emits pack, agent, skill, and declarative tool canonical JSON Schemas to target directories."""
     schemas = {
         "pack.schema.json": generate_json_schema(
             PackManifest,
@@ -50,6 +51,11 @@ def emit_canonical_schemas(
             SkillFrontmatter,
             title="Yarvelle Skill Frontmatter Schema",
             schema_id="https://schemas.yarvelle.org/v1/skill.schema.json",
+        ),
+        "tool_spec.schema.json": generate_json_schema(
+            ToolSetManifest,
+            title="Yarvelle Declarative Tool Specification Schema (yarvelle.tools/v1)",
+            schema_id="https://schemas.yarvelle.org/v1/tool_spec.schema.json",
         ),
     }
 

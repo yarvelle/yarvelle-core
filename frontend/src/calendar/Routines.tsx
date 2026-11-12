@@ -58,7 +58,7 @@ export function Routines({
                 className="sr-only peer"
                 aria-label={`Toggle ${routine.title} routine`}
               />
-              <div className="h-6 w-11 rounded-full bg-surface-3 peer peer-checked:bg-primary peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all" />
+              <div className="h-6 w-11 rounded-full bg-surface-3 peer peer-checked:bg-primary peer-checked:after:translate-x-full peer-checked:after:border-fg-on-primary peer-checked:after:bg-fg-on-primary after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-surface after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all" />
             </label>
           </div>
         ))

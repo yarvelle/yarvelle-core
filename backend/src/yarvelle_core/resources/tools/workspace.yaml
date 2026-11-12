@@ -1,0 +1,86 @@
+# Yarvelle Core — Domain-Neutral AI Agent Runtime & Execution Engine
+# Copyright 2026 Spectrayan (https://spectrayan.com)
+#
+# Licensed under the PolyForm Noncommercial License 1.0.0 and the
+# Yarvelle Core Additional Terms (see LICENSE and ADDITIONAL-TERMS.md).
+# Personal and household local use only. Commercial use, hosted service
+# offering, rebranding, white-labeling, and redistribution of modified
+# forks are prohibited without a written commercial license from Spectrayan.
+#
+# Required Notice: Copyright 2026 Spectrayan (https://spectrayan.com)
+
+apiVersion: yarvelle.tools/v1
+kind: ToolSet
+pack_id: core
+tools:
+  - name: attach-read
+    category: workspace
+    risk_tier: read
+    trust: trusted
+    data_sensitivity: restricted
+    phase_0_closed: true
+    context_params: [profile_id, user_id, scope]
+    description: Read a text or PDF file located in the workspace attachments directory.
+    input_schema:
+      type: object
+      properties:
+        path:
+          type: string
+          description: 'Filename or path of attachment (e.g. "report.txt", "statement.pdf").'
+      required:
+        - path
+    binding:
+      kind: handler
+      entrypoint: yarvelle_core.tools.builtin_handlers:exec_attach_read
+
+  - name: workspace-note
+    category: workspace
+    risk_tier: write_local
+    trust: trusted
+    data_sensitivity: internal
+    phase_0_closed: true
+    context_params: [profile_id, user_id, scope]
+    description: >-
+      Save a new markdown note into the workspace notes directory and return its saved
+      relative and absolute paths. Only use this when explicitly asked to record, save,
+      or write a note. Do NOT call this tool when the user is merely asking questions
+      about existing notes, their locations, or their file paths.
+    input_schema:
+      type: object
+      properties:
+        title:
+          type: string
+          description: Short title for the note (letters, numbers, hyphens).
+        content:
+          type: string
+          description: Markdown formatted note content to record.
+      required:
+        - title
+        - content
+    binding:
+      kind: handler
+      entrypoint: yarvelle_core.tools.builtin_handlers:exec_workspace_note
+
+  - name: skill-docs
+    category: workspace
+    risk_tier: read
+    trust: trusted
+    data_sensitivity: public
+    phase_0_closed: true
+    context_params: [profile_id, scope]
+    description: Read documentation or reference files from an installed skill references directory.
+    input_schema:
+      type: object
+      properties:
+        skill_id:
+          type: string
+          description: The ID of the skill owning the reference document.
+        doc:
+          type: string
+          description: 'Filename of the reference document (e.g. "checklist.md").'
+      required:
+        - skill_id
+        - doc
+    binding:
+      kind: handler
+      entrypoint: yarvelle_core.tools.builtin_handlers:exec_skill_docs

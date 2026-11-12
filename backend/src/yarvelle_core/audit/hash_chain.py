@@ -23,7 +23,7 @@ import hashlib
 from typing import Any, Dict, Optional, Sequence
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from yarvelle_core.db.models import AuditEventRecord
@@ -176,57 +176,70 @@ async def append_chained_audit_event(
     return record
 
 
+DEFAULT_AUDIT_VERIFY_BATCH_SIZE: int = 500
+
+
 async def verify_profile_audit_chain(
     session: AsyncSession,
     profile_id: str,
+    *,
+    batch_size: int = DEFAULT_AUDIT_VERIFY_BATCH_SIZE,
 ) -> Dict[str, Any]:
     """Verifies the cryptographic integrity of a profile's `AuditEventRecord` hash chain.
+
+    Streams `AuditEventRecord` rows in bounded keyset pages ordered by `(ts, id)`
+    carrying only `expected_prev` across page boundaries so memory stays O(batch_size).
 
     Returns:
         Dictionary with `profile_id`, `valid`, `checked_count`, `head_hash`,
         `broken_at_event_id`, and `reason`.
     """
     clean_profile_id = (profile_id or "").strip()
-    stmt = (
-        select(AuditEventRecord)
-        .where(
-            AuditEventRecord.profile_id == clean_profile_id,
-            AuditEventRecord.entry_hash.is_not(None),
-        )
-        .order_by(AuditEventRecord.ts.asc(), AuditEventRecord.id.asc())
-        .execution_options(include_all_scopes=True)
-    )
-    result = await session.execute(stmt)
-    rows = list(result.scalars().all())
+    page_size = max(1, int(batch_size))
 
     expected_prev = GENESIS_HASH
-    for idx, row in enumerate(rows):
-        if row.prev_hash != expected_prev:
-            return {
-                "profile_id": clean_profile_id,
-                "valid": False,
-                "checked_count": idx + 1,
-                "head_hash": None,
-                "broken_at_event_id": row.id,
-                "reason": "prev_hash_mismatch",
-            }
+    checked_count = 0
+    head_hash = GENESIS_HASH
+    last_ts: Optional[datetime] = None
+    last_id: Optional[str] = None
 
-        recomputed_hash = compute_audit_entry_hash(
-            prev_hash=row.prev_hash or GENESIS_HASH,
-            event_id=row.id,
-            profile_id=row.profile_id,
-            event=row.event,
-            tool=row.tool,
-            risk=row.risk,
-            decision=row.decision,
-            payload_hash=row.payload_hash,
-            scope=row.scope,
-            pack_id=row.pack_id,
-            risk_tier=row.risk_tier,
+    while True:
+        criteria = [
+            AuditEventRecord.profile_id == clean_profile_id,
+            AuditEventRecord.entry_hash.is_not(None),
+        ]
+        if last_ts is not None and last_id is not None:
+            criteria.append(
+                or_(
+                    AuditEventRecord.ts > last_ts,
+                    and_(AuditEventRecord.ts == last_ts, AuditEventRecord.id > last_id),
+                )
+            )
+
+        stmt = (
+            select(AuditEventRecord)
+            .where(*criteria)
+            .order_by(AuditEventRecord.ts.asc(), AuditEventRecord.id.asc())
+            .limit(page_size)
+            .execution_options(include_all_scopes=True)
         )
-        if row.entry_hash != recomputed_hash:
-            # Fallback to checking legacy 8-field hash for pre-migration records
-            legacy_hash = compute_audit_entry_hash_v1(
+        result = await session.execute(stmt)
+
+        rows_in_page = 0
+        for row in result.scalars():
+            rows_in_page += 1
+            checked_count += 1
+            if row.prev_hash != expected_prev:
+                return {
+                    "profile_id": clean_profile_id,
+                    "valid": False,
+                    "checked_count": checked_count,
+                    "head_hash": None,
+                    "broken_at_event_id": row.id,
+                    "reason": "prev_hash_mismatch",
+                }
+
+            recomputed_hash = compute_audit_entry_hash(
                 prev_hash=row.prev_hash or GENESIS_HASH,
                 event_id=row.id,
                 profile_id=row.profile_id,
@@ -235,24 +248,45 @@ async def verify_profile_audit_chain(
                 risk=row.risk,
                 decision=row.decision,
                 payload_hash=row.payload_hash,
+                scope=row.scope,
+                pack_id=row.pack_id,
+                risk_tier=row.risk_tier,
             )
-            if row.entry_hash != legacy_hash:
-                return {
-                    "profile_id": clean_profile_id,
-                    "valid": False,
-                    "checked_count": idx + 1,
-                    "head_hash": None,
-                    "broken_at_event_id": row.id,
-                    "reason": "hash_mismatch",
-                }
+            if row.entry_hash != recomputed_hash:
+                # Fallback to checking legacy 8-field hash for pre-migration records
+                legacy_hash = compute_audit_entry_hash_v1(
+                    prev_hash=row.prev_hash or GENESIS_HASH,
+                    event_id=row.id,
+                    profile_id=row.profile_id,
+                    event=row.event,
+                    tool=row.tool,
+                    risk=row.risk,
+                    decision=row.decision,
+                    payload_hash=row.payload_hash,
+                )
+                if row.entry_hash != legacy_hash:
+                    return {
+                        "profile_id": clean_profile_id,
+                        "valid": False,
+                        "checked_count": checked_count,
+                        "head_hash": None,
+                        "broken_at_event_id": row.id,
+                        "reason": "hash_mismatch",
+                    }
 
-        expected_prev = row.entry_hash
+            expected_prev = row.entry_hash
+            head_hash = row.entry_hash
+            last_ts = row.ts
+            last_id = row.id
+
+        if rows_in_page < page_size:
+            break
 
     return {
         "profile_id": clean_profile_id,
         "valid": True,
-        "checked_count": len(rows),
-        "head_hash": rows[-1].entry_hash if rows else GENESIS_HASH,
+        "checked_count": checked_count,
+        "head_hash": head_hash,
         "broken_at_event_id": None,
         "reason": None,
     }

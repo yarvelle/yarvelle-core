@@ -1,0 +1,45 @@
+# Yarvelle Core — Domain-Neutral AI Agent Runtime & Execution Engine
+# Copyright 2026 Spectrayan (https://spectrayan.com)
+#
+# Licensed under the PolyForm Noncommercial License 1.0.0 and the
+# Yarvelle Core Additional Terms (see LICENSE and ADDITIONAL-TERMS.md).
+# Personal and household local use only. Commercial use, hosted service
+# offering, rebranding, white-labeling, and redistribution of modified
+# forks are prohibited without a written commercial license from Spectrayan.
+#
+# Required Notice: Copyright 2026 Spectrayan (https://spectrayan.com)
+
+apiVersion: yarvelle.tools/v1
+kind: ToolSet
+pack_id: core
+tools:
+  - name: search_records
+    category: search
+    risk_tier: read
+    trust: trusted
+    data_sensitivity: restricted
+    phase_0_closed: true
+    context_params: [profile_id, user_id, scope]
+    description: Search user records, attachments, and notes.
+    input_schema:
+      type: object
+      properties:
+        query:
+          type: string
+          description: Natural language query or keywords to search across user records.
+        limit:
+          type: integer
+          description: "Maximum number of search results to retrieve (default: 5)."
+          default: 5
+        mode:
+          type: string
+          description: "Search mode: 'hybrid', 'lexical', or 'semantic' (default: 'hybrid')."
+          default: hybrid
+        source:
+          type: string
+          description: "Optional filter by record source ('workspace_note', 'upload', 'document', 'note', 'connector', 'external')."
+      required:
+        - query
+    binding:
+      kind: handler
+      entrypoint: yarvelle_core.tools.builtin_handlers:exec_search_records

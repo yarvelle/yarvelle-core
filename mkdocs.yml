@@ -70,3 +70,4 @@ nav:
       - 0009 - Content-Addressed Storage: adr/0009-content-addressed-storage-and-hybrid-search.md
       - 0010 - Stateless OAuth PKCE Relay: adr/0010-oauth-relay-and-stateless-callback.md
       - 0011 - Internationalization & Multilingual Architecture: adr/0011-internationalization-and-multilingual-architecture.md
+      - 0012 - Declarative Tool Specifications: adr/0012-declarative-tool-specifications.md

@@ -13,7 +13,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import json
 import logging
 import secrets
@@ -319,44 +319,7 @@ async def list_reminders(
     profile: Profile = Depends(require_profile_access("view_records")),
     db: AsyncSession = Depends(get_db),
 ) -> ReminderListResponse:
-    """Lists reminders, automatically sweeps overdue items past 24 hours to missed."""
-    now_utc = datetime.now(timezone.utc)
-    cutoff_24h = now_utc - timedelta(hours=24)
-
-    # 1. Sweep overdue reminders > 24 hours
-    overdue_stmt = select(Reminder).where(
-        Reminder.profile_id == profile.id,
-        Reminder.status.in_(["pending", "snoozed"]),
-    )
-    overdue_res = await db.execute(overdue_stmt)
-    pending_items = list(overdue_res.scalars().all())
-
-    sweep_needed = False
-    for r in pending_items:
-        eff_due = r.snooze_until if (r.status == "snoozed" and r.snooze_until) else r.next_due_at
-        if eff_due:
-            eff_due_utc = eff_due.astimezone(timezone.utc) if eff_due.tzinfo else eff_due.replace(tzinfo=timezone.utc)
-            if now_utc - eff_due_utc > timedelta(hours=24):
-                r.status = "missed"
-                r.updated_at = now_utc
-                sweep_needed = True
-
-                # Also mark job missed
-                job_stmt = select(Job).where(
-                    Job.kind == "reminder",
-                    Job.idempotency_key == f"reminder:{r.id}",
-                    Job.status == "pending",
-                )
-                j_res = await db.execute(job_stmt)
-                m_job = j_res.scalar_one_or_none()
-                if m_job:
-                    m_job.status = "missed"
-                    m_job.updated_at = now_utc
-
-    if sweep_needed:
-        await db.commit()
-
-    # 2. Query filtered reminders
+    """Lists reminders for a profile without performing database writes on GET."""
     query = select(Reminder).where(Reminder.profile_id == profile.id)
 
     if status_filter:
