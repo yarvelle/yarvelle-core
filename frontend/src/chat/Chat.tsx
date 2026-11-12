@@ -170,10 +170,10 @@ export function ChatMessageItem({ message, className }: ChatMessageProps) {
           className={cn(
             'yc-Chat-bubble rounded-2xl px-4 py-2.5 shadow-1 text-sm leading-relaxed',
             isUser
-              ? 'bg-primary text-primary-fg rounded-be-sm'
+              ? 'bg-primary text-primary-fg rounded-ee-sm'
               : isSystem
               ? 'bg-surface-2 text-fg-muted border border-border'
-              : 'bg-surface-2 text-fg rounded-bs-sm border border-border'
+              : 'bg-surface-2 text-fg rounded-es-sm border border-border'
           )}
         >
           {message.reasoning && (

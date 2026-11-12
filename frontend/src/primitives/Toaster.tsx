@@ -108,7 +108,7 @@ export function Toaster({ className, position = 'bottom-end' }: ToasterProps) {
           data-slot="toast"
           data-variant={toast.variant || 'info'}
           className={cn(
-            'yc-Toaster-toast pointer-events-auto flex w-full items-start justify-between rounded-lg p-3 shadow-2 border transition-all duration-normal',
+            'yc-Toaster-toast pointer-events-auto flex w-full items-start justify-between rounded-lg p-3 shadow-2 border transition-all duration-base',
             variantStyles[toast.variant || 'info']
           )}
         >

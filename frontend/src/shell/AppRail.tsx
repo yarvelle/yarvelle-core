@@ -55,7 +55,7 @@ export function AppRail({
       data-slot="app-rail"
       data-collapsed={collapsed ? 'true' : undefined}
       className={cn(
-        'yc-AppRail-root flex flex-col justify-between border-e border-border bg-surface text-fg transition-all duration-normal',
+        'yc-AppRail-root flex flex-col justify-between border-e border-border bg-surface text-fg transition-all duration-base',
         collapsed ? 'w-16' : 'w-64',
         className
       )}
@@ -92,7 +92,7 @@ export function AppRail({
                 {item.icon && <span className="inline-flex shrink-0">{item.icon}</span>}
                 {!collapsed && <span className="truncate flex-1">{item.label}</span>}
                 {!collapsed && item.badge !== undefined && (
-                  <span className="rounded-full bg-primary-subtle px-1.5 py-0.5 text-[10px] font-bold text-primary">
+                  <span className="rounded-full bg-primary-soft px-1.5 py-0.5 text-[10px] font-bold text-primary">
                     {item.badge}
                   </span>
                 )}

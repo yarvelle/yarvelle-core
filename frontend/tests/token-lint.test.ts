@@ -32,8 +32,9 @@ const sourceFiles = getAllSourceFiles(srcDir);
 
 describe('GU3 Token Lint & Architectural Purity', () => {
   it('contains zero raw Tailwind palette classes in src/**', () => {
-    // e.g. bg-zinc-500, text-slate-900, border-blue-200
+    // e.g. bg-zinc-500, text-slate-900, border-blue-200, text-white, bg-black/10
     const palettePattern = /\b(slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-[0-9]{2,3}\b/g;
+    const bwPattern = /\b(?:bg|text|border|ring|fill|stroke)-(?:white|black)(?:\/[0-9]{1,3})?\b/g;
     const violations: Array<{ file: string; match: string }> = [];
 
     for (const filePath of sourceFiles) {
@@ -41,6 +42,10 @@ describe('GU3 Token Lint & Architectural Purity', () => {
       const matches = content.match(palettePattern);
       if (matches) {
         matches.forEach((m) => violations.push({ file: path.relative(srcDir, filePath), match: m }));
+      }
+      const bwMatches = content.match(bwPattern);
+      if (bwMatches) {
+        bwMatches.forEach((m) => violations.push({ file: path.relative(srcDir, filePath), match: m }));
       }
     }
 

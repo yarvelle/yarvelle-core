@@ -57,11 +57,11 @@ export function ExecutionPlanCard({
                 className={cn(
                   'mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] font-bold',
                   isDone
-                    ? 'bg-success-fg text-white'
+                    ? 'bg-success-fg text-fg-on-primary'
                     : isRunning
                     ? 'animate-spin border-2 border-primary border-t-transparent'
                     : isFailed
-                    ? 'bg-danger-fg text-white'
+                    ? 'bg-danger-fg text-fg-on-primary'
                     : 'bg-surface-3 text-fg-muted'
                 )}
               >
