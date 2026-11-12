@@ -17,7 +17,7 @@ from typing import List, Literal, Optional
 from pydantic import BaseModel, Field
 
 ProfileRole = Literal["self", "guardian", "viewer"]
-AccessLevel = Literal["manage", "view_clinical", "view_paperwork"]
+AccessLevel = Literal["manage", "view_records", "view_paperwork"]
 
 
 class ProfileCreate(BaseModel):
@@ -43,14 +43,14 @@ class ProfileUpdate(BaseModel):
 class ProfileConsentResponse(BaseModel):
     id: str
     profile_id: str
-    allow_clinical: bool
+    allow_assist: bool
     terms_version: str
     consented_at: Optional[str] = None
     teen_handover_notified: bool = False
 
 
 class ProfileConsentUpdate(BaseModel):
-    allow_clinical: bool
+    allow_assist: bool
     terms_version: Optional[str] = "v1.0"
 
 
@@ -66,7 +66,7 @@ class ProfileAccessResponse(BaseModel):
 class ProfileAccessGrant(BaseModel):
     user_id: Optional[str] = None
     email: Optional[str] = None
-    access_level: AccessLevel = Field(default="view_clinical")
+    access_level: AccessLevel = Field(default="view_records")
 
 
 class ProfileSummaryResponse(BaseModel):
@@ -114,7 +114,7 @@ ProfileResponse = ProfileDetailResponse
 class ViewerInviteCreate(BaseModel):
     invitee_name: str = Field(..., min_length=1, max_length=255, description="Name or label of the invited viewer")
     role: ProfileRole = Field(default="viewer", description="Role granted upon acceptance")
-    view_clinical: bool = Field(default=True, description="Whether viewer can see visits, prep, and notes")
+    view_records: bool = Field(default=True, description="Whether viewer can see visits, prep, and notes")
     view_paperwork: bool = Field(default=False, description="Whether viewer can see paperwork, bills, and insurance")
 
 
@@ -125,7 +125,7 @@ class ViewerInviteResponse(BaseModel):
     invited_by: Optional[str] = Field(default=None, description="User ID who issued the invitation")
     invitee_name: str = Field(..., description="Name of invited viewer")
     role: str = Field(default="viewer")
-    view_clinical: bool = Field(default=True)
+    view_records: bool = Field(default=True)
     view_paperwork: bool = Field(default=False)
     expires_at: str = Field(..., description="ISO UTC expiration timestamp (7 days)")
     accepted_at: Optional[str] = Field(default=None)

@@ -342,15 +342,15 @@ def _escape_ics_text(val: Optional[str]) -> str:
 
 def generate_ics_calendar(
     reminders: List[Dict[str, Any]],
-    sanitize_phi: bool = True,
+    sanitize_sensitive: bool = True,
     app_name: Optional[str] = None,
 ) -> str:
     """Generates RFC 5545 .ics calendar content formatted with CRLF.
 
     Args:
         reminders: List of reminder state dicts or Reminder ORM instances.
-        sanitize_phi: When True (default), masks medical specifics in title and description.
-                      When False, exports verbatim title and description.
+        sanitize_sensitive: When True (default), masks private specifics in title and description.
+                            When False, exports verbatim title and description.
         app_name: Application brand name for sanitized summary and PRODID.
 
     Returns:
@@ -405,7 +405,7 @@ def generate_ics_calendar(
         else:
             dt_stamp = now_stamp
 
-        if sanitize_phi:
+        if sanitize_sensitive:
             cat_name = (category or "general").title()
             title = f"{app_name} {cat_name} Reminder"
             desc = f"Sanitized reminder event. Check {app_name} app for private details."

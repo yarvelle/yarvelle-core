@@ -93,9 +93,9 @@ class ToolDeclaration(BaseModel):
 
     name: str = Field(..., description="Unique tool identifier")
     description: str = Field(..., description="Human-readable description of tool capability")
-    risk_class: Literal["read_only", "clinical_assist", "admin"] = Field(
+    risk_class: Literal["read_only", "assist", "admin"] = Field(
         default="read_only",
-        description="Clinical and operational risk classification",
+        description="Operational risk classification",
     )
 
 
@@ -170,7 +170,7 @@ class ConnectorManifest(BaseModel):
     )
     categories: List[str] = Field(
         default_factory=list,
-        description="Clinical or administrative categories provided by this connector",
+        description="Domain or administrative categories provided by this connector",
     )
     entrypoint: Optional[str] = Field(
         default=None,

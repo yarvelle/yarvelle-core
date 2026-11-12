@@ -2,11 +2,11 @@
   "locale": "fr-FR",
   "direction": "ltr",
   "safety": {
-    "disclaimer_banner": "Les agents Yarvelle fournissent une aide éducative au bien-être et à l'orientation des soins. Ceci ne remplace ni un médecin ni les services d'urgence. Ne modifiez jamais un traitement sans l'avis du médecin prescripteur.",
-    "emergency_directive": "En cas d'urgence médicale, cessez d'utiliser cet assistant et appelez immédiatement le 112, le 15 ou le 911 (ou le 988 en cas de crise), ou rendez-vous aux urgences les plus proches.",
-    "non_clinical_notice": "À titre purement informatif et pour préparer vos consultations. Vérifiez toujours les décisions cliniques auprès d'un professionnel de santé qualifié.",
-    "disclaimerBanner": "Yarvelle vous aide à préparer vos consultations médicales. Il ne fournit pas de diagnostic ni de traitement médical.",
-    "emergencyNotice": "En cas d'urgence médicale, appelez immédiatement le 15, le 112 ou le 911."
+    "disclaimer_banner": "Les agents Yarvelle fournissent une aide informative et organisationnelle. Vérifiez toujours les décisions importantes auprès de sources primaires.",
+    "emergency_directive": "En cas d'urgence immédiate, cessez d'utiliser cet assistant et contactez les services d'urgence locaux.",
+    "informational_notice": "À titre purement informatif et organisationnel. Vérifiez toujours les décisions importantes auprès d'un professionnel qualifié.",
+    "disclaimerBanner": "Yarvelle vous aide à organiser vos documents, tâches et listes de préparation.",
+    "emergencyNotice": "En cas d'urgence immédiate, contactez les services d'urgence locaux."
   },
   "navigation": {
     "home": "Accueil",
@@ -174,7 +174,6 @@
     "create_agent": "Créer un agent",
     "create_skill": "Créer une compétence",
     "domain_all": "Tous les domaines",
-    "domain_clinical": "Clinique",
     "domain_label": "Domaine",
     "domain_navigation": "Navigation",
     "domain_wellness": "Bien-être",
@@ -182,7 +181,6 @@
     "for_caregivers": "Pour les aidants",
     "risk_admin": "Administratif",
     "risk_all": "Tous les niveaux",
-    "risk_clinical": "Assistance clinique",
     "risk_wellness": "Bien-être",
     "search_agents": "Rechercher des agents par nom, mot-clé ou domaine...",
     "search_skills": "Rechercher des compétences par nom, mot-clé ou domaine...",
@@ -194,7 +192,9 @@
     "stage_pre_visit": "Avant la visite",
     "tab_agents": "Agents",
     "tab_skills": "Compétences",
-    "view_details": "Voir les détails"
+    "view_details": "Voir les détails",
+    "domain_specialist": "Clinique",
+    "risk_assist": "Assistance clinique"
   },
   "family": {
     "title": "Famille",
@@ -333,13 +333,13 @@
     },
     "privacy": {
       "title": "Confidentialité, Consentement et Données",
-      "description": "Consultez la souveraineté des données sur l'appareil, les consentements cliniques et les données locales du navigateur.",
-      "clinicalConsents": "Consentements d'Assistance Clinique",
-      "clinicalConsentsDesc": "Les assistants de préparation clinique ne s'exécutent qu'après votre consentement explicite. Le retrait prend effet dès le message suivant.",
+      "description": "Consultez la souveraineté des données sur l'appareil, les consentements d'assistance et les données locales du navigateur.",
       "localBrowserData": "Données et Stockage du Navigateur Local",
       "localBrowserDataDesc": "Les données sont stockées dans votre navigateur. Vous pouvez effacer les discussions ou supprimer les clés enregistrées à tout moment.",
       "storedConversations": "Discussions enregistrées",
-      "savedApiKeys": "Clés API enregistrées"
+      "savedApiKeys": "Clés API enregistrées",
+      "assistConsents": "Consentements d'Assistance",
+      "assistConsentsDesc": "Les assistants avancés ne s'exécutent qu'après votre consentement explicite. Le retrait prend effet dès le message suivant."
     },
     "diagnostics": {
       "title": "Diagnostics et État du Système",

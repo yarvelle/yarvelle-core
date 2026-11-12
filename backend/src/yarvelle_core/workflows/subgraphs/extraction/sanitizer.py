@@ -11,10 +11,9 @@
 
 """PII Sanitizer for Document & Attachment Extraction (Feature F-35 & Domain 5).
 
-Automated masking of direct identifiers (SSN, MRN, phone numbers, street addresses,
+Automated masking of direct identifiers (SSN, record identifiers, phone numbers, street addresses,
 emails) before sending document contents to external model providers, while strictly
-preserving terminology, blood pressure (e.g. 120/80 mmHg), lab values, medications,
-and dosages.
+preserving domain terminology, numerical ratios (e.g. 120/80), dates, and structured values.
 """
 
 from __future__ import annotations
@@ -28,7 +27,7 @@ from typing import Dict, List, Optional, Set, Tuple, Union
 # ============================================================================
 
 DEFAULT_SSN_TAG: str = "[SSN]"
-DEFAULT_MRN_TAG: str = "[MRN]"
+DEFAULT_RECORD_ID_TAG: str = "[RECORD_ID]"
 DEFAULT_PHONE_TAG: str = "[PHONE]"
 DEFAULT_ADDRESS_TAG: str = "[ADDRESS]"
 DEFAULT_EMAIL_TAG: str = "[EMAIL]"
@@ -46,7 +45,7 @@ EMAIL_PATTERN: re.Pattern[str] = re.compile(
 
 # 2.2 Social Security Numbers (SSN)
 # Hyphenated / dotted / space-separated (e.g., 123-45-6789, 123.45.6789, 123 45 6789)
-# Uses digit lookarounds (?<!\d) and (?!\d) to match even when adjacent to letters (e.g. 123-45-6789MRN:)
+# Uses digit lookarounds (?<!\d) and (?!\d) to match even when adjacent to letters (e.g. 123-45-6789ID:)
 SSN_HYPHEN_PATTERN: re.Pattern[str] = re.compile(
     r"(?<!\d)\d{3}[-\s\.]\d{2}[-\s\.]\d{4}(?!\d)"
 )
@@ -61,21 +60,21 @@ SSN_UNHYPHENATED_PATTERN: re.Pattern[str] = re.compile(
     r"(?<!\d)\d{9}(?!\d)"
 )
 
-# 2.3 Medical Record Numbers (MRN)
-# Direct MRN token starting with MRN (e.g. MRN44921, MRN998877)
-MRN_TOKEN_PATTERN: re.Pattern[str] = re.compile(
-    r"(?i)\bMRN[0-9A-Z]+\b"
+# 2.3 External Record / Account / Member Identifiers
+# Direct prefixed record token (e.g. REC44921, ID998877)
+RECORD_ID_TOKEN_PATTERN: re.Pattern[str] = re.compile(
+    r"(?i)\b(?:REC|ACCT|MEM)[0-9A-Z]{4,}\b"
 )
 
-# Contextual MRN labeled with MRN:, Medical Record Number:, etc.
-MRN_CONTEXT_PATTERN: re.Pattern[str] = re.compile(
-    r"(?i)(\b(?:mrn|medical\s*record\s*(?:no\.?|number)?|med\s*rec\s*#?)\b[:#\s]+)[A-Za-z0-9\-]+"
+# Contextual record identifier labeled with Record ID:, Account Number:, Member ID:, etc.
+RECORD_ID_CONTEXT_PATTERN: re.Pattern[str] = re.compile(
+    r"(?i)(\b(?:record\s*(?:id|no\.?|number)?|account\s*(?:id|no\.?|number)?|member\s*(?:id|no\.?|number)?)\b[:#\s]+)[A-Za-z0-9\-]+"
 )
 
 # 2.4 Phone Numbers
 # US formats: (555) 234-5678, 555-234-5678, 555.234.5678, 555 234 5678
 # International formats with +: +1-555-432-1098, +44 20 7946 0958, +1 (555) 234-5678
-# Preserves blood pressure (120/80 mmHg uses /), dates (2026-09-30), and copays ($25)
+# Preserves ratios (120/80 uses /), dates (2026-09-30), and currency ($25)
 _US_PHONE: str = (
     r"(?:(?:\+1[\s.-]?)?(?:\(\d{3}\)|\b\d{3})[\s.-]?\d{3}[\s.-]\d{4}|\(\d{3}\)\s*\d{3}[\s.-]\d{4})"
 )
@@ -91,19 +90,18 @@ PHONE_CONTEXT_PATTERN: re.Pattern[str] = re.compile(
 
 # 2.5 Street Addresses
 # Matches house number + street name + street suffix (e.g. 123 Elm Street, Springfield)
-# Enforces \b on street types to avoid matching clinical words like "stay" in "stay: 24 hours".
+# Enforces \b on street types to avoid matching ordinary words like "stay" in "stay: 24 hours".
 # Uses negative lookaheads and word boundary restrictions to prevent collisions with:
-# - Physician titles: "Dr. Smith" (Drive vs Doctor)
-# - Diagnostic imaging: "CT scan" (Court vs Computed Tomography)
-# - Pathology findings: "sentinel LN showed..." (Lane vs Lymph Node)
+# - Honorific titles: "Dr. Smith" (Drive vs honorific Dr.)
+# - Abbreviated phrases: "CT scan" (Court vs abbreviation)
 # - Common nouns: "different way" (Street suffix Way vs common noun way)
 _STREET_TYPES: str = (
     r"(?:"
     r"Street|St\.?|Avenue|Ave\.?|Boulevard|Blvd\.?|Road|Rd\.?|"
     r"Drive|Dr(?!\.\s*(?-i:[A-Z])|\s+(?-i:[A-Z][a-z]+(?:'s)?\b))\.?|"
-    r"Lane|Ln(?!\s*(?:showed|positive|negative|dissection|biopsy|involvement|metastasis|resected|removed|palpable|enlarged|nodes?|status)\b)\.?|"
+    r"Lane|Ln(?!\s*(?:showed|positive|negative|status)\b)\.?|"
     r"Way(?!\s+(?:to|of|that|in|out|through)\b)|"
-    r"Court|Ct(?!\s*(?:scan|imaging|angiogram|guided|results?)\b)\.?|"
+    r"Court|Ct(?!\s*(?:scan|imaging|results?)\b)\.?|"
     r"Place|Pl\.?|Terrace|Ter\.?|Circle|Cir\.?|"
     r"Parkway|Pkwy\.?|Highway|Hwy\.?|Loop|Square|Sq\.?|Trail|Trl\.?|Path"
     r")\b"
@@ -118,12 +116,12 @@ _CITY_STATE_ZIP: str = (
     r"|\s*,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?"
     r"|\s*,\s*\d{5}(?:-\d{4})?"
     r"|\s*,\s*[A-Z][a-zA-Z\s.-]{1,30}?\s*,\s*[A-Z]{2}\b"
-    r"|\s*,\s*[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?(?=\s*(?:[.,\n\r)]|$|\b(?:email|phone|mrn|ssn|dob)\b))"
+    r"|\s*,\s*[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?(?=\s*(?:[.,\n\r)]|$|\b(?:email|phone|id|ssn|dob)\b))"
     r")?"
 )
 _STREET_NAME_WORD: str = (
-    r"(?!\b(?:weeks?|days?|months?|years?|hours?|minutes?|times?|doses?|dosed|"
-    r"pelvic|chest|abdominal|sentinel|axillary|different|another|other|same|with|every|per)\b)"
+    r"(?!\b(?:weeks?|days?|months?|years?|hours?|minutes?|times?|"
+    r"different|another|other|same|with|every|per)\b)"
     r"[A-Za-z0-9#\.\-]+"
 )
 ADDRESS_PATTERN: re.Pattern[str] = re.compile(
@@ -133,7 +131,7 @@ PO_BOX_PATTERN: re.Pattern[str] = re.compile(
     r"(?i)\b(?:p\.?o\.?\s*box\s+\d+)(?:\s*,\s*[A-Z][a-zA-Z\s.-]{1,30}?)?(?:\s*,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?)?"
 )
 ADDRESS_CONTEXT_PATTERN: re.Pattern[str] = re.compile(
-    r"(?i)(\b(?:address|resides\s+at|residing\s+at|home\s+address)\b[:\s]+)(?:[0-9A-Za-z\s,.\-#]+?)(?=\s*(?:\n|\r|\.|$|phone|mrn|ssn|dob))"
+    r"(?i)(\b(?:address|resides\s+at|residing\s+at|home\s+address)\b[:\s]+)(?:[0-9A-Za-z\s,.\-#]+?)(?=\s*(?:\n|\r|\.|$|phone|id|ssn|dob))"
 )
 
 
@@ -154,11 +152,11 @@ class SanitizationResult:
 # ============================================================================
 
 def sanitize_pii(text: str, mask_type: str = "tag") -> str:
-    """Masks direct PII (SSN, MRN, phone, address, email) from input text.
+    """Masks direct PII (SSN, record ID, phone, address, email) from input text.
 
     Args:
         text: Source text possibly containing sensitive identifiers.
-        mask_type: "tag" to replace with typed placeholders ([SSN], [MRN], [PHONE], [ADDRESS]),
+        mask_type: "tag" to replace with typed placeholders ([SSN], [RECORD_ID], [PHONE], [ADDRESS]),
                    or "redacted" to replace with [REDACTED].
 
     Returns:
@@ -169,7 +167,7 @@ def sanitize_pii(text: str, mask_type: str = "tag") -> str:
 
     is_redacted = mask_type == "redacted"
     ssn_tag = DEFAULT_REDACTED_TAG if is_redacted else DEFAULT_SSN_TAG
-    mrn_tag = DEFAULT_REDACTED_TAG if is_redacted else DEFAULT_MRN_TAG
+    record_id_tag = DEFAULT_REDACTED_TAG if is_redacted else DEFAULT_RECORD_ID_TAG
     phone_tag = DEFAULT_REDACTED_TAG if is_redacted else DEFAULT_PHONE_TAG
     addr_tag = DEFAULT_REDACTED_TAG if is_redacted else DEFAULT_ADDRESS_TAG
     email_tag = DEFAULT_REDACTED_TAG if is_redacted else DEFAULT_EMAIL_TAG
@@ -187,11 +185,11 @@ def sanitize_pii(text: str, mask_type: str = "tag") -> str:
     # 2c. Standalone unhyphenated 9-digit SSN
     out = SSN_UNHYPHENATED_PATTERN.sub(ssn_tag, out)
 
-    # 3. Mask MRN
-    # 3a. Direct MRN tokens (e.g. MRN44921, MRN998877)
-    out = MRN_TOKEN_PATTERN.sub(mrn_tag, out)
-    # 3b. Contextually labeled MRN (e.g. MRN: 987654)
-    out = MRN_CONTEXT_PATTERN.sub(rf"\g<1>{mrn_tag}", out)
+    # 3. Mask Record Identifiers
+    # 3a. Direct record tokens (e.g. REC44921, ACCT998877)
+    out = RECORD_ID_TOKEN_PATTERN.sub(record_id_tag, out)
+    # 3b. Contextually labeled record IDs (e.g. Record ID: 987654)
+    out = RECORD_ID_CONTEXT_PATTERN.sub(rf"\g<1>{record_id_tag}", out)
 
     # 4. Mask Phone Numbers
     out = PHONE_COMBINED_PATTERN.sub(phone_tag, out)
@@ -216,7 +214,7 @@ def sanitize_pii_with_metadata(text: str, mask_type: str = "tag") -> Sanitizatio
     counts: Dict[str, int] = {}
     counts["email"] = len(EMAIL_PATTERN.findall(text))
     counts["ssn"] = len(SSN_HYPHEN_PATTERN.findall(text)) + len(SSN_UNHYPHENATED_PATTERN.findall(text))
-    counts["mrn"] = len(MRN_TOKEN_PATTERN.findall(text))
+    counts["record_id"] = len(RECORD_ID_TOKEN_PATTERN.findall(text))
     counts["phone"] = len(PHONE_COMBINED_PATTERN.findall(text))
     counts["address"] = len(ADDRESS_PATTERN.findall(text)) + len(PO_BOX_PATTERN.findall(text))
 
@@ -257,8 +255,8 @@ class PIISanitizer:
 __all__ = [
     "DEFAULT_ADDRESS_TAG",
     "DEFAULT_EMAIL_TAG",
-    "DEFAULT_MRN_TAG",
     "DEFAULT_PHONE_TAG",
+    "DEFAULT_RECORD_ID_TAG",
     "DEFAULT_REDACTED_TAG",
     "DEFAULT_SSN_TAG",
     "PIISanitizer",

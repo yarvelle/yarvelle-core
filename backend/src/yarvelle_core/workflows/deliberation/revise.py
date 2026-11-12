@@ -28,6 +28,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import ValidationError
 
 from yarvelle_core.schemas.plan import SharedConstraint
+from yarvelle_core.resources.loader import get_resource_loader
 from yarvelle_core.scope.context import scope_context
 from yarvelle_core.workflows.deliberation.doc_critique import _invoke_model_async, parse_json_or_literal
 from yarvelle_core.workflows.deliberation.tool_gate import derive_tool_risk_tier, filter_read_only_tools
@@ -99,21 +100,16 @@ async def run_selective_revision(
             for c in agent_critiques
         )
 
-        system_prompt = (
-            f"You are specialist agent '{aid}' revising your proposal in deliberation round {round_num}.\n"
-            "Peers and auditors have reviewed your prior proposal with the following critiques:\n"
-            f"{critique_summary}\n\n"
-            "Revise your proposal to address these critiques. Output a JSON object adhering to AgentProposal schema:\n"
-            "- agent_id: string\n"
-            "- round_num: integer\n"
-            "- scope: string\n"
-            "- summary: string\n"
-            "- recommendations: list of strings\n"
-            "- resource_claims: dict mapping constraint slug to numeric float\n"
-            "- resource_claim_units: dict mapping constraint slug to allowed unit string\n"
-            "- staged_actions: optional list of proposed actions (tool_name, tool_args, rationale)\n"
-            "Read-only tools may be consulted during deliberation. Any state-mutating action "
-            "must be staged under staged_actions for human review at plan completion."
+        system_prompt = get_resource_loader().render_template(
+            "deliberation_revise",
+            {
+                "agent_id": aid,
+                "round_num": round_num,
+                "critique_summary": critique_summary,
+                "scope": prior_prop.scope,
+                "pack_instructions": str(ctx.get("pack_instructions") or "").strip(),
+            },
+            pack_id=ctx.get("pack_id"),
         )
 
         messages = [

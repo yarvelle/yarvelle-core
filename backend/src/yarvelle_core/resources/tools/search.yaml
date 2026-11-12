@@ -17,7 +17,7 @@ tools:
     category: search
     risk_tier: read
     trust: trusted
-    data_sensitivity: confidential
+    data_sensitivity: restricted
     phase_0_closed: true
     context_params: [profile_id, user_id, scope]
     description: Search user records, attachments, and notes.
@@ -37,7 +37,7 @@ tools:
           default: hybrid
         source:
           type: string
-          description: "Optional filter by record source ('upload', 'note', 'connector', 'external')."
+          description: "Optional filter by record source ('workspace_note', 'upload', 'document', 'note', 'connector', 'external')."
       required:
         - query
     binding:

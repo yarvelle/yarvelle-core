@@ -17,7 +17,7 @@ tools:
     category: reminders
     risk_tier: write_local
     trust: trusted
-    data_sensitivity: confidential
+    data_sensitivity: restricted
     context_params: [profile_id, user_id, scope, now]
     description: >-
       Create a scheduled reminder with optional RFC 5545 recurrence and enqueue
@@ -62,7 +62,7 @@ tools:
     category: reminders
     risk_tier: read
     trust: trusted
-    data_sensitivity: confidential
+    data_sensitivity: restricted
     context_params: [profile_id, user_id, scope]
     description: >-
       List active or filtered reminders for a profile with optional status,

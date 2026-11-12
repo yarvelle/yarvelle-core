@@ -66,19 +66,19 @@ class SanitizePIIInput(BaseModel):
     )
     mask_type: str = Field(
         default="tag",
-        description="Masking mode: 'tag' ([SSN], [MRN], [PHONE], [ADDRESS]) or 'redacted' ([REDACTED]).",
+        description="Masking mode: 'tag' ([SSN], [RECORD_ID], [PHONE], [ADDRESS]) or 'redacted' ([REDACTED]).",
     )
 
 
 class SanitizePIITool(BaseTool):
     """LangChain tool wrapping deterministic regex PII sanitization.
 
-    Ensures SSN, MRN, phone numbers, and street addresses are masked before LLM transmission.
+    Ensures SSN, record identifiers, phone numbers, and street addresses are masked before LLM transmission.
     """
 
     name: str = TOOL_SANITIZE_PII
     description: str = (
-        "Mask direct PII (SSN, MRN, phone, street address, email) in text before sending "
+        "Mask direct PII (SSN, record ID, phone, street address, email) in text before sending "
         "to models or processing. Returns the sanitized text."
     )
     args_schema: Type[BaseModel] = SanitizePIIInput

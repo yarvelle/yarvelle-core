@@ -16,11 +16,11 @@
 id: microsoft-graph
 version: 0.1.0
 name: Microsoft 365 / Outlook Calendar (Microsoft Graph)
-description: Syncs Outlook / Microsoft 365 free/busy schedules, suggests conflict-free clinic slots, and creates sanitized appointment events.
+description: Syncs Outlook / Microsoft 365 free/busy schedules, suggests conflict-free appointment slots, and creates sanitized scheduled events.
 categories:
   - scheduling
   - calendar
-entrypoint: connectors.starters.wearables_v2:MicrosoftGraphCalendarConnector
+entrypoint: yarvelle_core.connectors.starters.calendar:GoogleCalendarConnector
 data_flows:
   allowed_hosts:
     - graph.microsoft.com
@@ -45,7 +45,7 @@ auth:
   token_url: https://login.microsoftonline.com/common/oauth2/v2.0/token
 tools:
   - name: msgraph_suggest_slots
-    description: Suggests conflict-free appointment slots from Outlook / Microsoft 365 calendar during clinic hours.
+    description: Suggests conflict-free appointment slots from Outlook / Microsoft 365 calendar during working hours.
     risk_class: read_only
   - name: msgraph_create_event
     description: Creates a sanitized Outlook / Microsoft 365 calendar event for a confirmed appointment.

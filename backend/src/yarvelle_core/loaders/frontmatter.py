@@ -51,35 +51,14 @@ def parse_frontmatter(markdown: str) -> ParsedFrontmatter:
 
 
 def check_mandatory_intended_use(content: str) -> Tuple[bool, Optional[str]]:
-    """Checks whether the content includes all 3 mandatory intended-use statements.
+    """Checks whether the content includes all pack-configured mandatory intended-use statements.
 
-    Returns (True, None) if all 3 are present, or (False, missing_line) if any is missing.
+    Returns (True, None) if all required lines are present, or (False, missing_line) if any is missing.
     """
     normalized = content.lower()
 
     for line in MANDATORY_INTENDED_USE_LINES:
-        if line == "Not a clinician and not emergency care":
-            has_clinician = "not a clinician" in normalized
-            has_emergency = "not emergency care" in normalized or "not emergency" in normalized
-            if not (has_clinician and has_emergency):
-                return False, line
-        elif line == "If this is an emergency, contact local emergency services":
-            has_contact = (
-                "contact local emergency services" in normalized
-                or "contact emergency services" in normalized
-                or "call 911" in normalized
-                or "emergency services" in normalized
-            )
-            if not has_contact:
-                return False, line
-        elif line == "Do not change medication without the prescribing clinician":
-            has_medication = (
-                "do not change medication" in normalized
-                or "prescribing clinician" in normalized
-                or "without authorization" in normalized
-                or "without consulting" in normalized
-            )
-            if not has_medication:
-                return False, line
+        if line.lower() not in normalized:
+            return False, line
 
     return True, None

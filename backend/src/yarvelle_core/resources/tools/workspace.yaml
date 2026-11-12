@@ -17,7 +17,7 @@ tools:
     category: workspace
     risk_tier: read
     trust: trusted
-    data_sensitivity: confidential
+    data_sensitivity: restricted
     phase_0_closed: true
     context_params: [profile_id, user_id, scope]
     description: Read a text or PDF file located in the workspace attachments directory.
@@ -26,7 +26,7 @@ tools:
       properties:
         path:
           type: string
-          description: 'Filename or path of the attachment in the attachments folder (e.g. "statement.pdf", "notes.txt").'
+          description: 'Filename or path of attachment (e.g. "report.txt", "statement.pdf").'
       required:
         - path
     binding:

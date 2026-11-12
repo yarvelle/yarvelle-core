@@ -71,9 +71,14 @@ class ManifestValidationError(ConnectorError, ValueError):
     DEFAULT_ERROR_CODE = "YRV-200-002"
 
 
+class ConnectorNotConfiguredError(ConnectorError):
+    """Raised when a tool requires an external connector or MCP client that is not configured or attached."""
+
+
 __all__ = [
     "AuthExpiredError",
     "ConnectorError",
+    "ConnectorNotConfiguredError",
     "EgressBlockedError",
     "ManifestValidationError",
 ]

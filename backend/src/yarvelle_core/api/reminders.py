@@ -93,7 +93,7 @@ def require_profile_access(required_access: str):
                 detail="Access denied: management permissions required to modify reminders for this profile.",
             )
 
-        if required_access == "view_clinical" and access not in ("manage", "view_clinical"):
+        if required_access == "view_records" and access not in ("manage", "view_records"):
             raise YarvelleError(
                 "YRV-300-007",
                 context={"profile_id": clean_id},
@@ -323,7 +323,7 @@ async def list_reminders(
     due_before: Optional[str] = Query(None, description="Filter reminders due on or before ISO-8601 timestamp"),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    profile: Profile = Depends(require_profile_access("view_clinical")),
+    profile: Profile = Depends(require_profile_access("view_records")),
     db: AsyncSession = Depends(get_db),
 ) -> ReminderListResponse:
     """Lists reminders for a profile without performing database writes on GET."""
@@ -379,8 +379,8 @@ async def list_reminders(
 )
 async def export_ics_calendar(
     profile_id: str,
-    sanitize_phi: bool = Query(True, description="Default-on PHI masking for external calendars"),
-    profile: Profile = Depends(require_profile_access("view_clinical")),
+    sanitize_sensitive: bool = Query(True, description="Default-on sensitive-detail masking for external calendars"),
+    profile: Profile = Depends(require_profile_access("view_records")),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
     """Exports active reminders in standards-compliant RFC 5545 iCalendar stream."""
@@ -391,7 +391,7 @@ async def export_ics_calendar(
     res = await db.execute(stmt)
     records = list(res.scalars().all())
 
-    ics_content = generate_ics_calendar(records, sanitize_phi=sanitize_phi)
+    ics_content = generate_ics_calendar(records, sanitize_sensitive=sanitize_sensitive)
     return Response(
         content=ics_content,
         media_type="text/calendar; charset=utf-8",
@@ -457,7 +457,7 @@ async def calendar_subscription_feed(
     rem_res = await db.execute(rem_stmt)
     records = list(rem_res.scalars().all())
 
-    ics_content = generate_ics_calendar(records, sanitize_phi=True)
+    ics_content = generate_ics_calendar(records, sanitize_sensitive=True)
     return Response(
         content=ics_content,
         media_type="text/calendar; charset=utf-8",
@@ -476,7 +476,7 @@ async def calendar_subscription_feed(
 async def get_reminder(
     profile_id: str,
     reminder_id: str,
-    profile: Profile = Depends(require_profile_access("view_clinical")),
+    profile: Profile = Depends(require_profile_access("view_records")),
     db: AsyncSession = Depends(get_db),
 ) -> ReminderResponse:
     """Fetches single reminder record by ID."""

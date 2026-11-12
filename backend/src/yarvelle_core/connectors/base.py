@@ -79,13 +79,13 @@ class Page:
 
 @dataclass
 class NormalisedRecord:
-    """Standardized, patient-scoped clinical or administrative record."""
+    """Standardized, profile-scoped domain or administrative record."""
 
     id: str
     stream: str
     profile_id: str
     source: str
-    record_type: str  # e.g. observation, medication, condition, encounter, document
+    record_type: str  # e.g. event, entry, status, document
     timestamp: Optional[datetime]
     data: Dict[str, Any]
     raw_hash: str

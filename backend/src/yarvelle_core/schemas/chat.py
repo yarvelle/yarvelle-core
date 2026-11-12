@@ -31,7 +31,7 @@ class ChatRequestBody(BaseModel):
     prompt: str
     messages: List[ChatMessage] = Field(default_factory=list)
     attachments: List[str] = Field(default_factory=list)
-    allow_clinical: bool = False
+    allow_assist: bool = False
 
     # LangGraph state & session parameters
     threadId: Optional[str] = None

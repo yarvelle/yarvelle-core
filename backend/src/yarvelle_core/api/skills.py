@@ -33,6 +33,7 @@ from yarvelle_core.constants.api import (
 from yarvelle_core.db.models import KnowledgeBase, Skill
 from yarvelle_core.db.session import get_db
 from yarvelle_core.errors import YarvelleError
+from yarvelle_core.loaders.frontmatter import MANDATORY_INTENDED_USE_LINES
 from yarvelle_core.loaders.skill_loader import (
     ManifestValidationError,
     find_skill_dir,
@@ -60,11 +61,7 @@ logger = get_logger("yarvelle_core.api.skills")
 
 router = APIRouter(tags=["Skills"], route_class=ProblemDetailsRoute)
 
-MANDATORY_SAFETY_STATEMENTS = [
-    "Not a clinician and not emergency care",
-    "If this is an emergency, contact local emergency services",
-    "Do not change medication without the prescribing clinician",
-]
+MANDATORY_SAFETY_STATEMENTS: List[str] = list(MANDATORY_INTENDED_USE_LINES)
 
 
 def ensure_safety_disclosures(instructions: str) -> str:
@@ -81,7 +78,7 @@ def ensure_safety_disclosures(instructions: str) -> str:
 @router.get(ROUTE_SKILLS, response_model=List[SkillSummary])
 async def list_skills(
     risk_class: Optional[str] = Query(None, description="Filter by risk class"),
-    allow_clinical: bool = Query(False, description="Include assist skills"),
+    allow_assist: bool = Query(False, description="Include assist skills"),
     domain: Optional[str] = Query(None, description="Filter by domain"),
     category: Optional[str] = Query(None, description="Filter by category or prefix"),
     page: Optional[int] = Query(None, ge=1, description="Page number (1-based)"),
@@ -191,7 +188,7 @@ async def create_skill(
             detail=f"Skill with ID '{payload.id}' already exists.",
         )
 
-    # Enforce clinical safety boundary disclosure
+    # Enforce pack-defined safety boundary disclosure
     instructions = ensure_safety_disclosures(payload.instructions)
 
     domain_val = payload.domain.value if hasattr(payload.domain, "value") else str(payload.domain)
@@ -414,7 +411,7 @@ async def update_skill(
             description=skill.description,
             domain=AgentDomain(skill.domain) if skill.domain in [d.value for d in AgentDomain] else AgentDomain.WELLNESS,
             category=skill.category,
-            risk_class=RiskClass(skill.risk_class) if skill.risk_class in [r.value for r in RiskClass] else RiskClass.CLINICAL_ASSIST,
+            risk_class=RiskClass(skill.risk_class) if skill.risk_class in [r.value for r in RiskClass] else RiskClass.ASSIST,
             tags=skill.get_tags(),
             tools=skill.get_tools(),
             instructions=skill.instructions,

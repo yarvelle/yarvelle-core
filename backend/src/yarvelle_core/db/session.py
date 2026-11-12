@@ -308,7 +308,7 @@ def _run_schema_migrations(connection) -> None:
                     invited_by VARCHAR(36),
                     invitee_name VARCHAR(255) NOT NULL,
                     role VARCHAR(32) NOT NULL DEFAULT 'viewer',
-                    view_clinical BOOLEAN NOT NULL DEFAULT 1,
+                    view_records BOOLEAN NOT NULL DEFAULT 1,
                     view_paperwork BOOLEAN NOT NULL DEFAULT 0,
                     expires_at DATETIME NOT NULL,
                     accepted_at DATETIME,
@@ -548,14 +548,11 @@ def run_alembic_migrations(connection: Connection) -> None:
 
     # Check whether migrations have already been applied to head
     if has_alembic:
+        script = alembic.script.ScriptDirectory.from_config(cfg)
         canonical_revisions = {
-            "0003": "0003_household_profiles_and_audit",
-            "0004": "0004_policy_gate_and_vault",
-            "0005": "0005_clinical_domain_records",
-            "0006": "0006_preventive_and_school_forms",
-            "0007": "0007_connectors_and_consent",
-            "0008": "0008_routines_mcp_and_drafts",
-            "0009": "0009_companion_and_handover",
+            rev.revision[:4]: rev.revision
+            for rev in script.walk_revisions()
+            if len(rev.revision) >= 4 and rev.revision[:4].isdigit()
         }
         rows = connection.exec_driver_sql("SELECT version_num FROM alembic_version;").fetchall()
         current_revs = set()
@@ -572,7 +569,6 @@ def run_alembic_migrations(connection: Connection) -> None:
                 )
                 ver = new_ver
             current_revs.add(ver)
-        script = alembic.script.ScriptDirectory.from_config(cfg)
         heads = set(script.get_heads())
         if heads and heads.issubset(current_revs):
             logger.info("database_already_at_head", revisions=list(current_revs))

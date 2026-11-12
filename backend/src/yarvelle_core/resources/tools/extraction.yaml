@@ -18,7 +18,7 @@ tools:
     risk_tier: read
     trust: trusted
     data_sensitivity: pii
-    description: Mask direct PII (national ID, account identifiers, phone, address, email) in text before processing.
+    description: Mask direct PII (SSN, record IDs, phone, address, email) in text before processing.
     input_schema:
       type: object
       properties:
@@ -38,7 +38,7 @@ tools:
     category: extraction
     risk_tier: read
     trust: trusted
-    data_sensitivity: confidential
+    data_sensitivity: restricted
     description: Extract structured data from text into a typed Pydantic schema.
     input_schema:
       type: object
@@ -48,7 +48,7 @@ tools:
           description: Sanitized document text.
         schema_type:
           type: string
-          description: "'insurance', 'records', or 'generic'."
+          description: "'document', 'records', or 'generic'."
       required:
         - text
     binding:
@@ -59,7 +59,7 @@ tools:
     category: extraction
     risk_tier: read
     trust: trusted
-    data_sensitivity: confidential
+    data_sensitivity: restricted
     description: Validate that extracted numerical values match source document text.
     input_schema:
       type: object
@@ -80,7 +80,7 @@ tools:
     category: extraction
     risk_tier: read
     trust: trusted
-    data_sensitivity: confidential
+    data_sensitivity: restricted
     description: "Composite pipeline: ingestion, PII sanitization, schema extraction, and grounding."
     input_schema:
       type: object
@@ -93,7 +93,7 @@ tools:
           description: Raw document text if loaded.
         dossier_type:
           type: string
-          description: "'insurance', 'records', or 'generic'."
+          description: "'document', 'records', or 'generic'."
     binding:
       kind: handler
       entrypoint: yarvelle_core.tools.builtin_handlers:exec_extract_document_dossier

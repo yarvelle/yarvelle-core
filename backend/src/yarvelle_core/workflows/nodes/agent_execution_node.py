@@ -288,7 +288,7 @@ class AgentExecutionNode(BaseNode):
                 toolbox = get_db_toolbox()
                 if str(db_toolset_name) == "auto":
                     dom = str(getattr(manifest, "domain", "general") or "general")
-                    rc = str(getattr(manifest, "risk_class", "clinical_assist") or "clinical_assist")
+                    rc = str(getattr(manifest, "risk_class", "assist") or "assist")
                     toolset_tools = toolbox.get_toolset_for_domain(dom, rc)
                 else:
                     toolset_tools = toolbox.get_toolset(str(db_toolset_name))
@@ -428,7 +428,7 @@ class AgentExecutionNode(BaseNode):
         # 4. Resolve and bind model
         model = self.model or state.get("model")
         if model is None:
-            fallback_msg = AIMessage(content="I am ready to assist with your healthcare administration.")
+            fallback_msg = AIMessage(content="I am ready to assist with your request.")
             return {
                 "messages": [fallback_msg],
                 "output": fallback_msg.content,

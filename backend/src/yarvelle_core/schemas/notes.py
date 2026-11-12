@@ -131,26 +131,28 @@ class TypedNoteListResponse(BaseModel):
     offset: int
 
 
-class AfterVisitExtractionResponse(BaseModel):
+class StructuredNoteExtractionResponse(BaseModel):
     note_id: str
-    diagnoses: List[Dict[str, Any]]
-    medication_adjustments: List[Dict[str, Any]]
-    ordered_tests: List[Dict[str, Any]]
+    findings: List[Dict[str, Any]]
+    action_items: List[Dict[str, Any]]
+    ordered_tasks: List[Dict[str, Any]]
     follow_up_timeline: List[Dict[str, Any]]
     recommended_reminders: List[Dict[str, Any]] = Field(default_factory=list)
     disclaimer: str = Field(
-        default="Extracted from your notes, not formal medical advice.",
+        default="Extracted from your notes; verify details against primary records.",
         description="Mandatory boundary disclaimer",
     )
     extracted_items_count: int = 0
 
 
 # Backward-compatibility aliases
+AfterVisitExtractionResponse = StructuredNoteExtractionResponse
 NoteSummary = WorkspaceNoteSummary
 NoteDetailResponse = WorkspaceNoteDetail
 
 __all__ = [
     "AfterVisitExtractionResponse",
+    "StructuredNoteExtractionResponse",
     "NoteCategoryLiteral",
     "NoteCreateRequest",
     "NoteDetailResponse",

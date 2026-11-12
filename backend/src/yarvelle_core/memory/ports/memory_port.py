@@ -24,7 +24,7 @@ class MemoryTier(str, Enum):
     Tiers categorize memories based on temporal longevity, mutability, and cognitive role:
     - WORKING: Ephemeral scratchpad, active task execution state, and session context.
     - EPISODIC: Autobiographical turn interactions, event logs, chronological history with timestamps.
-    - SEMANTIC: Consolidated factual healthcare knowledge, profile, preferences, extracted concepts.
+    - SEMANTIC: Consolidated factual domain knowledge, profile, preferences, extracted concepts.
     - PROCEDURAL: Procedural guidelines, step-by-step SOP execution rules, protocols, skill action steps.
     """
 

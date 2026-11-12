@@ -188,7 +188,7 @@ def _serialize_consent_grant(grant: ConsentGrant) -> Dict[str, Any]:
 
 
 def require_profile_access(
-    required_access: Literal["manage", "view_clinical"] = "view_clinical",
+    required_access: Literal["manage", "view_records"] = "view_records",
 ) -> Callable[..., Coroutine[Any, Any, Profile]]:
     """FastAPI dependency enforcing profile-scoped management permissions."""
 
@@ -229,7 +229,7 @@ def require_profile_access(
                 detail="Access denied: management permissions required to modify connections.",
             )
 
-        if required_access == "view_clinical" and access not in ("manage", "view_clinical"):
+        if required_access == "view_records" and access not in ("manage", "view_records"):
             raise YarvelleError(
                 "YRV-300-007",
                 context={"profile_id": clean_id},
@@ -272,7 +272,7 @@ async def get_connectors_catalog(
 )
 async def list_profile_connections(
     profile_id: str,
-    profile: Profile = Depends(require_profile_access("view_clinical")),
+    profile: Profile = Depends(require_profile_access("view_records")),
     db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
     """Lists all `Connection` rows for `profile_id` with their most recent `SyncRun` telemetry."""
@@ -620,7 +620,7 @@ async def trigger_profile_connection_sync(
 async def list_connection_sync_runs(
     profile_id: str,
     connection_id: str,
-    profile: Profile = Depends(require_profile_access("view_clinical")),
+    profile: Profile = Depends(require_profile_access("view_records")),
     db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
     """Returns `SyncRun` history for `(profile_id, connection_id)` ordered by `started_at` descending (`AU-52`)."""
@@ -697,7 +697,7 @@ async def revoke_profile_connection(
 )
 async def list_profile_consents(
     profile_id: str,
-    profile: Profile = Depends(require_profile_access("view_clinical")),
+    profile: Profile = Depends(require_profile_access("view_records")),
     db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
     """Lists all `ConsentGrant` records for `profile_id` (`AU-53`)."""
@@ -721,7 +721,7 @@ async def list_profile_consents(
 )
 async def get_profile_data_flows_endpoint(
     profile_id: str,
-    profile: Profile = Depends(require_profile_access("view_clinical")),
+    profile: Profile = Depends(require_profile_access("view_records")),
     db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
     """Returns the Settings › Data Flows inventory (`model_provider`, `search_provider`, `connections`) (`AU-53`)."""

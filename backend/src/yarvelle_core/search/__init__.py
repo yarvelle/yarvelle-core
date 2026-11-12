@@ -18,8 +18,6 @@ from yarvelle_core.search.adapters.sqlite import SqliteSearchIndex
 from yarvelle_core.search.base import SearchIndex, SearchResult
 from yarvelle_core.search.chunker import (
     Chunker,
-    ClinicalChunk,
-    ClinicalChunker,
     DocumentChunk,
     StructuralChunker,
 )
@@ -37,8 +35,6 @@ from yarvelle_core.search.factory import (
 
 __all__ = [
     "Chunker",
-    "ClinicalChunk",
-    "ClinicalChunker",
     "DocumentChunk",
     "SEARCH_BACKEND_SPECTOR",
     "SEARCH_BACKEND_SQLITE",

@@ -1184,7 +1184,7 @@
       "description": "Specification of a scope owned by a pack.",
       "properties": {
         "id": {
-          "description": "Unique scope identifier e.g. 'health.records', 'finance.accounts'",
+          "description": "Unique scope identifier e.g. 'workspace.records', 'operations.accounts'",
           "title": "Id",
           "type": "string"
         },
@@ -1211,7 +1211,7 @@
             "public",
             "internal",
             "confidential",
-            "phi",
+            "restricted",
             "pii"
           ],
           "title": "Sensitivity",

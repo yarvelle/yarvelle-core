@@ -68,7 +68,6 @@ ToolDataSensitivity = Literal[
     "confidential",
     "restricted",
     "pii",
-    "phi",
 ]
 
 

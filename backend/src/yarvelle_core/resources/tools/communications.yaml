@@ -62,14 +62,14 @@ tools:
     context_params: [profile_id, user_id]
     description: >-
       Create an external calendar event on Google Calendar or CalDAV.
-      Always requires human approval in A0/A1 autonomy modes and redacts sensitive
+      Always requires human approval in A0/A1 autonomy modes and strips sensitive
       details from titles by default.
     input_schema:
       type: object
       properties:
         title:
           type: string
-          description: Event title (sensitive details redacted by default).
+          description: Event title (sensitive details stripped by default).
         start_time:
           type: string
           description: ISO-8601 start timestamp.
@@ -79,10 +79,10 @@ tools:
         location:
           type: string
           description: Optional location or address.
-        redact_title:
+        strip_sensitive:
           type: boolean
           default: true
-          description: Replace detailed title with a generic appointment label on external calendars.
+          description: Replace detailed title with a generic event label on external calendars.
       required:
         - title
         - start_time
@@ -99,7 +99,7 @@ tools:
     category: email
     risk_tier: write_local
     trust: trusted
-    data_sensitivity: confidential
+    data_sensitivity: restricted
     context_params: [profile_id, user_id, scope]
     description: >-
       Create a local email draft (RFC 5322 .eml / mailto:) for user review and
@@ -121,7 +121,7 @@ tools:
           description: Draft body content.
         context_type:
           type: string
-          enum: [scheduling_request, records_request, administrative_form, appeal, general]
+          enum: [scheduling_request, records_request, form_submission, appeal, general]
           default: general
       required:
         - subject
@@ -139,21 +139,21 @@ tools:
     category: email
     risk_tier: read
     trust: untrusted
-    data_sensitivity: confidential
+    data_sensitivity: restricted
     allowed_hosts:
       - workspace-mcp.spectrayan.com
       - gmail.googleapis.com
     context_params: [profile_id, user_id]
     description: >-
-      List read-only Gmail messages filtered by consented label via an approved
-      Google Workspace remote MCP bridge.
+      List read-only Gmail messages filtered by consented label ('INBOX',
+      'IMPORTANT', 'STARRED', 'UPDATES') via the curated Google Workspace remote MCP bridge.
     input_schema:
       type: object
       properties:
         label:
           type: string
-          enum: [appointments, summaries, records, INBOX]
-          default: appointments
+          enum: [INBOX, IMPORTANT, STARRED, UPDATES]
+          default: INBOX
         query:
           type: string
         max_results:
@@ -176,7 +176,7 @@ tools:
     category: email
     risk_tier: irreversible
     trust: untrusted
-    data_sensitivity: confidential
+    data_sensitivity: restricted
     allowed_hosts:
       - workspace-mcp.spectrayan.com
       - gmail.googleapis.com

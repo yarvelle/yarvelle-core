@@ -56,12 +56,12 @@ RiskTierMax = Literal["T1", "T2", "T3", "T4"]
 class ScopeDefinitionSpec(BaseModel):
     """Specification of a scope owned by a pack."""
 
-    id: str = Field(..., description="Unique scope identifier e.g. 'health.records', 'finance.accounts'")
+    id: str = Field(..., description="Unique scope identifier e.g. 'workspace.records', 'operations.accounts'")
     description: str = Field(default="", description="Human-readable description of data protected by this scope")
     consent: Literal["required", "optional"] = Field(
         default="optional", description="Whether explicit user consent is required before first write"
     )
-    sensitivity: Literal["public", "internal", "confidential", "phi", "pii"] = Field(
+    sensitivity: Literal["public", "internal", "confidential", "restricted", "pii"] = Field(
         default="internal", description="Data sensitivity classification driving encryption and egress policies"
     )
 

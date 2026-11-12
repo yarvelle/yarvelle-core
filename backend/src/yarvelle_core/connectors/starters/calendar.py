@@ -38,10 +38,10 @@ GOOGLE_CALENDAR_EVENTS_URL = "https://www.googleapis.com/calendar/v3/calendars/p
 CALDAV_DEFAULT_EVENTS_URL = "https://caldav.icloud.com/calendars/user/default"
 
 _SAFE_GENERIC_TITLES = frozenset({
-    "medical appointment",
-    "clinic visit",
-    "doctor appointment",
-    "healthcare visit",
+    "scheduled event",
+    "calendar event",
+    "appointment",
+    "meeting",
     "provider appointment",
 })
 
@@ -61,22 +61,22 @@ def _parse_iso_dt(value: Union[str, datetime]) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
-def sanitize_calendar_event_title(title: str, strip_phi: bool = True) -> str:
-    """Strips clinical diagnoses, medications, and sensitive PHI from calendar event titles.
+def sanitize_calendar_event_title(title: str, strip_sensitive: bool = True) -> str:
+    """Strips sensitive details from external calendar event titles.
 
-    By default (`strip_phi=True`), external calendar titles are replaced with a neutral
-    `"Medical Appointment"` label unless the provided title is already an approved generic
-    placeholder, preventing accidental disclosure of diagnoses or medications to third-party
+    By default (`strip_sensitive=True`), external calendar titles are replaced with a neutral
+    `"Scheduled Event"` label unless the provided title is already an approved generic
+    placeholder, preventing accidental disclosure of sensitive details to third-party
     calendar providers.
     """
     cleaned = " ".join(str(title or "").split()).strip()
     if not cleaned:
-        return "Medical Appointment"
-    if not strip_phi:
+        return "Scheduled Event"
+    if not strip_sensitive:
         return cleaned
     if cleaned.lower() in _SAFE_GENERIC_TITLES:
         return cleaned
-    return "Medical Appointment"
+    return "Scheduled Event"
 
 
 def suggest_free_slots(
@@ -85,7 +85,7 @@ def suggest_free_slots(
     window_end: Union[str, datetime],
     duration_minutes: int = 30,
 ) -> List[Dict[str, Any]]:
-    """Computes deterministic conflict-free appointment slots during clinic hours (09:00-17:00).
+    """Computes deterministic conflict-free appointment slots during working hours (09:00-17:00).
 
     Args:
         busy_windows: Sequence of busy intervals as `{"start": ..., "end": ...}` dicts,
@@ -95,7 +95,7 @@ def suggest_free_slots(
         duration_minutes: Desired appointment slot duration in minutes (default 30).
 
     Returns:
-        List of conflict-free slot dictionaries within 09:00-17:00 clinic hours.
+        List of conflict-free slot dictionaries within 09:00-17:00 working hours.
     """
     if duration_minutes <= 0:
         raise ValueError("duration_minutes must be positive.")
@@ -136,11 +136,11 @@ def suggest_free_slots(
     end_date = end_dt.date()
 
     while current_date <= end_date:
-        clinic_open = datetime.combine(current_date, time(9, 0), tzinfo=timezone.utc)
-        clinic_close = datetime.combine(current_date, time(17, 0), tzinfo=timezone.utc)
+        work_open = datetime.combine(current_date, time(9, 0), tzinfo=timezone.utc)
+        work_close = datetime.combine(current_date, time(17, 0), tzinfo=timezone.utc)
 
-        day_start = max(start_dt, clinic_open)
-        day_end = min(end_dt, clinic_close)
+        day_start = max(start_dt, work_open)
+        day_end = min(end_dt, work_close)
 
         cursor = day_start
         while cursor + slot_delta <= day_end:
@@ -341,23 +341,23 @@ class _BaseCalendarConnector:
             if not ctx.profile_id or not ctx.user_id:
                 raise ValueError("ToolContext user_id and profile_id are required.")
             params = args or {}
-            raw_title = str(params.get("title") or "Medical Appointment")
-            strip_phi = bool(params.get("strip_phi", True))
-            sanitized_title = sanitize_calendar_event_title(raw_title, strip_phi=strip_phi)
+            raw_title = str(params.get("title") or "Scheduled Event")
+            strip_sensitive = bool(params.get("strip_sensitive", True))
+            sanitized_title = sanitize_calendar_event_title(raw_title, strip_sensitive=strip_sensitive)
             event_id = str(params.get("event_id") or uuid.uuid4().hex[:12])
             return {
                 "status": "created",
                 "external_ref": f"calendar_event:{event_id}",
                 "title": sanitized_title,
-                "start": params.get("start"),
-                "end": params.get("end"),
+                "start": params.get("start") or params.get("start_time"),
+                "end": params.get("end") or params.get("end_time"),
                 "connector_id": self._manifest.id,
             }
 
         return [
             ToolSpec(
                 name="calendar_suggest_slots",
-                description="Suggests conflict-free appointment slots during clinic hours (09:00-17:00).",
+                description="Suggests conflict-free appointment slots during working hours (09:00-17:00).",
                 parameters={
                     "type": "object",
                     "properties": {
@@ -381,7 +381,7 @@ class _BaseCalendarConnector:
                         "title": {"type": "string"},
                         "start": {"type": "string"},
                         "end": {"type": "string"},
-                        "strip_phi": {"type": "boolean", "default": True},
+                        "strip_sensitive": {"type": "boolean", "default": True},
                     },
                     "required": ["start", "end"],
                 },

@@ -31,7 +31,7 @@ from spector_client.models import MemoryTier, RecallRecord, SearchRecord
 
 from yarvelle_core.config import Settings, settings as global_settings
 from yarvelle_core.search.base import SearchIndex, SearchResult
-from yarvelle_core.search.chunker import ClinicalChunk, ClinicalChunker
+from yarvelle_core.search.chunker import Chunker, StructuralChunker
 
 logger = logging.getLogger("yarvelle_core.search.adapters.spector")
 
@@ -41,7 +41,7 @@ class SpectorSearchIndex(SearchIndex):
 
     Features:
     1. Per-profile client caching with physical namespace partition isolation (X-Namespace).
-    2. Document chunking preserving section boundaries via ClinicalChunker.
+    2. Document chunking preserving section boundaries via StructuralChunker.
     3. Ingestion of rich chunk metadata (chunk index, section header, token count, source doc ID).
     4. Hybrid search fusing BM25 lexical rank and HNSW vector rank via Reciprocal Rank Fusion (k=60).
     5. Resilient circuit breaker falling back transparently to SqliteSearchIndex on network faults.
@@ -54,7 +54,7 @@ class SpectorSearchIndex(SearchIndex):
         fallback_to_sqlite: bool = True,
         fallback_index: Optional[SearchIndex] = None,
         client: Optional[Any] = None,
-        chunker: Optional[ClinicalChunker] = None,
+        chunker: Optional[Chunker] = None,
         cooldown_seconds: float = 30.0,
         rrf_k: int = 60,
     ) -> None:
@@ -64,7 +64,7 @@ class SpectorSearchIndex(SearchIndex):
         self.fallback_to_sqlite = fallback_to_sqlite
         self._fallback_index = fallback_index
         self._client = client  # Direct client override (for test doubles)
-        self._chunker = chunker or ClinicalChunker()
+        self._chunker = chunker or StructuralChunker()
         self.cooldown_seconds = cooldown_seconds
         self.rrf_k = rrf_k
 

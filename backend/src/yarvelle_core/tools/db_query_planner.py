@@ -34,28 +34,30 @@ from yarvelle_core.db.schema_catalog import (
     TableSchemaDoc,
     get_schema_catalog,
 )
+from yarvelle_core.resources.loader import get_resource_loader
 from yarvelle_core.tools.sql_ast_sandbox import SqlOperation
 
 logger = logging.getLogger(__name__)
 
-QUERY_PLANNER_SYSTEM_PROMPT = """You are the Yarvelle Core Database Query Planner.
-Your job is to translate a user or agent database operation request into a single, safe,
-parameterized SQL statement using ONLY the provided M-Schema database documentation.
 
-STRICT SECURITY & SQL GENERATION RULES:
-1. ALLOWED OPERATIONS ONLY: You may ONLY generate `SELECT`, `INSERT`, `UPDATE`, or `DELETE`.
-   NEVER generate DDL (`CREATE`, `ALTER`, `DROP`, `TRUNCATE`, `RENAME`), DCL (`GRANT`, `REVOKE`),
-   TCL (`BEGIN`, `COMMIT`, `ROLLBACK`), or administrative commands (`PRAGMA`, `ATTACH`, `VACUUM`).
-2. SINGLE STATEMENT: Output exactly one SQL statement. Never stack multiple statements with `;`.
-3. NAMED PARAMETER BINDINGS: Use colon-prefixed named parameters (`:param_name`) for all literal
-   filter values and inserted/updated values, and populate their values in the `parameters` dict.
-4. EXACT SCHEMA ADHERENCE: Use ONLY table and column names documented in the `【TABLE】` M-Schema blocks.
-   Read column comments and `# Indexes:` comments carefully to choose the best filter and sort columns.
-5. TENANT & SCOPE ISOLATION: `profile_id` and `scope` are automatically injected by the AST sandbox,
-   so you do not need to manually bind them unless specifically filtering by a secondary column.
-6. SAFE MUTATIONS: Every `UPDATE` and `DELETE` statement MUST include an explicit, non-tautological
-   `WHERE` clause identifying the target row(s) (e.g., `WHERE id = :id` or `WHERE slug = :slug`).
-"""
+def compose_query_planner_prompt(
+    *,
+    product_name: str = "Yarvelle Core",
+    pack_instructions: str = "",
+    pack_id: Optional[str] = None,
+) -> str:
+    """Renders the SQL query planner system prompt from ``db_query_planner.hbs``."""
+    return get_resource_loader().render_template(
+        "db_query_planner",
+        {
+            "product_name": product_name,
+            "pack_instructions": (pack_instructions or "").strip(),
+        },
+        pack_id=pack_id,
+    )
+
+
+QUERY_PLANNER_SYSTEM_PROMPT = compose_query_planner_prompt()
 
 
 class SqlQueryPlan(BaseModel):
@@ -453,8 +455,14 @@ class DbQueryPlanner:
                     "Fix the table/column names or syntax strictly using the M-Schema above."
                 )
 
+            active_pack_id = getattr(scope_ctx, "pack_id", None) if scope_ctx is not None else None
+            system_prompt = (
+                compose_query_planner_prompt(pack_id=active_pack_id)
+                if active_pack_id
+                else QUERY_PLANNER_SYSTEM_PROMPT
+            )
             messages = [
-                SystemMessage(content=QUERY_PLANNER_SYSTEM_PROMPT),
+                SystemMessage(content=system_prompt),
                 HumanMessage(content="\n\n".join(user_prompt_parts)),
             ]
 
@@ -489,4 +497,5 @@ __all__ = [
     "DbQueryPlanner",
     "QUERY_PLANNER_SYSTEM_PROMPT",
     "SqlQueryPlan",
+    "compose_query_planner_prompt",
 ]

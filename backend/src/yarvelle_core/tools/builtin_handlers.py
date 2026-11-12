@@ -19,7 +19,8 @@ parity against the declarative catalog by ``tests/test_tool_spec_schema_validati
 
 from __future__ import annotations
 
-from typing import Any, Callable, Coroutine, Dict, Optional
+import inspect
+from typing import Any, Callable, Coroutine, Dict, Mapping, Optional
 
 BuiltinHandlerFn = Callable[[Dict[str, Any], Any], Coroutine[Any, Any, Any]]
 
@@ -147,24 +148,32 @@ async def exec_web_search(args: Dict[str, Any], ctx: Any = None) -> Any:
     return await execute_web_search(args or {}, ctx)
 
 
+def _build_connector_ctx(ctx: Any, connector_id: str) -> Any:
+    from yarvelle_core.connectors.base import ToolContext as ConnectorToolContext
+
+    if isinstance(ctx, ConnectorToolContext):
+        return ctx
+    return ConnectorToolContext(
+        user_id=str(getattr(ctx, "user_id", "") or ""),
+        profile_id=str(getattr(ctx, "profile_id", "") or ""),
+        run_id=str(getattr(ctx, "run_id", "") or connector_id),
+    )
+
+
 @builtin_tool_handler("calendar_suggest_slots")
 async def exec_calendar_suggest_slots(args: Dict[str, Any], ctx: Any = None) -> Any:
-    from yarvelle_core.connectors.base import ToolContext as ConnectorToolContext
     from yarvelle_core.connectors.starters.calendar import GoogleCalendarConnector
 
     connector = GoogleCalendarConnector()
-    effective_ctx = ctx
-    if effective_ctx is None or not hasattr(effective_ctx, "profile_id"):
-        effective_ctx = ConnectorToolContext(user_id="", profile_id="")
+    conn_ctx = _build_connector_ctx(ctx, "google-calendar")
     for tool_spec in connector.tools():
         if tool_spec.name == "calendar_suggest_slots" and tool_spec.handler is not None:
-            return await tool_spec.handler(effective_ctx, args or {})
+            return await tool_spec.handler(conn_ctx, args or {})
     return {"slots": []}
 
 
 @builtin_tool_handler("calendar_create_event")
 async def exec_calendar_create_event(args: Dict[str, Any], ctx: Any = None) -> Any:
-    from yarvelle_core.connectors.base import ToolContext as ConnectorToolContext
     from yarvelle_core.connectors.starters.calendar import GoogleCalendarConnector
 
     payload = dict(args or {})
@@ -172,16 +181,14 @@ async def exec_calendar_create_event(args: Dict[str, Any], ctx: Any = None) -> A
         payload["start"] = payload["start_time"]
     if "end" not in payload and "end_time" in payload:
         payload["end"] = payload["end_time"]
-    if "strip_phi" not in payload and "redact_title" in payload:
-        payload["strip_phi"] = bool(payload["redact_title"])
+    if "strip_sensitive" not in payload and "redact_title" in payload:
+        payload["strip_sensitive"] = bool(payload["redact_title"])
 
     connector = GoogleCalendarConnector()
-    effective_ctx = ctx
-    if effective_ctx is None or not hasattr(effective_ctx, "profile_id"):
-        effective_ctx = ConnectorToolContext(user_id="", profile_id="")
+    conn_ctx = _build_connector_ctx(ctx, "google-calendar")
     for tool_spec in connector.tools():
         if tool_spec.name == "calendar_create_event" and tool_spec.handler is not None:
-            return await tool_spec.handler(effective_ctx, payload)
+            return await tool_spec.handler(conn_ctx, payload)
     return {"status": "created"}
 
 
@@ -197,38 +204,61 @@ async def exec_create_email_draft(args: Dict[str, Any], ctx: Any = None) -> Any:
     return await execute_create_email_draft(payload, ctx)
 
 
-@builtin_tool_handler("gmail_list_messages")
-async def exec_gmail_list_messages(args: Dict[str, Any], ctx: Any = None) -> Any:
+async def _invoke_gmail_mcp(tool_name: str, args: Dict[str, Any], ctx: Any = None) -> Any:
+    from yarvelle_core.connectors.errors import ConnectorNotConfiguredError
+    from yarvelle_core.engine.tool_exec import TaintFlag, UntrustedResult
+
     if ctx is None or not getattr(ctx, "profile_id", None):
         raise ValueError("Missing profile_id in ToolContext")
-    mcp_adapter = getattr(ctx, "mcp_client", None) or (
-        ctx.extra.get("mcp_client")
-        if isinstance(getattr(ctx, "extra", None), dict)
-        else None
+
+    extra = getattr(ctx, "extra", None)
+    mcp_client = getattr(ctx, "mcp_client", None) or (
+        extra.get("mcp_client") if isinstance(extra, Mapping) else None
     )
-    if mcp_adapter is not None and hasattr(mcp_adapter, "call_tool"):
-        return await mcp_adapter.call_tool("gmail_list_messages", args or {})
-    raise RuntimeError(
-        "Gmail MCP connector is not configured for this profile; "
-        "connect an approved Google Workspace MCP server before listing messages."
+    if mcp_client is None:
+        raise ConnectorNotConfiguredError(
+            f"Remote MCP connector 'google-workspace-gmail' is not configured or attached for tool '{tool_name}'."
+        )
+
+    call_fn = getattr(mcp_client, "call_tool", None)
+    if callable(call_fn):
+        raw = call_fn(tool_name, dict(args or {}))
+    elif callable(mcp_client):
+        raw = mcp_client(tool_name, dict(args or {}))
+    else:
+        raise ConnectorNotConfiguredError(
+            f"Attached MCP client for 'google-workspace-gmail' does not implement 'call_tool' for '{tool_name}'."
+        )
+
+    if inspect.isawaitable(raw):
+        raw = await raw
+
+    taint_attr = getattr(ctx, "taint", None)
+    if taint_attr is not None and hasattr(taint_attr, "set"):
+        taint_attr.set()
+    else:
+        try:
+            setattr(ctx, "taint", TaintFlag(True))
+        except Exception:
+            pass
+
+    if isinstance(raw, UntrustedResult):
+        return raw
+    return UntrustedResult(
+        data=raw,
+        taint=True,
+        source=f"mcp:google-workspace-gmail:{tool_name}",
     )
+
+
+@builtin_tool_handler("gmail_list_messages")
+async def exec_gmail_list_messages(args: Dict[str, Any], ctx: Any = None) -> Any:
+    return await _invoke_gmail_mcp("gmail_list_messages", args or {}, ctx)
 
 
 @builtin_tool_handler("gmail_send_message")
 async def exec_gmail_send_message(args: Dict[str, Any], ctx: Any = None) -> Any:
-    if ctx is None or not getattr(ctx, "profile_id", None):
-        raise ValueError("Missing profile_id in ToolContext")
-    mcp_adapter = getattr(ctx, "mcp_client", None) or (
-        ctx.extra.get("mcp_client")
-        if isinstance(getattr(ctx, "extra", None), dict)
-        else None
-    )
-    if mcp_adapter is not None and hasattr(mcp_adapter, "call_tool"):
-        return await mcp_adapter.call_tool("gmail_send_message", args or {})
-    raise RuntimeError(
-        "Gmail MCP connector is not configured for this profile; "
-        "connect an approved Google Workspace MCP server before sending messages."
-    )
+    return await _invoke_gmail_mcp("gmail_send_message", args or {}, ctx)
 
 
 __all__ = [

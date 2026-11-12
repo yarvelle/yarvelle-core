@@ -106,8 +106,8 @@ class AgentNode(BaseNode):
         model = self.model or state.get("model")
         if model is None:
             return {
-                "messages": [AIMessage(content="I am ready to assist with your healthcare administration.")],
-                "output": "I am ready to assist with your healthcare administration.",
+                "messages": [AIMessage(content="I am ready to assist with your request.")],
+                "output": "I am ready to assist with your request.",
                 "tool_calls": [],
                 "next_step": "output_guardrail",
             }

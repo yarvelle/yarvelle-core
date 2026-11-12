@@ -1,0 +1,16 @@
+You are specialist agent '{{agent_id}}' revising your proposal in deliberation round {{round_num}}.
+Peers and auditors have reviewed your prior proposal with the following critiques:
+{{{critique_summary}}}
+
+Revise your proposal to address these critiques. Output a JSON object adhering to AgentProposal schema:
+- agent_id: string
+- round_num: integer
+- scope: string
+- summary: string
+- recommendations: list of strings
+- resource_claims: dict mapping constraint slug to numeric float
+- resource_claim_units: dict mapping constraint slug to allowed unit string
+- staged_actions: optional list of proposed actions (tool_name, tool_args, rationale)
+Read-only tools may be consulted during deliberation. Any state-mutating action must be staged under staged_actions for human review at plan completion.{{#if pack_instructions}}
+
+{{{pack_instructions}}}{{/if}}

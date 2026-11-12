@@ -277,8 +277,6 @@ CORE_TOOL_NAMES: Tuple[str, ...] = (
     "gmail_send_message",
 )
 
-HEALTH_TOOL_NAMES: Tuple[str, ...] = ()
-
 
 def bound_declarative_to_tool_spec(bound: BoundDeclarativeTool) -> ToolSpec:
     """Converts a validated ``BoundDeclarativeTool`` into a runtime ``ToolSpec``."""
@@ -328,11 +326,6 @@ def _make_builtin_specs(loader: Optional[ToolSpecLoader] = None) -> List[ToolSpe
 def _make_core_builtin_specs(loader: Optional[ToolSpecLoader] = None) -> List[ToolSpec]:
     """Loads all domain-neutral Yarvelle Core built-in ToolSpecs."""
     return _make_builtin_specs(loader=loader)
-
-
-def _make_health_builtin_specs() -> List[ToolSpec]:
-    """Deprecated compatibility shim; domain pack tools belong in external packs."""
-    return []
 
 
 def _load_entrypoint_pack_tools(
@@ -408,14 +401,12 @@ def create_default_registry(
 __all__ = [
     "CORE_TOOL_NAMES",
     "DataFlows",
-    "HEALTH_TOOL_NAMES",
     "RiskTier",
     "ToolSpec",
     "ToolSpecRegistry",
     "TrustLevel",
     "_make_builtin_specs",
     "_make_core_builtin_specs",
-    "_make_health_builtin_specs",
     "bound_declarative_to_tool_spec",
     "create_default_registry",
 ]

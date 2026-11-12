@@ -146,8 +146,7 @@
             "internal",
             "confidential",
             "restricted",
-            "pii",
-            "phi"
+            "pii"
           ],
           "title": "Data Sensitivity",
           "type": "string"

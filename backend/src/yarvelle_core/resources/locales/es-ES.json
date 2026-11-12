@@ -2,11 +2,11 @@
   "locale": "es-ES",
   "direction": "ltr",
   "safety": {
-    "disclaimer_banner": "Los agentes de Yarvelle brindan asistencia educativa de bienestar y navegación de atención médica. No es un médico ni atención de emergencia. No cambie su medicación sin consultar al médico que la recetó.",
-    "emergency_directive": "Si experimenta una emergencia médica, deje de usar este asistente y llame inmediatamente al 112 o al 911 (o al 988 para apoyo en crisis) o acuda al servicio de urgencias más cercano.",
-    "non_clinical_notice": "Solo con fines informativos y de preparación para consultas. Verifique siempre las decisiones clínicas con un profesional sanitario titulado.",
-    "disclaimerBanner": "Yarvelle te ayuda a preparar tus consultas médicas y navegar tu atención. No proporciona diagnósticos ni tratamientos médicos.",
-    "emergencyNotice": "Si experimentas una emergencia médica, llama al 911 o al 112 o acude a urgencias de inmediato."
+    "disclaimer_banner": "Los agentes de Yarvelle brindan asistencia informativa y organizativa. Verifique las decisiones importantes con fuentes primarias y profesionales cualificados.",
+    "emergency_directive": "En caso de emergencia urgente, deje de usar este asistente y comuníquese de inmediato con los servicios locales de emergencia.",
+    "informational_notice": "Solo con fines informativos y de preparación. Verifique siempre las decisiones importantes con un profesional cualificado.",
+    "disclaimerBanner": "Yarvelle te ayuda a organizar registros, tareas y listas de preparación.",
+    "emergencyNotice": "En caso de emergencia urgente, comuníquese con los servicios locales de emergencia de inmediato."
   },
   "navigation": {
     "home": "Inicio",
@@ -174,7 +174,6 @@
     "create_agent": "Crear agente",
     "create_skill": "Crear habilidad",
     "domain_all": "Todos los dominios",
-    "domain_clinical": "Clínico",
     "domain_label": "Dominio",
     "domain_navigation": "Navegación",
     "domain_wellness": "Bienestar",
@@ -182,7 +181,6 @@
     "for_caregivers": "Para cuidadores",
     "risk_admin": "Administrativo",
     "risk_all": "Todos los niveles",
-    "risk_clinical": "Asistencia clínica",
     "risk_wellness": "Bienestar",
     "search_agents": "Buscar agentes por nombre, palabra clave o dominio...",
     "search_skills": "Buscar habilidades por nombre, palabra clave o dominio...",
@@ -194,7 +192,9 @@
     "stage_pre_visit": "Preconsulta",
     "tab_agents": "Agentes",
     "tab_skills": "Habilidades",
-    "view_details": "Ver detalles"
+    "view_details": "Ver detalles",
+    "domain_specialist": "Clínico",
+    "risk_assist": "Asistencia clínica"
   },
   "family": {
     "title": "Familia",
@@ -294,7 +294,7 @@
   },
   "settings": {
     "title": "Ajustes",
-    "subtitle": "Gestiona servidores locales de ejecución, privacidad del paciente, diagnósticos y seguridad de la cuenta.",
+    "subtitle": "Gestiona servidores locales de ejecución, privacidad de datos, diagnósticos y seguridad de la cuenta.",
     "nav": {
       "model": "Modelos y Proveedores",
       "privacy": "Privacidad y Datos",
@@ -333,13 +333,13 @@
     },
     "privacy": {
       "title": "Privacidad, Consentimiento y Datos",
-      "description": "Revisa la soberanía de datos en tu dispositivo, consentimientos clínicos y datos del navegador.",
-      "clinicalConsents": "Consentimientos de Asistencia Clínica",
-      "clinicalConsentsDesc": "Los asistentes clínicos solo se ejecutan tras tu consentimiento explícito. Retirar el consentimiento aplica en tu siguiente mensaje.",
+      "description": "Revisa la soberanía de datos en tu dispositivo, consentimientos de asistencia y datos del navegador.",
       "localBrowserData": "Datos y Almacenamiento Local del Navegador",
       "localBrowserDataDesc": "Los datos se almacenan en tu navegador web. Puedes borrar conversaciones o eliminar claves guardadas en cualquier momento.",
       "storedConversations": "Conversaciones guardadas",
-      "savedApiKeys": "Claves API guardadas"
+      "savedApiKeys": "Claves API guardadas",
+      "assistConsents": "Consentimientos de Asistencia",
+      "assistConsentsDesc": "Los asistentes elevados solo se ejecutan tras tu consentimiento explícito. Retirar el consentimiento aplica en tu siguiente mensaje."
     },
     "diagnostics": {
       "title": "Diagnóstico y Estado del Sistema",

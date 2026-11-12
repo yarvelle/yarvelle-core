@@ -15,7 +15,7 @@ Provides a zero-storage, HMAC-SHA256 state-sealed callback bounce mechanism
 that validates short-lived (`<= 120s` TTL) relay tickets in constant time,
 enforces single-use nonce replay protection, and constructs a strict
 loopback (`http://127.0.0.1:...`) or companion (`<url_scheme>://...`) redirect
-without ever exchanging or persisting OAuth tokens or PHI.
+without ever exchanging or persisting OAuth tokens or sensitive user data.
 """
 
 from __future__ import annotations
@@ -166,7 +166,7 @@ def resolve_stateless_relay_callback(
 ) -> Dict[str, Any]:
     """Verifies a stateless relay ticket and constructs the loopback/companion redirect target.
 
-    Never exchanges the authorization code and never stores OAuth tokens or PHI.
+    Never exchanges the authorization code and never stores OAuth tokens or sensitive user data.
 
     Args:
         relay_ticket: Signed `<base64url_payload>.<hmac_sha256_hex>` ticket.

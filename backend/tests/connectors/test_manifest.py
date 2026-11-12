@@ -17,8 +17,8 @@ import yarvelle_core  # noqa: F401
 
 import pytest
 
-from connectors.errors import ManifestValidationError
-from connectors.manifest import (
+from yarvelle_core.connectors.errors import ManifestValidationError
+from yarvelle_core.connectors.manifest import (
     AuthConfig,
     ConnectorManifest,
     DataFlowSpec,

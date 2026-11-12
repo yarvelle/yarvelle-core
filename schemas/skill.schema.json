@@ -20,7 +20,7 @@
         "wellness",
         "admin",
         "education",
-        "clinical_assist"
+        "assist"
       ],
       "title": "RiskClass",
       "type": "string"
