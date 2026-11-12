@@ -40,8 +40,6 @@ ignore_imports =
     yarvelle_core.engine.graph -> yarvelle_core.workflows.nodes.input_guardrail_node
     yarvelle_core.engine.graph -> yarvelle_core.workflows.nodes.suggestion_node
     yarvelle_core.engine.graph -> yarvelle_core.workflows.state
-    yarvelle_core.engine.tool_registry -> yarvelle_core.workflows.subgraphs.extraction.tool
-    yarvelle_core.engine.tool_registry -> yarvelle_core.tools.extraction_tools
     yarvelle_core.db.scoped_session -> yarvelle_core.scope.context
     yarvelle_core.db.scoped_session -> yarvelle_core.scope.mixin
     yarvelle_core.db.models -> yarvelle_core.scope.adapter

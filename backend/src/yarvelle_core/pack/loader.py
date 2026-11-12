@@ -21,10 +21,11 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Set
 
 from yarvelle_core import __version__ as CORE_VERSION
 from yarvelle_core.engine.safety_policy import SafetyPolicy, set_domain_safety_policy
-from yarvelle_core.engine.tool_registry import ToolSpecRegistry
+from yarvelle_core.engine.tool_registry import ToolSpecRegistry, bound_declarative_to_tool_spec
 from yarvelle_core.pack.spec import PackSpec, RouterContribution
 from yarvelle_core.pack.validator import validate_pack_spec
 from yarvelle_core.resources.loader import get_resource_loader
+from yarvelle_core.tools.spec_loader import get_tool_spec_loader
 
 logger = logging.getLogger("yarvelle_core.pack.loader")
 ENTRY_POINT_GROUP = "yarvelle.packs"
@@ -136,9 +137,28 @@ def discover_and_load_packs(
             except Exception:
                 pass
 
-        # Register tools
+        # Register tools (explicit Python ToolSpecs + declarative YAML/JSON specs if present)
         for tool in pack_spec.tools:
             registry.tool_registry.register(tool, pack_id=pack_spec.id)
+
+        if getattr(pack_spec, "manifest_path", None):
+            pack_root = Path(str(pack_spec.manifest_path)).resolve().parent
+            decl_loader = get_tool_spec_loader()
+            for candidate_rel in ("resources/tools", "tools.yaml", "resources/tools.yaml"):
+                candidate_path = pack_root / candidate_rel
+                if candidate_path.exists():
+                    try:
+                        decl_loader.register_pack_source(pack_spec.id, candidate_path)
+                        for bound in decl_loader.load_pack_tools(pack_spec.id):
+                            if registry.tool_registry.get(bound.spec.name) is None:
+                                registry.tool_registry.register(
+                                    bound_declarative_to_tool_spec(bound),
+                                    pack_id=pack_spec.id,
+                                )
+                    except Exception as tool_err:
+                        raise PackLoadError(
+                            f"Pack '{pack_spec.id}' declarative tool registration failed: {tool_err}"
+                        ) from tool_err
 
         # Register router contributions
         for router_contrib in pack_spec.routers:
