@@ -11,15 +11,37 @@
 
 """Yarvelle Core Vault Exception Hierarchy.
 
-Defines domain-specific errors for the cryptographic keyring vault,
-ensuring fail-closed semantics and zero-silent-plaintext leaks.
+Defines domain-specific errors for the cryptographic keyring vault bridged onto
+the unified ``YarvelleError`` taxonomy (``YRV-400-*``), ensuring fail-closed
+semantics and zero-silent-plaintext leaks.
 """
 
 from __future__ import annotations
 
+from typing import Any, Mapping, Optional
 
-class VaultError(Exception):
+from yarvelle_core.errors.base import YarvelleError
+
+
+class VaultError(YarvelleError):
     """Base exception for all Yarvelle Core cryptographic vault operations."""
+
+    DEFAULT_ERROR_CODE = "YRV-400-001"
+
+    def __init__(
+        self,
+        message: Optional[str] = None,
+        *,
+        code: Optional[str] = None,
+        context: Optional[Mapping[str, Any]] = None,
+        cause: Optional[BaseException] = None,
+    ) -> None:
+        super().__init__(
+            code or self.DEFAULT_ERROR_CODE,
+            context=context,
+            cause=cause,
+            detail=str(message) if message is not None else None,
+        )
 
 
 class VaultLockedError(VaultError):
@@ -29,6 +51,8 @@ class VaultLockedError(VaultError):
     silently fall back to unencrypted storage or a hardcoded default key.
     """
 
+    DEFAULT_ERROR_CODE = "YRV-400-002"
+
 
 class DecryptionError(VaultError):
     """Raised when AES-256-GCM ciphertext decryption or authentication fails.
@@ -37,6 +61,18 @@ class DecryptionError(VaultError):
     bit flips, or mismatches in Authenticated Additional Data (AAD).
     """
 
+    DEFAULT_ERROR_CODE = "YRV-400-003"
+
 
 class KeyDerivationError(VaultError):
     """Raised when cryptographic key derivation (e.g. Argon2id) fails."""
+
+    DEFAULT_ERROR_CODE = "YRV-400-004"
+
+
+__all__ = [
+    "DecryptionError",
+    "KeyDerivationError",
+    "VaultError",
+    "VaultLockedError",
+]

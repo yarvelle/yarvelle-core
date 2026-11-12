@@ -59,6 +59,7 @@ from yarvelle_core.engine.tool_registry import (
     ToolSpec,
     TrustLevel,
 )
+from yarvelle_core.errors.base import YarvelleError, ensure_yarvelle_error
 from yarvelle_core.schemas.tool import ToolResult as BaseToolResult
 
 logger = logging.getLogger("yarvelle_core.engine.tool_exec")
@@ -135,8 +136,10 @@ class UntrustedResult:
 # Section 2: Egress Firewall Exception & Anti-SSRF (AU-17 & AU-20)
 # ============================================================================
 
-class EgressBlockedError(PermissionError):
+class EgressBlockedError(YarvelleError, PermissionError):
     """Raised when an outbound network request targets an unauthorized host or violates egress policy."""
+
+    DEFAULT_ERROR_CODE = "YRV-600-002"
 
     def __init__(
         self,
@@ -144,7 +147,16 @@ class EgressBlockedError(PermissionError):
         host: Optional[str] = None,
         tool: Optional[str] = None,
     ) -> None:
-        super().__init__(message)
+        ctx: Dict[str, Any] = {}
+        if host is not None:
+            ctx["host"] = host
+        if tool is not None:
+            ctx["tool"] = tool
+        super().__init__(
+            self.DEFAULT_ERROR_CODE,
+            context=ctx or None,
+            detail=str(message) if message is not None else None,
+        )
         self.host = host
         self.tool = tool
 
@@ -689,6 +701,8 @@ async def execute_tool_call(
             success=False,
             output=None,
             error="Security violation: Tool execution denied. ToolContext instance is required.",
+            error_code="YRV-300-014",
+            retryable=False,
         )
 
     if not ctx.profile_id or not isinstance(ctx.profile_id, str) or not ctx.profile_id.strip():
@@ -696,6 +710,8 @@ async def execute_tool_call(
             success=False,
             output=None,
             error="Security violation: Tool execution denied. profile_id is missing or empty (fail-closed).",
+            error_code="YRV-300-014",
+            retryable=False,
         )
 
     if not ctx.user_id or not isinstance(ctx.user_id, str) or not ctx.user_id.strip():
@@ -703,6 +719,8 @@ async def execute_tool_call(
             success=False,
             output=None,
             error="Security violation: Tool execution denied. user_id is missing or empty (fail-closed).",
+            error_code="YRV-300-014",
+            retryable=False,
         )
 
     # 2. ToolSpec Validation
@@ -711,6 +729,8 @@ async def execute_tool_call(
             success=False,
             output=None,
             error="Security violation: Tool execution denied. ToolSpec instance is required.",
+            error_code="YRV-700-001",
+            retryable=False,
         )
 
     executor = getattr(spec, "executor", None) or getattr(spec, "handler", None)
@@ -719,6 +739,8 @@ async def execute_tool_call(
             success=False,
             output=None,
             error=f"Tool '{spec.name}' has no valid executor.",
+            error_code="YRV-700-003",
+            retryable=False,
         )
 
     # 2.5 Scope Authorization Verification
@@ -755,6 +777,8 @@ async def execute_tool_call(
                 success=False,
                 output=None,
                 error=err_msg,
+                error_code="YRV-300-008",
+                retryable=False,
             )
 
     # 3. Network Egress Firewall Verification
@@ -768,6 +792,8 @@ async def execute_tool_call(
             success=False,
             output=None,
             error=err_msg,
+            error_code=exc.code,
+            retryable=exc.retryable,
         )
 
     eff_agent_id = agent_id or getattr(ctx, "agent_id", None) or getattr(getattr(ctx, "agent", None), "id", None)
@@ -790,6 +816,8 @@ async def execute_tool_call(
             success=False,
             output=None,
             error=err_msg,
+            error_code="YRV-300-013",
+            retryable=False,
         )
 
     if decision.decision == "needs_approval":
@@ -818,6 +846,8 @@ async def execute_tool_call(
                     success=False,
                     output=None,
                     error=err_msg,
+                    error_code="YRV-700-006",
+                    retryable=False,
                 )
         else:
             # Execution halted: create pending approval record if store available
@@ -852,6 +882,8 @@ async def execute_tool_call(
                 success=False,
                 output=None,
                 error=err_msg,
+                error_code="YRV-700-005",
+                retryable=False,
                 needs_approval=True,
                 approval_id=app_id,
             )
@@ -895,11 +927,14 @@ async def execute_tool_call(
         dur_ms = round((time.time() - t0) * 1000, 2)
         logger.exception("Error executing tool '%s': %s", spec.name, exc)
         err_msg = f"Tool '{spec.name}' execution failed: {exc}"
+        mapped_err = exc if isinstance(exc, YarvelleError) else ensure_yarvelle_error(exc, default_code="YRV-700-009")
         await _record_tool_audit(ctx, spec, False, dur_ms, err_msg)
         return ToolResult(
             success=False,
             output=None,
             error=err_msg,
+            error_code=mapped_err.code,
+            retryable=mapped_err.retryable,
         )
 
     dur_ms = round((time.time() - t0) * 1000, 2)

@@ -17,6 +17,7 @@ from typing import Any, List
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from yarvelle_core.api.errors import register_error_handlers
 from yarvelle_core.conformance.layers.base import BaseIsolationLayerTest
 from yarvelle_core.conformance.models import IsolationLayer, LayerViolation
 from yarvelle_core.scope.context import scope_context
@@ -40,6 +41,7 @@ class Layer08ApiTest(BaseIsolationLayerTest):
         scope_b = pack_b.owned_scopes[0]
 
         app = FastAPI()
+        register_error_handlers(app)
         app.include_router(pack_a.get_test_router())
         app.include_router(pack_b.get_test_router())
 

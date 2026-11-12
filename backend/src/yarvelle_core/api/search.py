@@ -15,22 +15,24 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from yarvelle_core.api.deps import get_current_user
+from yarvelle_core.api.errors import ProblemDetailsRoute
 from yarvelle_core.api.profiles import auto_provision_primary_me_profile, get_user_profile_access
 from yarvelle_core.auth.ports import UserProfile
 from yarvelle_core.db.models import Profile
 from yarvelle_core.db.session import get_db
+from yarvelle_core.errors.base import YarvelleError
 from yarvelle_core.logging import get_logger
 from yarvelle_core.search.base import SearchResult
 from yarvelle_core.search.factory import get_search_index
 
 logger = get_logger("yarvelle_core.api.search")
 
-router = APIRouter(tags=["search"])
+router = APIRouter(tags=["search"], route_class=ProblemDetailsRoute)
 search_router = router
 
 VALID_SEARCH_MODES = frozenset({"hybrid", "lexical", "semantic"})
@@ -57,8 +59,9 @@ async def search_profile_records(
     # 1. Validate profile_id parameter
     clean_profile_id = (profile_id or "").strip() if isinstance(profile_id, str) else ""
     if not clean_profile_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        raise YarvelleError(
+            "YRV-100-004",
+            context={"parameter": "profile_id"},
             detail="Profile not found",
         )
 
@@ -66,16 +69,18 @@ async def search_profile_records(
     raw_query = q if q is not None else query
     clean_query = (raw_query or "").strip()
     if not clean_query:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        raise YarvelleError(
+            "YRV-100-004",
+            context={"parameter": "q"},
             detail="Search query cannot be empty",
         )
 
     # 3. Validate retrieval mode
     clean_mode = (mode or "hybrid").lower().strip()
     if clean_mode not in VALID_SEARCH_MODES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        raise YarvelleError(
+            "YRV-100-002",
+            context={"mode": mode, "valid_modes": sorted(VALID_SEARCH_MODES)},
             detail="Invalid search mode",
         )
 
@@ -88,16 +93,18 @@ async def search_profile_records(
         prof = p_res.scalar_one_or_none()
 
     if prof is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        raise YarvelleError(
+            "YRV-500-002",
+            context={"profile_id": clean_profile_id},
             detail="Profile not found",
         )
 
     # 5. Verify user access
     access = await get_user_profile_access(prof, user, db)
     if access is None:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise YarvelleError(
+            "YRV-300-007",
+            context={"profile_id": prof.id},
             detail="Forbidden: profile access denied",
         )
 

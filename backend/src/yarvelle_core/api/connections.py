@@ -17,7 +17,7 @@ import json
 from typing import Any, Callable, Coroutine, Dict, List, Literal, Optional
 import uuid
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,6 +26,7 @@ from sqlalchemy.orm import aliased
 from yarvelle_core import identity
 from yarvelle_core.api.deps import get_current_user, get_db, resolve_owner_user_id
 from yarvelle_core.api.deps import get_user_profile_access
+from yarvelle_core.api.errors import ProblemDetailsRoute
 from yarvelle_core.auth.ports import UserProfile
 from yarvelle_core.connectors.lifecycle import (
     check_under_13_connection_guard,
@@ -54,12 +55,13 @@ from yarvelle_core.db.models import (
     SyncRun,
     utc_now,
 )
+from yarvelle_core.errors import YarvelleError
 from yarvelle_core.logging import get_logger
 from yarvelle_core.vault import get_kek
 
 logger = get_logger("yarvelle_core.api.connections")
 
-router = APIRouter(tags=["connections"])
+router = APIRouter(tags=["connections"], route_class=ProblemDetailsRoute)
 
 
 # ============================================================================
@@ -197,8 +199,9 @@ def require_profile_access(
     ) -> Profile:
         clean_id = (profile_id or "").strip()
         if not clean_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+            raise YarvelleError(
+                "YRV-100-004",
+                context={"parameter": "profile_id"},
                 detail="profile_id path parameter is required.",
             )
 
@@ -206,27 +209,30 @@ def require_profile_access(
         res = await db.execute(stmt)
         profile = res.scalar_one_or_none()
         if profile is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Profile '{clean_id}' not found.",
+            raise YarvelleError(
+                "YRV-500-002",
+                context={"profile_id": clean_id},
             )
 
         access = await get_user_profile_access(profile, user, db)
         if access is None:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+            raise YarvelleError(
+                "YRV-300-007",
+                context={"profile_id": clean_id},
                 detail="Access denied: you do not have permission for this profile.",
             )
 
         if required_access == "manage" and access != "manage":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+            raise YarvelleError(
+                "YRV-300-007",
+                context={"profile_id": clean_id},
                 detail="Access denied: management permissions required to modify connections.",
             )
 
         if required_access == "view_clinical" and access not in ("manage", "view_clinical"):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+            raise YarvelleError(
+                "YRV-300-007",
+                context={"profile_id": clean_id},
                 detail="Access denied: profile view permissions required to inspect connections.",
             )
 
@@ -334,8 +340,9 @@ async def create_profile_connection(
     try:
         check_under_13_connection_guard(profile, user_role)
     except PermissionError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise YarvelleError(
+            "YRV-300-004",
+            cause=exc,
             detail=str(exc),
         ) from exc
 
@@ -457,8 +464,9 @@ async def create_profile_connection(
                 external_base_url=payload.external_base_url,
             )
         except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+            raise YarvelleError(
+                "YRV-100-003",
+                cause=exc,
                 detail=str(exc),
             ) from exc
 
@@ -524,9 +532,9 @@ async def complete_connection_oauth_callback(
     conn_res = await db.execute(conn_stmt)
     connection = conn_res.scalar_one_or_none()
     if connection is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Connection '{connection_id}' not found for profile '{profile.id}'.",
+        raise YarvelleError(
+            "YRV-500-009",
+            context={"connection_id": connection_id, "profile_id": profile.id},
         )
 
     owner_id = resolve_owner_user_id(user) or profile.user_id or getattr(user, "id", "local-steward")
@@ -538,16 +546,14 @@ async def complete_connection_oauth_callback(
             expected_profile_id=profile.id,
         )
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        raise YarvelleError(
+            "YRV-600-008",
+            cause=exc,
             detail=str(exc),
         ) from exc
 
     if state_data.get("connection_id") != connection.id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="OAuth state connection_id does not match the target connection.",
-        )
+        raise YarvelleError("YRV-600-008")
 
     token_data: Dict[str, Any] = dict(payload.token_payload or {})
     if not token_data.get("access_token"):
@@ -590,9 +596,9 @@ async def trigger_profile_connection_sync(
     conn_res = await db.execute(conn_stmt)
     connection = conn_res.scalar_one_or_none()
     if connection is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Connection '{connection_id}' not found for profile '{profile.id}'.",
+        raise YarvelleError(
+            "YRV-500-009",
+            context={"connection_id": connection_id, "profile_id": profile.id},
         )
 
     sync_run = await run_connection_sync(session=db, connection_id=connection.id)
@@ -625,9 +631,9 @@ async def list_connection_sync_runs(
     conn_res = await db.execute(conn_stmt)
     connection = conn_res.scalar_one_or_none()
     if connection is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Connection '{connection_id}' not found for profile '{profile.id}'.",
+        raise YarvelleError(
+            "YRV-500-009",
+            context={"connection_id": connection_id, "profile_id": profile.id},
         )
 
     stmt = (
@@ -672,8 +678,10 @@ async def revoke_profile_connection(
             delete_imported_data=delete_imported,
         )
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+        raise YarvelleError(
+            "YRV-500-009",
+            cause=exc,
+            context={"connection_id": connection_id.strip(), "profile_id": profile.id},
             detail=str(exc),
         ) from exc
 

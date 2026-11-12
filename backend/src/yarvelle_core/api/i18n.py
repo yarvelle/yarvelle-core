@@ -15,9 +15,11 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional
 
-from fastapi import APIRouter, Header, HTTPException, Query, status
+from fastapi import APIRouter, Header, Query
 from pydantic import BaseModel, Field
 
+from yarvelle_core.api.errors import ProblemDetailsRoute
+from yarvelle_core.errors.base import YarvelleError
 from yarvelle_core.i18n.catalog import (
     get_catalog,
     get_localized_disclaimer,
@@ -31,7 +33,7 @@ from yarvelle_core.i18n.locale import (
     negotiate_locale,
 )
 
-router = APIRouter(prefix="/i18n", tags=["i18n"])
+router = APIRouter(prefix="/i18n", tags=["i18n"], route_class=ProblemDetailsRoute)
 
 
 class LocaleMetadataItem(BaseModel):
@@ -99,9 +101,10 @@ async def get_locale_catalog(locale: str) -> LocaleCatalogResponse:
     try:
         canonical_req = canonicalize_locale(locale, strict=True)
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Invalid or malformed BCP 47 locale tag.",
+        raise YarvelleError(
+            "YRV-100-009",
+            context={"locale": locale},
+            cause=exc,
         ) from exc
 
     resolved_locale = negotiate_locale(profile_locale=canonical_req, default=DEFAULT_LOCALE)

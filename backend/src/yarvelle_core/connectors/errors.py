@@ -9,29 +9,66 @@
 #
 # Required Notice: Copyright 2026 Spectrayan (https://spectrayan.com)
 
-"""Exception hierarchy for the connectors framework."""
+"""Exception hierarchy for the connectors framework bridged onto YarvelleError."""
 
 from __future__ import annotations
 
+from typing import Any, Dict, Mapping, Optional
 
-class ConnectorError(Exception):
+from yarvelle_core.errors.base import YarvelleError
+
+
+class ConnectorError(YarvelleError):
     """Base exception for all connector-related errors."""
 
+    DEFAULT_ERROR_CODE = "YRV-600-001"
 
-class EgressBlockedError(PermissionError, ConnectorError):
+    def __init__(
+        self,
+        message: Optional[str] = None,
+        *,
+        code: Optional[str] = None,
+        context: Optional[Mapping[str, Any]] = None,
+        cause: Optional[BaseException] = None,
+    ) -> None:
+        super().__init__(
+            code or self.DEFAULT_ERROR_CODE,
+            context=context,
+            cause=cause,
+            detail=str(message) if message is not None else None,
+        )
+
+
+class EgressBlockedError(ConnectorError, PermissionError):
     """Raised when an outbound HTTP request targets a host, scheme, or port prohibited by policy."""
 
-    def __init__(self, message: str, host: str | None = None) -> None:
-        super().__init__(message)
+    DEFAULT_ERROR_CODE = "YRV-600-002"
+
+    def __init__(
+        self,
+        message: str = "Outbound network egress blocked by security policy.",
+        host: str | None = None,
+        *,
+        context: Optional[Mapping[str, Any]] = None,
+        cause: Optional[BaseException] = None,
+    ) -> None:
+        ctx: Dict[str, Any] = dict(context) if context else {}
+        if host is not None:
+            ctx.setdefault("host", host)
+        super().__init__(message, code=self.DEFAULT_ERROR_CODE, context=ctx or None, cause=cause)
         self.host = host
 
 
 class AuthExpiredError(ConnectorError):
     """Raised when connector authentication credentials have expired or require reauthorization."""
 
+    DEFAULT_ERROR_CODE = "YRV-600-003"
+
 
 class ManifestValidationError(ConnectorError, ValueError):
     """Raised when a connector manifest fails schema validation."""
+
+    DEFAULT_ERROR_CODE = "YRV-200-002"
 
 
 __all__ = [

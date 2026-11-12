@@ -23,12 +23,13 @@ from datetime import datetime, timezone
 import json
 from typing import Any, Dict, List, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from yarvelle_core.api.deps import get_current_user, get_db
+from yarvelle_core.api.errors import ProblemDetailsRoute
 from yarvelle_core.api.profiles import get_user_profile_access
 from yarvelle_core.audit.redaction import contains_redaction_placeholder, redact_tool_args
 from yarvelle_core.auth.ports import UserProfile
@@ -38,11 +39,12 @@ from yarvelle_core.engine.tool_exec import (
     canonical_json,
     compute_payload_hash,
 )
+from yarvelle_core.errors import YarvelleError
 from yarvelle_core.logging import get_logger
 
 logger = get_logger("yarvelle_core.api.approvals")
 
-router = APIRouter(tags=["approvals"])
+router = APIRouter(tags=["approvals"], route_class=ProblemDetailsRoute)
 
 
 # ============================================================================
@@ -136,10 +138,7 @@ def verify_csrf(request: Request) -> None:
     sec_fetch_site = request.headers.get("Sec-Fetch-Site")
     if sec_fetch_site == "cross-site":
         logger.warning("csrf_blocked_cross_site_request", path=str(request.url.path))
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="CSRF protection: cross-site requests are forbidden.",
-        )
+        raise YarvelleError("YRV-300-009")
 
 
 async def verify_manage_access(
@@ -161,8 +160,9 @@ async def verify_manage_access(
             access_level=access,
             user_role=getattr(user, "role", None),
         )
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise YarvelleError(
+            "YRV-300-007",
+            context={"profile_id": profile.id},
             detail="Forbidden: management privileges required for profile.",
         )
 
@@ -191,8 +191,9 @@ async def list_approvals(
     """
     resolved_profile_id = profile_id or request.path_params.get("profile_id")
     if not resolved_profile_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        raise YarvelleError(
+            "YRV-100-004",
+            context={"parameter": "profile_id"},
             detail="Query parameter 'profile_id' is required.",
         )
 
@@ -201,9 +202,9 @@ async def list_approvals(
     p_res = await db.execute(p_stmt)
     profile = p_res.scalar_one_or_none()
     if profile is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Profile '{resolved_profile_id}' not found.",
+        raise YarvelleError(
+            "YRV-500-002",
+            context={"profile_id": resolved_profile_id},
         )
 
     await verify_manage_access(profile, user, db)
@@ -237,17 +238,18 @@ async def get_approval(
     res = await db.execute(stmt)
     approval = res.scalar_one_or_none()
     if approval is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Approval request '{approval_id}' not found.",
+        raise YarvelleError(
+            "YRV-700-004",
+            context={"approval_id": approval_id},
         )
 
     p_stmt = select(Profile).where(Profile.id == approval.profile_id)
     p_res = await db.execute(p_stmt)
     profile = p_res.scalar_one_or_none()
     if profile is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+        raise YarvelleError(
+            "YRV-500-002",
+            context={"profile_id": approval.profile_id},
             detail=f"Target profile '{approval.profile_id}' not found.",
         )
 
@@ -278,9 +280,9 @@ async def decide_approval(
     res = await db.execute(stmt)
     approval = res.scalar_one_or_none()
     if approval is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Approval request '{approval_id}' not found.",
+        raise YarvelleError(
+            "YRV-700-004",
+            context={"approval_id": approval_id},
         )
 
     # 2. Fetch associated Profile and assert 'manage' permission (admin bypass denied)
@@ -288,8 +290,9 @@ async def decide_approval(
     p_res = await db.execute(p_stmt)
     profile = p_res.scalar_one_or_none()
     if profile is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+        raise YarvelleError(
+            "YRV-500-002",
+            context={"profile_id": approval.profile_id},
             detail=f"Target profile '{approval.profile_id}' not found.",
         )
 
@@ -297,8 +300,9 @@ async def decide_approval(
 
     # 3. Check lifecycle invariants: must be currently 'pending'
     if approval.status != "pending":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        raise YarvelleError(
+            "YRV-700-006",
+            context={"approval_id": approval_id, "status": approval.status},
             detail=f"Approval request '{approval_id}' is already in status '{approval.status}' and cannot be decided.",
         )
 
@@ -307,8 +311,9 @@ async def decide_approval(
     if ensure_utc(approval.expires_at) <= now:
         approval.status = "expired"
         await db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        raise YarvelleError(
+            "YRV-700-006",
+            context={"approval_id": approval_id, "status": "expired"},
             detail="Approval request has expired and cannot be decided.",
         )
 
@@ -321,10 +326,7 @@ async def decide_approval(
     # 6. If approved with edited arguments, recompute payload hash and canonical JSON
     if normalized_decision == "approved" and payload.edited_args is not None:
         if contains_redaction_placeholder(payload.edited_args):
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Edited arguments still contain redacted placeholders; supply the full values.",
-            )
+            raise YarvelleError("YRV-100-010")
         approval.payload_hash = compute_payload_hash(payload.edited_args)
         approval.args_redacted = canonical_json(redact_tool_args(payload.edited_args))
 

@@ -15,13 +15,16 @@ from __future__ import annotations
 
 import json
 from typing import Any, List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query
+
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from yarvelle_core.api.deps import get_current_user, resolve_owner_user_id
+from yarvelle_core.api.errors import ProblemDetailsRoute
 from yarvelle_core.api.profiles import get_user_profile_access
 from yarvelle_core.audit.logger import get_recent_audit_events, open_audit_detail
+from yarvelle_core.errors import YarvelleError
 from yarvelle_core.vault.field_crypto import (
     FieldDecryptionError,
     FieldKeyError,
@@ -41,7 +44,7 @@ from yarvelle_core.db.session import get_db
 from yarvelle_core.config import settings
 from yarvelle_core.schemas.audit import AuditEvent, AuditListResponse
 
-router = APIRouter(tags=["Audit"])
+router = APIRouter(tags=["Audit"], route_class=ProblemDetailsRoute)
 
 
 def _record_to_schema(record: AuditEventRecord, full: bool = False) -> AuditEvent:
@@ -127,15 +130,16 @@ async def list_audit_events(
             p_res = await db.execute(select(Profile).where(Profile.id == profile_id))
             prof = p_res.scalar_one_or_none()
             if prof is None:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Profile '{profile_id}' not found.",
+                raise YarvelleError(
+                    "YRV-500-002",
+                    context={"profile_id": profile_id},
                 )
 
             access = await get_user_profile_access(prof, user, db)
             if access is None:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
+                raise YarvelleError(
+                    "YRV-300-007",
+                    context={"profile_id": profile_id},
                     detail=f"Forbidden: access denied for profile '{profile_id}'.",
                 )
 
@@ -238,13 +242,13 @@ async def list_audit_events(
             limit=limit,
             events=events,
         )
-    except HTTPException:
-        raise
     except (FieldDecryptionError, FieldKeyError, PlaintextFieldError) as err:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Audit detail decryption failed",
+        raise YarvelleError(
+            "YRV-400-005",
+            cause=err,
         ) from err
+    except YarvelleError:
+        raise
     except Exception as err:
         if "no such table" in str(err).lower():
             total, events = await get_recent_audit_events(

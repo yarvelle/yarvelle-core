@@ -179,6 +179,7 @@ class PackProvidesSpec(BaseModel):
     resources_dir: Optional[str] = Field(default="resources/", description="Pack-native resource files directory")
     workflows_dir: Optional[str] = Field(default="workflows/", description="Pack-native workflow/pattern files directory")
     evals: Optional[str] = Field(default=None, description="Path to evals definition or dataset")
+    errors_file: Optional[str] = Field(default=None, description="Optional path to pack error catalog YAML file")
     panels: List[PackPanelSpec] = Field(default_factory=list, description="Declared multi-agent deliberation panels contributed by this pack")
 
 
@@ -211,6 +212,9 @@ class PackManifest(BaseModel):
     )
     safety: Optional[PackSafetySpec] = Field(
         default=None, description="Guard checks that run after the safety policy (safety.guards)"
+    )
+    error_prefix: Optional[str] = Field(
+        default=None, description="Optional disjoint uppercase error code prefix e.g. 'CFD' or 'FIN'"
     )
 
     @field_validator("id")
@@ -268,6 +272,9 @@ class PackSpec(BaseModel):
     )
     safety: Optional[PackSafetySpec] = Field(
         default=None, description="Guard checks that run after the safety policy (safety.guards)"
+    )
+    error_prefix: Optional[str] = Field(
+        default=None, description="Optional disjoint uppercase error code prefix e.g. 'CFD' or 'FIN'"
     )
 
     @field_validator("id", "domain")

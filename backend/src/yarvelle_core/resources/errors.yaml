@@ -1,176 +1,1118 @@
+# Yarvelle Core — Domain-Neutral AI Agent Runtime & Execution Engine
+# Copyright 2026 Spectrayan (https://spectrayan.com)
+#
+# Licensed under the PolyForm Noncommercial License 1.0.0 and the
+# Yarvelle Core Additional Terms (see LICENSE and ADDITIONAL-TERMS.md).
+# Personal and household local use only. Commercial use, hosted service
+# offering, rebranding, white-labeling, and redistribution of modified
+# forks are prohibited without a written commercial license from Spectrayan.
+#
+# Required Notice: Copyright 2026 Spectrayan (https://spectrayan.com)
+
 # ============================================================================
-# Yarvelle Core Standardized Error Messages and Status Codes
+# Yarvelle Core Immutable Unified Error Taxonomy (YRV-XXX-YYY)
 # ============================================================================
+# Immutability Contract:
+# Once released, a YRV-XXX-YYY error code MUST NEVER be deleted or reassigned
+# to a different semantic failure condition. Deprecated codes remain reserved.
+
+apiVersion: yarvelle.errors/v1
+kind: ErrorCatalog
+prefix: YRV
+type_base_uri: https://errors.yarvelle.dev
+
+categories:
+  100: validation
+  200: configuration
+  300: auth
+  400: vault
+  500: storage
+  600: connector
+  700: mcp_tools
+  800: workflow
+  900: internal
 
 errors:
-  # HTTP 400 Bad Request / Validation Errors
+  # --------------------------------------------------------------------------
+  # 100 — Validation (Input, Parameters, Preconditions & Media Constraints)
+  # --------------------------------------------------------------------------
   prompt_empty:
+    code: YRV-100-001
+    category: validation
+    http_status: 400
     status_code: 400
+    jsonrpc_code: -32602
+    retryable: false
+    title: "Empty Prompt"
+    template: "Parameter 'prompt' must not be empty."
     message: "Parameter 'prompt' must not be empty."
-    description: "Submitted user chat prompt was empty or whitespace"
+    description: "Submitted user chat prompt was empty or whitespace."
 
   invalid_input:
+    code: YRV-100-002
+    category: validation
+    http_status: 400
     status_code: 400
+    jsonrpc_code: -32602
+    retryable: false
+    title: "Invalid Input"
+    template: "Invalid request parameter: {detail}"
     message: "Invalid request parameter: {detail}"
-    description: "General parameter validation failure"
+    description: "General parameter validation failure."
 
   validation_error:
+    code: YRV-100-003
+    category: validation
+    http_status: 400
     status_code: 400
+    jsonrpc_code: -32602
+    retryable: false
+    title: "Validation Error"
+    template: "Request validation failed: {detail}"
     message: "Request validation failed: {detail}"
-    description: "Parameter or payload validation error"
+    description: "Parameter or payload validation error."
+
+  missing_required_parameter:
+    code: YRV-100-004
+    category: validation
+    http_status: 400
+    status_code: 400
+    jsonrpc_code: -32602
+    retryable: false
+    title: "Missing Required Parameter"
+    template: "Parameter '{parameter}' is required."
+    message: "Parameter '{parameter}' is required."
+    description: "A required path, query, or body parameter was omitted or blank."
+
+  invalid_state_transition:
+    code: YRV-100-005
+    category: validation
+    http_status: 400
+    status_code: 400
+    jsonrpc_code: -32602
+    retryable: false
+    title: "Invalid State Transition"
+    template: "{detail}"
+    message: "{detail}"
+    description: "Requested operation violates lifecycle state or domain preconditions."
+
+  payload_too_large:
+    code: YRV-100-006
+    category: validation
+    http_status: 413
+    status_code: 413
+    jsonrpc_code: -32013
+    retryable: false
+    title: "Payload Too Large"
+    template: "{detail}"
+    message: "{detail}"
+    description: "Uploaded file or request body exceeds the configured byte limit."
+
+  unsupported_media_format:
+    code: YRV-100-007
+    category: validation
+    http_status: 400
+    status_code: 400
+    jsonrpc_code: -32602
+    retryable: false
+    title: "Unsupported Media Format"
+    template: "{detail}"
+    message: "{detail}"
+    description: "Uploaded attachment format or extension is not in the allowlist."
+
+  unprocessable_entity:
+    code: YRV-100-008
+    category: validation
+    http_status: 422
+    status_code: 422
+    jsonrpc_code: -32602
+    retryable: false
+    title: "Unprocessable Entity"
+    template: "{detail}"
+    message: "{detail}"
+    description: "Syntactically valid payload failed semantic validation."
+
+  invalid_locale_tag:
+    code: YRV-100-009
+    category: validation
+    http_status: 422
+    status_code: 422
+    jsonrpc_code: -32602
+    retryable: false
+    title: "Invalid Locale Tag"
+    template: "Invalid or malformed BCP 47 locale tag."
+    message: "Invalid or malformed BCP 47 locale tag."
+    description: "Supplied locale string does not conform to BCP 47 syntax."
+
+  redacted_placeholder_rejected:
+    code: YRV-100-010
+    category: validation
+    http_status: 422
+    status_code: 422
+    jsonrpc_code: -32602
+    retryable: false
+    title: "Redacted Placeholder Rejected"
+    template: "Edited arguments still contain redacted placeholders; supply the full values."
+    message: "Edited arguments still contain redacted placeholders; supply the full values."
+    description: "Approval decision submitted edited tool arguments still containing redaction markers."
+
+  invalid_path_or_key:
+    code: YRV-100-011
+    category: validation
+    http_status: 400
+    status_code: 400
+    jsonrpc_code: -32602
+    retryable: false
+    title: "Invalid Key or Filename"
+    template: "{detail}"
+    message: "{detail}"
+    description: "Key, namespace, or filename contains prohibited characters or traversal sequences."
+
+  # --------------------------------------------------------------------------
+  # 200 — Configuration & Pack (Manifests, YAML, Providers & Pack Loading)
+  # --------------------------------------------------------------------------
+  malformed_yaml:
+    code: YRV-200-001
+    category: configuration
+    http_status: 400
+    status_code: 400
+    jsonrpc_code: -32700
+    retryable: false
+    title: "Malformed YAML"
+    template: "Malformed YAML in '{path}': {error}"
+    message: "Malformed YAML in '{path}': {error}"
+    description: "YAML syntax parsing failure."
 
   manifest_validation_error:
+    code: YRV-200-002
+    category: configuration
+    http_status: 400
     status_code: 400
+    jsonrpc_code: -32602
+    retryable: false
+    title: "Manifest Validation Failed"
+    template: "Manifest validation failed: {detail}"
     message: "Manifest validation failed: {detail}"
-    description: "Agent or skill manifest failed schema validation"
+    description: "Agent, skill, connector, or pack manifest failed schema validation."
 
-  tool_validation_error:
-    status_code: 400
-    message: "Tool validation error: {detail}"
-    description: "Undeclared tool or tool outside Phase 0 registry"
-
-  malformed_yaml:
-    status_code: 400
-    message: "Malformed YAML in '{path}': {error}"
-    description: "YAML syntax parsing failure"
-
-  # HTTP 403 Forbidden
-  clinical_consent_required:
-    status_code: 403
-    message: "Agent '{agent_id}' is a clinical_assist agent. Explicit user consent (allow_clinical=true) is required."
-    description: "Access to clinical assist agent denied without explicit consent parameter"
-
-  clinical_execution_forbidden:
-    status_code: 403
-    message: "Agent '{agent_id}' is classified as clinical_assist. Execution is forbidden without explicit clinical consent (allow_clinical=True)."
-    description: "Execution blocked for clinical assist agent"
-
-  tool_forbidden:
-    status_code: 403
-    message: "Tool '{tool_name}' execution denied: undeclared tool for agent '{agent_id}'."
-    description: "Agent attempted to call a tool outside its allowed union"
-
-  sandbox_access_denied:
-    status_code: 403
-    message: "Access denied: path '{path}' is outside sandboxed workspace."
-    description: "Tool attempted path traversal outside permitted directory"
-
-  # HTTP 404 Not Found
-  not_found:
-    status_code: 404
-    message: "Requested resource not found: {detail}"
-    description: "General resource not found error"
-
-  agent_not_found:
-    status_code: 404
-    message: "Agent '{agent_id}' not found."
-    description: "Requested agent ID directory does not exist"
-
-  skill_not_found:
-    status_code: 404
-    message: "Skill '{skill_id}' not found."
-    description: "Requested skill ID directory does not exist"
-
-  thread_not_found:
-    status_code: 404
-    message: "Thread '{thread_id}' not found."
-    description: "Requested conversation thread has no checkpoint record"
-
-  checkpoints_not_found:
-    status_code: 404
-    message: "No checkpoints found for thread '{thread_id}'."
-    description: "Checkpoints database file or record does not exist"
-
-  attachment_not_found:
-    status_code: 404
-    message: "Attachment '{filename}' not found in attachments directory."
-    description: "Referenced attachment file does not exist"
-
-  note_not_found:
-    status_code: 404
-    message: "Note '{note_id}' not found in workspace notes."
-    description: "Referenced note does not exist"
-
-  # HTTP 500 Internal Server Error
-  internal_error:
-    status_code: 500
-    message: "An internal server error occurred: {detail}"
-    description: "Internal runtime error"
-
-  agent_load_failed:
-    status_code: 500
-    message: "Failed to load agent: {error}"
-    description: "Unexpected exception loading agent"
-
-  skill_load_failed:
-    status_code: 500
-    message: "Failed to load skill: {error}"
-    description: "Unexpected exception loading skill"
-
-  thread_load_failed:
-    status_code: 500
-    message: "Failed to load thread: {error}"
-    description: "Unexpected exception reading checkpoints"
-
-  stream_execution_error:
-    status_code: 500
-    message: "Unexpected error during chat stream execution: {error}"
-    description: "Unhandled error during LangGraph agent execution"
-
-  # Model & Provider Errors
   missing_api_key:
+    code: YRV-200-003
+    category: configuration
+    http_status: 500
     status_code: 500
+    jsonrpc_code: -32005
+    retryable: false
+    title: "Missing Provider API Key"
+    template: "API key for provider '{provider}' is missing. Please specify an API key in the request settings or set {env_vars} on the server."
     message: "API key for provider '{provider}' is missing. Please specify an API key in the request settings or set {env_vars} on the server."
-    description: "Model provider API key not supplied"
+    description: "Model provider API key was not supplied."
 
   missing_configuration:
+    code: YRV-200-004
+    category: configuration
+    http_status: 500
     status_code: 500
+    jsonrpc_code: -32005
+    retryable: false
+    title: "Missing Configuration"
+    template: "Configuration for provider '{provider}' is missing: {detail}"
     message: "Configuration for provider '{provider}' is missing: {detail}"
-    description: "Required configuration parameter (e.g. base_url) missing"
+    description: "Required runtime or provider configuration parameter is missing."
 
   unsupported_provider:
+    code: YRV-200-005
+    category: configuration
+    http_status: 400
     status_code: 400
+    jsonrpc_code: -32602
+    retryable: false
+    title: "Unsupported Model Provider"
+    template: "Unsupported model provider '{provider}'. Supported providers: {supported}."
     message: "Unsupported model provider '{provider}'. Supported providers: {supported}."
-    description: "Unrecognized provider identifier"
+    description: "Unrecognized model provider identifier."
+
+  pack_not_found:
+    code: YRV-200-006
+    category: configuration
+    http_status: 404
+    status_code: 404
+    jsonrpc_code: -32601
+    retryable: false
+    title: "Pack Not Found"
+    template: "Pack '{pack_id}' is not installed or registered."
+    message: "Pack '{pack_id}' is not installed or registered."
+    description: "Enabled pack identifier was not discovered via entry points."
+
+  pack_load_failed:
+    code: YRV-200-007
+    category: configuration
+    http_status: 500
+    status_code: 500
+    jsonrpc_code: -32603
+    retryable: false
+    title: "Pack Load Failed"
+    template: "Failed to load pack '{pack_id}'."
+    message: "Failed to load pack '{pack_id}'."
+    description: "Pack entry point or manifest failed during initialization."
+
+  # --------------------------------------------------------------------------
+  # 300 — Auth, Scope & Policy (Identity, Sessions, RBAC, Scopes & Sandbox)
+  # --------------------------------------------------------------------------
+  authentication_required:
+    code: YRV-300-001
+    category: auth
+    http_status: 401
+    status_code: 401
+    jsonrpc_code: -32001
+    retryable: false
+    title: "Authentication Required"
+    template: "Authentication required"
+    message: "Authentication required"
+    description: "Endpoint requires an authenticated session or bearer token."
+
+  invalid_credentials:
+    code: YRV-300-002
+    category: auth
+    http_status: 401
+    status_code: 401
+    jsonrpc_code: -32001
+    retryable: false
+    title: "Invalid Credentials"
+    template: "Invalid credentials"
+    message: "Invalid credentials"
+    description: "Supplied credentials or feed token failed verification."
+
+  session_expired:
+    code: YRV-300-003
+    category: auth
+    http_status: 401
+    status_code: 401
+    jsonrpc_code: -32001
+    retryable: false
+    title: "Session Expired"
+    template: "Invalid or expired session"
+    message: "Invalid or expired session"
+    description: "Session token does not exist, was revoked, or has expired."
+
+  forbidden:
+    code: YRV-300-004
+    category: auth
+    http_status: 403
+    status_code: 403
+    jsonrpc_code: -32002
+    retryable: false
+    title: "Forbidden"
+    template: "{detail}"
+    message: "{detail}"
+    description: "Caller is authenticated but not authorized for the requested action."
+
+  account_disabled:
+    code: YRV-300-005
+    category: auth
+    http_status: 403
+    status_code: 403
+    jsonrpc_code: -32002
+    retryable: false
+    title: "Account Disabled"
+    template: "Account is disabled"
+    message: "Account is disabled"
+    description: "User account status is disabled."
+
+  admin_required:
+    code: YRV-300-006
+    category: auth
+    http_status: 403
+    status_code: 403
+    jsonrpc_code: -32002
+    retryable: false
+    title: "Administrative Privileges Required"
+    template: "Administrative privileges required"
+    message: "Administrative privileges required"
+    description: "Endpoint or mutation requires an administrator role."
+
+  profile_access_denied:
+    code: YRV-300-007
+    category: auth
+    http_status: 403
+    status_code: 403
+    jsonrpc_code: -32002
+    retryable: false
+    title: "Profile Access Denied"
+    template: "Access denied to profile '{profile_id}'."
+    message: "Access denied to profile '{profile_id}'."
+    description: "Caller lacks required view or management permissions on the target profile."
+
+  scope_access_denied:
+    code: YRV-300-008
+    category: auth
+    http_status: 403
+    status_code: 403
+    jsonrpc_code: -32002
+    retryable: false
+    title: "Scope Access Denied"
+    template: "Access to scope '{scope}' ({level}) denied for this profile"
+    message: "Access to scope '{scope}' ({level}) denied for this profile"
+    description: "Caller or active ScopeContext does not hold the required scope grant."
+
+  csrf_forbidden:
+    code: YRV-300-009
+    category: auth
+    http_status: 403
+    status_code: 403
+    jsonrpc_code: -32002
+    retryable: false
+    title: "Cross-Site Request Forbidden"
+    template: "CSRF protection: cross-site requests are forbidden."
+    message: "CSRF protection: cross-site requests are forbidden."
+    description: "Mutating request failed Origin/Referer or Sec-Fetch-Site validation."
+
+  consent_required:
+    code: YRV-300-010
+    category: auth
+    http_status: 403
+    status_code: 403
+    jsonrpc_code: -32002
+    retryable: false
+    title: "Explicit Consent Required"
+    template: "Agent '{agent_id}' requires explicit user consent before execution."
+    message: "Agent '{agent_id}' requires explicit user consent before execution."
+    description: "Access to consent-gated agent or scope denied without explicit user consent."
+
+  execution_consent_forbidden:
+    code: YRV-300-011
+    category: auth
+    http_status: 403
+    status_code: 403
+    jsonrpc_code: -32002
+    retryable: false
+    title: "Consent-Gated Execution Forbidden"
+    template: "Agent '{agent_id}' execution is forbidden without explicit user consent."
+    message: "Agent '{agent_id}' execution is forbidden without explicit user consent."
+    description: "Execution blocked for consent-gated agent when consent parameter is absent."
+
+  sandbox_access_denied:
+    code: YRV-300-012
+    category: auth
+    http_status: 403
+    status_code: 403
+    jsonrpc_code: -32002
+    retryable: false
+    title: "Sandbox Access Denied"
+    template: "Access denied: path '{path}' is outside sandboxed workspace."
+    message: "Access denied: path '{path}' is outside sandboxed workspace."
+    description: "Tool attempted path traversal outside the permitted workspace directory."
+
+  policy_blocked:
+    code: YRV-300-013
+    category: auth
+    http_status: 403
+    status_code: 403
+    jsonrpc_code: -32002
+    retryable: false
+    title: "Policy Gate Blocked"
+    template: "PolicyBlocked: {reason}"
+    message: "PolicyBlocked: {reason}"
+    description: "Deterministic tool policy gate blocked execution."
+
+  tool_context_invalid:
+    code: YRV-300-014
+    category: auth
+    http_status: 403
+    status_code: 403
+    jsonrpc_code: -32002
+    retryable: false
+    title: "Invalid Tool Context"
+    template: "Security violation: Tool execution denied ({detail})."
+    message: "Security violation: Tool execution denied ({detail})."
+    description: "Fail-closed tool context check rejected missing user_id or profile_id."
+
+  # --------------------------------------------------------------------------
+  # 400 — Vault & Cryptography (KEK, DEK, Envelope Encryption & Key Derivation)
+  # --------------------------------------------------------------------------
+  vault_error:
+    code: YRV-400-001
+    category: vault
+    http_status: 500
+    status_code: 500
+    jsonrpc_code: -32603
+    retryable: false
+    title: "Vault Error"
+    template: "Cryptographic vault operation failed."
+    message: "Cryptographic vault operation failed."
+    description: "Base cryptographic vault operation error."
+
+  vault_locked:
+    code: YRV-400-002
+    category: vault
+    http_status: 503
+    status_code: 503
+    jsonrpc_code: -32005
+    retryable: false
+    title: "Vault Locked"
+    template: "Master Key Encryption Key (KEK) is missing or locked."
+    message: "Master Key Encryption Key (KEK) is missing or locked."
+    description: "Master Key Encryption Key is unavailable; fail-closed policy blocked access."
+
+  vault_decryption_failed:
+    code: YRV-400-003
+    category: vault
+    http_status: 500
+    status_code: 500
+    jsonrpc_code: -32603
+    retryable: false
+    title: "Decryption Failed"
+    template: "Authenticated ciphertext decryption failed."
+    message: "Authenticated ciphertext decryption failed."
+    description: "AES-256-GCM authentication tag, AAD, or payload integrity verification failed."
+
+  vault_key_derivation_failed:
+    code: YRV-400-004
+    category: vault
+    http_status: 500
+    status_code: 500
+    jsonrpc_code: -32603
+    retryable: false
+    title: "Key Derivation Failed"
+    template: "Cryptographic key derivation failed."
+    message: "Cryptographic key derivation failed."
+    description: "Argon2id or HKDF key derivation failed."
+
+  audit_decryption_failed:
+    code: YRV-400-005
+    category: vault
+    http_status: 500
+    status_code: 500
+    jsonrpc_code: -32603
+    retryable: false
+    title: "Audit Detail Decryption Failed"
+    template: "Audit detail decryption failed"
+    message: "Audit detail decryption failed"
+    description: "Encrypted audit event detail payload failed decryption."
+
+  # --------------------------------------------------------------------------
+  # 500 — Storage & Database (Lookup, CAS, Memory Store & Integrity Conflicts)
+  # --------------------------------------------------------------------------
+  not_found:
+    code: YRV-500-001
+    category: storage
+    http_status: 404
+    status_code: 404
+    jsonrpc_code: -32003
+    retryable: false
+    title: "Resource Not Found"
+    template: "Requested resource not found: {detail}"
+    message: "Requested resource not found: {detail}"
+    description: "General resource not found error."
+
+  profile_not_found:
+    code: YRV-500-002
+    category: storage
+    http_status: 404
+    status_code: 404
+    jsonrpc_code: -32003
+    retryable: false
+    title: "Profile Not Found"
+    template: "Profile '{profile_id}' not found."
+    message: "Profile '{profile_id}' not found."
+    description: "Requested profile record does not exist."
+
+  user_not_found:
+    code: YRV-500-003
+    category: storage
+    http_status: 404
+    status_code: 404
+    jsonrpc_code: -32003
+    retryable: false
+    title: "User Not Found"
+    template: "User '{user_id}' not found."
+    message: "User '{user_id}' not found."
+    description: "Requested user account does not exist."
+
+  attachment_not_found:
+    code: YRV-500-004
+    category: storage
+    http_status: 404
+    status_code: 404
+    jsonrpc_code: -32003
+    retryable: false
+    title: "Attachment Not Found"
+    template: "Attachment '{filename}' not found in attachments directory."
+    message: "Attachment '{filename}' not found in attachments directory."
+    description: "Referenced attachment record or CAS blob does not exist."
+
+  note_not_found:
+    code: YRV-500-005
+    category: storage
+    http_status: 404
+    status_code: 404
+    jsonrpc_code: -32003
+    retryable: false
+    title: "Note Not Found"
+    template: "Note '{note_id}' not found in workspace notes."
+    message: "Note '{note_id}' not found in workspace notes."
+    description: "Referenced workspace note does not exist."
+
+  memory_not_found:
+    code: YRV-500-006
+    category: storage
+    http_status: 404
+    status_code: 404
+    jsonrpc_code: -32003
+    retryable: false
+    title: "Memory Record Not Found"
+    template: "Memory record '{key}' not found in namespace '{namespace}'."
+    message: "Memory record '{key}' not found in namespace '{namespace}'."
+    description: "Requested memory item does not exist in the specified namespace."
+
+  reminder_not_found:
+    code: YRV-500-007
+    category: storage
+    http_status: 404
+    status_code: 404
+    jsonrpc_code: -32003
+    retryable: false
+    title: "Reminder Not Found"
+    template: "Reminder '{reminder_id}' not found."
+    message: "Reminder '{reminder_id}' not found."
+    description: "Requested reminder record does not exist."
+
+  routine_not_found:
+    code: YRV-500-008
+    category: storage
+    http_status: 404
+    status_code: 404
+    jsonrpc_code: -32003
+    retryable: false
+    title: "Routine Not Found"
+    template: "Routine '{routine_id}' not found for profile '{profile_id}'."
+    message: "Routine '{routine_id}' not found for profile '{profile_id}'."
+    description: "Requested routine record does not exist for the target profile."
+
+  connection_not_found:
+    code: YRV-500-009
+    category: storage
+    http_status: 404
+    status_code: 404
+    jsonrpc_code: -32003
+    retryable: false
+    title: "Connection Not Found"
+    template: "Connection '{connection_id}' not found for profile '{profile_id}'."
+    message: "Connection '{connection_id}' not found for profile '{profile_id}'."
+    description: "Requested external connection record does not exist."
+
+  email_draft_not_found:
+    code: YRV-500-010
+    category: storage
+    http_status: 404
+    status_code: 404
+    jsonrpc_code: -32003
+    retryable: false
+    title: "Email Draft Not Found"
+    template: "EmailDraft '{draft_id}' not found for profile '{profile_id}'."
+    message: "EmailDraft '{draft_id}' not found for profile '{profile_id}'."
+    description: "Requested email draft record does not exist."
+
+  invitation_not_found:
+    code: YRV-500-011
+    category: storage
+    http_status: 404
+    status_code: 404
+    jsonrpc_code: -32003
+    retryable: false
+    title: "Invitation Not Found"
+    template: "Invitation not found."
+    message: "Invitation not found."
+    description: "Requested profile invitation code or record does not exist."
+
+  resource_conflict:
+    code: YRV-500-012
+    category: storage
+    http_status: 409
+    status_code: 409
+    jsonrpc_code: -32004
+    retryable: false
+    title: "Resource Conflict"
+    template: "{detail}"
+    message: "{detail}"
+    description: "Resource creation or update conflicted with an existing unique entity."
+
+  storage_operation_failed:
+    code: YRV-500-013
+    category: storage
+    http_status: 500
+    status_code: 500
+    jsonrpc_code: -32603
+    retryable: false
+    title: "Storage Operation Failed"
+    template: "Storage operation failed."
+    message: "Storage operation failed."
+    description: "Database or CAS persistence operation failed."
+
+  memory_operation_failed:
+    code: YRV-500-014
+    category: storage
+    http_status: 500
+    status_code: 500
+    jsonrpc_code: -32603
+    retryable: false
+    title: "Memory Store Operation Failed"
+    template: "Memory store operation failed."
+    message: "Memory store operation failed."
+    description: "Persistence or retrieval operation in the memory subsystem failed."
+
+  # --------------------------------------------------------------------------
+  # 600 — Connector & Network (Egress Firewall, OAuth & Upstream Gateways)
+  # --------------------------------------------------------------------------
+  connector_error:
+    code: YRV-600-001
+    category: connector
+    http_status: 502
+    status_code: 502
+    jsonrpc_code: -32007
+    retryable: true
+    title: "Connector Error"
+    template: "Upstream connector operation failed."
+    message: "Upstream connector operation failed."
+    description: "Transient or upstream failure in an external connector."
+
+  egress_blocked:
+    code: YRV-600-002
+    category: connector
+    http_status: 403
+    status_code: 403
+    jsonrpc_code: -32002
+    retryable: false
+    title: "Outbound Egress Blocked"
+    template: "Outbound network egress blocked by security policy."
+    message: "Outbound network egress blocked by security policy."
+    description: "Outbound HTTP request targeted an unlisted host, private IP, or prohibited port."
+
+  connector_auth_expired:
+    code: YRV-600-003
+    category: connector
+    http_status: 401
+    status_code: 401
+    jsonrpc_code: -32001
+    retryable: false
+    title: "Connector Authorization Expired"
+    template: "Connector credentials have expired or require reauthorization."
+    message: "Connector credentials have expired or require reauthorization."
+    description: "External OAuth token or credential expired and requires reauthorization."
 
   model_timeout:
+    code: YRV-600-004
+    category: connector
+    http_status: 504
     status_code: 504
+    jsonrpc_code: -32006
+    retryable: true
+    title: "Upstream Model Timeout"
+    template: "Model request timed out after {timeout} seconds."
     message: "Model request timed out after {timeout} seconds."
-    description: "Upstream model call timed out"
+    description: "Upstream LLM or embedding provider call timed out."
 
   model_server_error:
+    code: YRV-600-005
+    category: connector
+    http_status: 502
     status_code: 502
+    jsonrpc_code: -32007
+    retryable: true
+    title: "Upstream Model Error"
+    template: "Model server error (HTTP {status_code}): {detail}"
     message: "Model server error (HTTP {status_code}): {detail}"
-    description: "Upstream model provider returned error"
+    description: "Upstream model provider returned a server or gateway error."
 
-  # Safety Refusal Errors
+  connector_timeout:
+    code: YRV-600-006
+    category: connector
+    http_status: 504
+    status_code: 504
+    jsonrpc_code: -32006
+    retryable: true
+    title: "Connector Timeout"
+    template: "Upstream connector timed out."
+    message: "Upstream connector timed out."
+    description: "Network call to external connector timed out."
+
+  connector_unavailable:
+    code: YRV-600-007
+    category: connector
+    http_status: 503
+    status_code: 503
+    jsonrpc_code: -32007
+    retryable: true
+    title: "Connector Unavailable"
+    template: "Upstream connector is temporarily unavailable."
+    message: "Upstream connector is temporarily unavailable."
+    description: "External connector endpoint refused connection or returned HTTP 503."
+
+  oauth_state_mismatch:
+    code: YRV-600-008
+    category: connector
+    http_status: 400
+    status_code: 400
+    jsonrpc_code: -32602
+    retryable: false
+    title: "OAuth State Mismatch"
+    template: "OAuth state connection_id does not match the target connection."
+    message: "OAuth state connection_id does not match the target connection."
+    description: "OAuth callback state parameter failed verification against target connection."
+
+  # --------------------------------------------------------------------------
+  # 700 — MCP & Tools (Tool Registry, Approvals & Remote MCP Execution)
+  # --------------------------------------------------------------------------
+  tool_validation_error:
+    code: YRV-700-001
+    category: mcp_tools
+    http_status: 400
+    status_code: 400
+    jsonrpc_code: -32602
+    retryable: false
+    title: "Tool Validation Error"
+    template: "Tool validation error: {detail}"
+    message: "Tool validation error: {detail}"
+    description: "Undeclared tool or invalid tool argument payload."
+
+  tool_forbidden:
+    code: YRV-700-002
+    category: mcp_tools
+    http_status: 403
+    status_code: 403
+    jsonrpc_code: -32002
+    retryable: false
+    title: "Tool Execution Denied"
+    template: "Tool '{tool_name}' execution denied: undeclared tool for agent '{agent_id}'."
+    message: "Tool '{tool_name}' execution denied: undeclared tool for agent '{agent_id}'."
+    description: "Agent attempted to call a tool outside its allowed union."
+
+  tool_executor_missing:
+    code: YRV-700-003
+    category: mcp_tools
+    http_status: 500
+    status_code: 500
+    jsonrpc_code: -32601
+    retryable: false
+    title: "Tool Executor Missing"
+    template: "Tool '{tool_name}' has no valid executor."
+    message: "Tool '{tool_name}' has no valid executor."
+    description: "Registered tool specification has no bound callable handler."
+
+  approval_not_found:
+    code: YRV-700-004
+    category: mcp_tools
+    http_status: 404
+    status_code: 404
+    jsonrpc_code: -32003
+    retryable: false
+    title: "Approval Not Found"
+    template: "Approval request '{approval_id}' not found."
+    message: "Approval request '{approval_id}' not found."
+    description: "Referenced human-in-the-loop approval record does not exist."
+
+  approval_required:
+    code: YRV-700-005
+    category: mcp_tools
+    http_status: 403
+    status_code: 403
+    jsonrpc_code: -32008
+    retryable: false
+    title: "Approval Required"
+    template: "ApprovalRequired: {reason}"
+    message: "ApprovalRequired: {reason}"
+    description: "Tool execution halted pending explicit human approval."
+
+  approval_invalid:
+    code: YRV-700-006
+    category: mcp_tools
+    http_status: 400
+    status_code: 400
+    jsonrpc_code: -32602
+    retryable: false
+    title: "Invalid Approval State"
+    template: "{detail}"
+    message: "{detail}"
+    description: "Approval token is expired, already decided, or mismatched with tool arguments."
+
+  mcp_schema_drift:
+    code: YRV-700-007
+    category: mcp_tools
+    http_status: 403
+    status_code: 403
+    jsonrpc_code: -32002
+    retryable: false
+    title: "MCP Schema Drift Detected"
+    template: "Remote MCP tool schema diverged from pinned hash."
+    message: "Remote MCP tool schema diverged from pinned hash."
+    description: "Live remote MCP tool definition diverged from its pinned SHA-256 hash."
+
+  mcp_transport_error:
+    code: YRV-700-008
+    category: mcp_tools
+    http_status: 502
+    status_code: 502
+    jsonrpc_code: -32007
+    retryable: true
+    title: "MCP Transport Error"
+    template: "Transient transport failure communicating with remote MCP endpoint."
+    message: "Transient transport failure communicating with remote MCP endpoint."
+    description: "Remote MCP HTTPS JSON-RPC transport encountered a transient failure."
+
+  tool_execution_failed:
+    code: YRV-700-009
+    category: mcp_tools
+    http_status: 500
+    status_code: 500
+    jsonrpc_code: -32603
+    retryable: false
+    title: "Tool Execution Failed"
+    template: "Tool '{tool_name}' execution failed."
+    message: "Tool '{tool_name}' execution failed."
+    description: "Sandboxed tool handler raised an unhandled Permanent exception."
+
+  # --------------------------------------------------------------------------
+  # 800 — Agent, Workflow & Guardrail (Registry, Threads, Safety & Extraction)
+  # --------------------------------------------------------------------------
+  agent_not_found:
+    code: YRV-800-001
+    category: workflow
+    http_status: 404
+    status_code: 404
+    jsonrpc_code: -32601
+    retryable: false
+    title: "Agent Not Found"
+    template: "Agent '{agent_id}' not found."
+    message: "Agent '{agent_id}' not found."
+    description: "Requested agent identifier is not registered in the catalog."
+
+  duplicate_agent:
+    code: YRV-800-002
+    category: workflow
+    http_status: 409
+    status_code: 409
+    jsonrpc_code: -32004
+    retryable: false
+    title: "Duplicate Agent Identifier"
+    template: "Duplicate agent id '{agent_id}'."
+    message: "Duplicate agent id '{agent_id}'."
+    description: "Two agents of the same source kind declared identical identifiers."
+
+  subagent_hook_invalid:
+    code: YRV-800-003
+    category: workflow
+    http_status: 500
+    status_code: 500
+    jsonrpc_code: -32603
+    retryable: false
+    title: "Subagent Hook Invalid"
+    template: "Subagent specification lacks required policy or audit middleware."
+    message: "Subagent specification lacks required policy or audit middleware."
+    description: "Subagent specification failed middleware guard validation."
+
+  agent_load_failed:
+    code: YRV-800-004
+    category: workflow
+    http_status: 500
+    status_code: 500
+    jsonrpc_code: -32603
+    retryable: false
+    title: "Agent Load Failed"
+    template: "Failed to load agent: {error}"
+    message: "Failed to load agent: {error}"
+    description: "Unexpected exception while loading an agent manifest."
+
+  skill_not_found:
+    code: YRV-800-005
+    category: workflow
+    http_status: 404
+    status_code: 404
+    jsonrpc_code: -32003
+    retryable: false
+    title: "Skill Not Found"
+    template: "Skill '{skill_id}' not found."
+    message: "Skill '{skill_id}' not found."
+    description: "Requested skill identifier does not exist."
+
+  skill_document_not_found:
+    code: YRV-800-006
+    category: workflow
+    http_status: 404
+    status_code: 404
+    jsonrpc_code: -32003
+    retryable: false
+    title: "Skill Document Not Found"
+    template: "Document '{doc_name}' not found for skill '{skill_id}'."
+    message: "Document '{doc_name}' not found for skill '{skill_id}'."
+    description: "Requested reference document does not exist for the target skill."
+
+  skill_load_failed:
+    code: YRV-800-007
+    category: workflow
+    http_status: 500
+    status_code: 500
+    jsonrpc_code: -32603
+    retryable: false
+    title: "Skill Load Failed"
+    template: "Failed to load skill: {error}"
+    message: "Failed to load skill: {error}"
+    description: "Unexpected exception while loading a skill definition."
+
+  thread_not_found:
+    code: YRV-800-008
+    category: workflow
+    http_status: 404
+    status_code: 404
+    jsonrpc_code: -32003
+    retryable: false
+    title: "Thread Not Found"
+    template: "Thread '{thread_id}' not found."
+    message: "Thread '{thread_id}' not found."
+    description: "Requested conversation thread has no record."
+
+  checkpoints_not_found:
+    code: YRV-800-009
+    category: workflow
+    http_status: 404
+    status_code: 404
+    jsonrpc_code: -32003
+    retryable: false
+    title: "Checkpoints Not Found"
+    template: "No checkpoints found for thread '{thread_id}'."
+    message: "No checkpoints found for thread '{thread_id}'."
+    description: "Checkpoints database file or thread state record does not exist."
+
+  thread_load_failed:
+    code: YRV-800-010
+    category: workflow
+    http_status: 500
+    status_code: 500
+    jsonrpc_code: -32603
+    retryable: false
+    title: "Thread Load Failed"
+    template: "Failed to load thread history."
+    message: "Failed to load thread history."
+    description: "Unexpected exception while reading conversation checkpoints."
+
+  stream_execution_error:
+    code: YRV-800-011
+    category: workflow
+    http_status: 500
+    status_code: 500
+    jsonrpc_code: -32603
+    retryable: false
+    title: "Stream Execution Error"
+    template: "Unexpected error during chat stream execution: {error}"
+    message: "Unexpected error during chat stream execution: {error}"
+    description: "Unhandled error during LangGraph agent stream execution."
+
   safety_refusal:
+    code: YRV-800-012
+    category: workflow
+    http_status: 200
     status_code: 200
+    jsonrpc_code: -32008
+    retryable: false
+    title: "Safety Guardrail Refusal"
+    template: "Request intercepted by safety refusal guardrail: {reason}"
     message: "Request intercepted by safety refusal guardrail: {reason}"
-    description: "Clinical safety refusal triggered by deterministic classifier"
+    description: "Safety refusal triggered by deterministic guardrail classifier."
 
   refusal_error:
+    code: YRV-800-013
+    category: workflow
+    http_status: 200
     status_code: 200
+    jsonrpc_code: -32008
+    retryable: false
+    title: "Request Refused"
+    template: "Request refused: {reason}"
     message: "Request refused: {reason}"
-    description: "Standard refusal event"
+    description: "Standard guardrail refusal event."
 
-  # Workflow & Extraction Errors
   max_reflections_exceeded:
+    code: YRV-800-014
+    category: workflow
+    http_status: 422
     status_code: 422
+    jsonrpc_code: -32008
+    retryable: false
+    title: "Max Reflections Exceeded"
+    template: "Max self-correction reflection iterations ({max_reflections}) reached."
     message: "Max self-correction reflection iterations ({max_reflections}) reached."
-    description: "Reflection loop exceeded retry limit"
+    description: "Self-correction reflection loop exceeded configured retry limit."
 
   grounding_validation_failed:
+    code: YRV-800-015
+    category: workflow
+    http_status: 422
     status_code: 422
+    jsonrpc_code: -32008
+    retryable: false
+    title: "Grounding Validation Failed"
+    template: "Extracted dossier failed grounding validation: numerical mismatch with source text."
     message: "Extracted dossier failed grounding validation: numerical mismatch with source text."
-    description: "Extracted numerical claim not grounded in raw document text"
+    description: "Extracted numerical claim is not grounded in raw source document text."
 
   pii_sanitization_error:
+    code: YRV-800-016
+    category: workflow
+    http_status: 500
     status_code: 500
+    jsonrpc_code: -32603
+    retryable: false
+    title: "Sanitization Failed"
+    template: "PII sanitization failed during attachment processing: {error}"
     message: "PII sanitization failed during attachment processing: {error}"
-    description: "Failure during automated PII masking"
+    description: "Failure during automated PII masking."
+
+  # --------------------------------------------------------------------------
+  # 900 — Internal Runtime Errors
+  # --------------------------------------------------------------------------
+  internal_error:
+    code: YRV-900-001
+    category: internal
+    http_status: 500
+    status_code: 500
+    jsonrpc_code: -32603
+    retryable: false
+    title: "Internal Server Error"
+    template: "An internal server error occurred: {detail}"
+    message: "An internal server error occurred: {detail}"
+    description: "Unclassified internal runtime error."
 
 schemas:
+  problem_details:
+    type: "object"
+    required: ["type", "title", "status", "detail", "code", "retryable"]
+    properties:
+      type:
+        type: "string"
+        format: "uri"
+        description: "RFC 7807 problem type URI"
+      title:
+        type: "string"
+        description: "Short human-readable summary of the problem type"
+      status:
+        type: "integer"
+        description: "HTTP status code"
+      detail:
+        type: "string"
+        description: "Human-readable explanation specific to this occurrence"
+      instance:
+        type: "string"
+        description: "URI reference identifying the specific request occurrence"
+      code:
+        type: "string"
+        description: "Immutable namespaced error code (e.g. YRV-300-001)"
+      slug:
+        type: "string"
+        description: "Canonical snake_case error slug"
+      retryable:
+        type: "boolean"
+        description: "Whether callers or circuit breakers may safely retry"
+      context:
+        type: "object"
+        description: "Sanitized structured error context"
   error_response:
     type: "object"
     required: ["error", "message", "status_code"]

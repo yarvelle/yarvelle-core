@@ -42,13 +42,16 @@ from yarvelle_core.db.models import (
 )
 from yarvelle_core.engine.tool_exec import TaintFlag, UntrustedResult
 from yarvelle_core.engine.tool_registry import ToolSpec
+from yarvelle_core.connectors.errors import ConnectorError
 from yarvelle_core.connectors.manifest import ConnectorManifest, McpToolAllowlistEntry
 
 CURATED_REMOTE_MCP_IDS = ("google-workspace-gmail",)
 
 
-class McpSchemaDriftError(PermissionError):
+class McpSchemaDriftError(ConnectorError, PermissionError):
     """Raised when a remote MCP tool's live schema or description diverges from its pinned SHA-256 hash."""
+
+    DEFAULT_ERROR_CODE = "YRV-700-007"
 
 
 def compute_mcp_schema_hash(

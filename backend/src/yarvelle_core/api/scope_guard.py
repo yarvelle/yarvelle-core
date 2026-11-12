@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Iterator, List, Optional, Tuple
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, Request
 from fastapi.routing import APIRoute
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,6 +34,7 @@ from yarvelle_core.api.deps import get_current_user, get_user_profile_access
 from yarvelle_core.auth.ports import UserProfile
 from yarvelle_core.db.models import Profile, ScopeGrant
 from yarvelle_core.db.session import get_db
+from yarvelle_core.errors.base import YarvelleError
 from yarvelle_core.scope.context import matches_scope
 
 SCOPE_LEVEL_RANK = {"read": 1, "write": 2, "approve": 3}
@@ -120,18 +121,23 @@ def require_pack_scope(
         profile_id = request.path_params.get("profile_id") or request.query_params.get("profile_id")
         if not profile_id:
             if require_profile:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
+                raise YarvelleError(
+                    "YRV-100-004",
+                    context={"parameter": "profile_id", "scope": scope},
                     detail="profile_id is required for this scoped route",
                 )
         else:
             profile = await db.get(Profile, profile_id)
             if profile is None:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found")
+                raise YarvelleError(
+                    "YRV-500-002",
+                    context={"profile_id": profile_id},
+                    detail="Profile not found",
+                )
             if not await has_scope_access(db, profile, user, scope, required):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Access to scope '{scope}' ({required}) denied for this profile",
+                raise YarvelleError(
+                    "YRV-300-008",
+                    context={"scope": scope, "level": required, "profile_id": profile_id},
                 )
 
         grant = PackScopeGrant(
