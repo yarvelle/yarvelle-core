@@ -282,7 +282,7 @@ def test_subagent_timeout_is_reported_to_main_agent(registry: AgentRegistry) -> 
         tool_call = {"name": "task", "id": "slow-1", "args": {"subagent_type": "budget-planner", "description": "x"}}
 
     async def slow_handler(_req: Any) -> Any:
-        await asyncio.sleep(1)
+        await asyncio.Event().wait()
 
     sink = Sink()
     guard.audit_sink = sink
