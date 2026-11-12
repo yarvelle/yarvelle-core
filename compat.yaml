@@ -2,12 +2,20 @@
 # Defines supported pairings of core, @yarvelle/ui, and pack_api versions.
 
 matrix:
+  - core: "0.2.5"
+    ui: "0.2.5"
+    pack_api: 1
+    python: ">=3.12"
+    node: ">=20.0.0"
+    status: "active"
+    notes: "Declarative yarvelle.tools/v1 tool specs, immutable YRV-XXX-YYY error taxonomy with RFC 7807 Problem Details, domain-neutral runtime identifiers and Handlebars prompts, bounded reminder/connection/audit queries, and @yarvelle/ui Tailwind preset/content-glob fixes"
+
   - core: "0.2.4"
     ui: "0.2.4"
     pack_api: 1
     python: ">=3.12"
     node: ">=20.0.0"
-    status: "active"
+    status: "supported"
     notes: "Configurable safety guards (rules and model checks), buffered answer release, and a final output check on resumed turns"
 
   - core: "0.2.3"

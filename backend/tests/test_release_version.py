@@ -9,7 +9,7 @@
 #
 # Required Notice: Copyright 2026 Spectrayan (https://spectrayan.com)
 
-"""Offline checks that release metadata and the version module stay aligned at 0.2.4."""
+"""Offline checks that release metadata and the version module stay aligned at 0.2.5."""
 
 from __future__ import annotations
 
@@ -28,17 +28,17 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_version_module_is_022() -> None:
-    assert version_mod.__version__ == "0.2.4"
-    assert yarvelle_core.__version__ == "0.2.4"
+    assert version_mod.__version__ == "0.2.5"
+    assert yarvelle_core.__version__ == "0.2.5"
     assert yarvelle_core.__version__ is version_mod.__version__ or yarvelle_core.__version__ == version_mod.__version__
 
 
 def test_pyproject_and_manifest_agree() -> None:
     pyproject = tomllib.loads((REPO_ROOT / "backend" / "pyproject.toml").read_text(encoding="utf-8"))
-    assert pyproject["project"]["version"] == "0.2.4"
+    assert pyproject["project"]["version"] == "0.2.5"
     manifest = json.loads((REPO_ROOT / ".release-please-manifest.json").read_text(encoding="utf-8"))
-    assert manifest["backend"] == "0.2.4"
-    assert importlib.metadata.version("yarvelle-core") == "0.2.4"
+    assert manifest["backend"] == "0.2.5"
+    assert importlib.metadata.version("yarvelle-core") == "0.2.5"
 
 
 def test_release_please_config_targets_v_tags_and_version_file() -> None:
@@ -61,11 +61,11 @@ def test_wheel_metadata_reports_022(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         meta_names = [n for n in zf.namelist() if n.endswith(".dist-info/METADATA")]
         assert meta_names
         meta = zf.read(meta_names[0]).decode("utf-8")
-        assert "Version: 0.2.4" in meta
+        assert "Version: 0.2.5" in meta
         version_members = [n for n in zf.namelist() if n.endswith("yarvelle_core/version.py")]
         assert version_members
         body = zf.read(version_members[0]).decode("utf-8")
-        assert '__version__ = "0.2.4"' in body
+        assert '__version__ = "0.2.5"' in body
 
 def test_httpx_constraint_keeps_stable_api() -> None:
     """CI uses --prerelease=allow; httpx must stay on the 0.x line with HTTPStatusError."""
