@@ -940,6 +940,19 @@
           "description": "Path to evals definition or dataset",
           "title": "Evals"
         },
+        "errors_file": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional path to pack error catalog YAML file",
+          "title": "Errors File"
+        },
         "panels": {
           "description": "Declared multi-agent deliberation panels contributed by this pack",
           "items": {
@@ -1396,6 +1409,19 @@
       ],
       "default": null,
       "description": "Guard checks that run after the safety policy (safety.guards)"
+    },
+    "error_prefix": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Optional disjoint uppercase error code prefix e.g. 'CFD' or 'FIN'",
+      "title": "Error Prefix"
     }
   },
   "required": [

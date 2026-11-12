@@ -17,7 +17,6 @@ import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from starlette.requests import Request
 
@@ -31,6 +30,7 @@ from yarvelle_core.auth.adapters.disabled_adapter import DEFAULT_STEWARD_USER
 from yarvelle_core.config import settings
 from yarvelle_core.db.models import Approval, Profile
 from yarvelle_core.engine.tool_exec import SqlApprovalStore, compute_payload_hash
+from yarvelle_core.errors import YarvelleError
 
 ARGS = {
     "to": "clinic@example.test",
@@ -103,9 +103,10 @@ async def test_decide_rejects_edits_that_still_contain_placeholders(async_db_ses
     monkeypatch.setattr(settings, "auth_provider", "disabled")
     await _seed_pending(async_db_session)
     payload = ApprovalDecideRequest(decision="approved", edited_args=redact_tool_args(ARGS))
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(YarvelleError) as exc:
         await decide_approval("app-2", payload, _request(), DEFAULT_STEWARD_USER, async_db_session)
     assert exc.value.status_code == 422
+    assert exc.value.code == "YRV-100-010"
 
 
 @pytest.mark.asyncio

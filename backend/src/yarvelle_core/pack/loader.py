@@ -22,6 +22,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Set
 from yarvelle_core import __version__ as CORE_VERSION
 from yarvelle_core.engine.safety_policy import SafetyPolicy, set_domain_safety_policy
 from yarvelle_core.engine.tool_registry import ToolSpecRegistry, bound_declarative_to_tool_spec
+from yarvelle_core.errors.base import YarvelleError
 from yarvelle_core.pack.spec import PackSpec, RouterContribution
 from yarvelle_core.pack.validator import validate_pack_spec
 from yarvelle_core.resources.loader import get_resource_loader
@@ -31,14 +32,24 @@ logger = logging.getLogger("yarvelle_core.pack.loader")
 ENTRY_POINT_GROUP = "yarvelle.packs"
 
 
-class PackNotFoundError(Exception):
+class PackNotFoundError(YarvelleError):
     """Raised when an enabled pack cannot be discovered in entry points."""
-    pass
+
+    DEFAULT_ERROR_CODE = "YRV-200-006"
+
+    def __init__(self, message: str, *, pack_id: Optional[str] = None, cause: Optional[BaseException] = None) -> None:
+        ctx = {"pack_id": pack_id} if pack_id else None
+        super().__init__(self.DEFAULT_ERROR_CODE, context=ctx, cause=cause, detail=message)
 
 
-class PackLoadError(Exception):
+class PackLoadError(YarvelleError):
     """Raised when an entry point fails to load or return a valid PackSpec."""
-    pass
+
+    DEFAULT_ERROR_CODE = "YRV-200-007"
+
+    def __init__(self, message: str, *, pack_id: Optional[str] = None, cause: Optional[BaseException] = None) -> None:
+        ctx = {"pack_id": pack_id} if pack_id else None
+        super().__init__(self.DEFAULT_ERROR_CODE, context=ctx, cause=cause, detail=message)
 
 
 class LoadedPacksRegistry:

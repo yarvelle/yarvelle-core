@@ -16,18 +16,15 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from yarvelle_core.api.deps import get_current_user, resolve_owner_user_id
+from yarvelle_core.api.errors import ProblemDetailsRoute
 from yarvelle_core.auth.ports import UserProfile
 from yarvelle_core.config import settings
 from yarvelle_core.constants.api import (
-    HTTP_400_BAD_REQUEST,
-    HTTP_403_FORBIDDEN,
-    HTTP_404_NOT_FOUND,
-    HTTP_500_INTERNAL_SERVER_ERROR,
     ROUTE_SKILL_DETAIL,
     ROUTE_SKILL_DOC_DETAIL,
     ROUTE_SKILL_DOCS,
@@ -35,6 +32,7 @@ from yarvelle_core.constants.api import (
 )
 from yarvelle_core.db.models import KnowledgeBase, Skill
 from yarvelle_core.db.session import get_db
+from yarvelle_core.errors import YarvelleError
 from yarvelle_core.loaders.frontmatter import MANDATORY_INTENDED_USE_LINES
 from yarvelle_core.loaders.skill_loader import (
     ManifestValidationError,
@@ -61,7 +59,7 @@ from yarvelle_core.schemas.manifest import (
 
 logger = get_logger("yarvelle_core.api.skills")
 
-router = APIRouter(tags=["Skills"])
+router = APIRouter(tags=["Skills"], route_class=ProblemDetailsRoute)
 
 MANDATORY_SAFETY_STATEMENTS: List[str] = list(MANDATORY_INTENDED_USE_LINES)
 
@@ -184,8 +182,9 @@ async def create_skill(
     stmt = select(Skill).where(Skill.id == payload.id)
     res = await db.execute(stmt)
     if res.scalar_one_or_none() is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
+        raise YarvelleError(
+            "YRV-500-012",
+            context={"skill_id": payload.id},
             detail=f"Skill with ID '{payload.id}' already exists.",
         )
 
@@ -313,14 +312,20 @@ async def get_skill(
     skill_dir = find_skill_dir(skills_dir, skill_id)
 
     if not skill_dir or not skill_dir.is_dir():
-        raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail=f"Skill '{skill_id}' not found.")
+        raise YarvelleError("YRV-800-005", context={"skill_id": skill_id})
 
     try:
         skill = load_skill(skill_dir)
     except ManifestValidationError as err:
-        raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail=str(err))
+        raise YarvelleError("YRV-200-002", cause=err, detail=str(err)) from err
     except Exception as err:
-        raise HTTPException(status_code=HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to load skill: {err}")
+        logger.error("skill_load_failed", skill_id=skill_id, error=str(err))
+        raise YarvelleError(
+            "YRV-800-007",
+            cause=err,
+            context={"skill_id": skill_id},
+            detail="Failed to load skill.",
+        ) from err
 
     has_evals = bool(skill.evals and (skill_dir / skill.evals).is_file())
     ref_names = []
@@ -363,11 +368,12 @@ async def update_skill(
     skill = res.scalar_one_or_none()
 
     if skill is None:
-        raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail=f"Skill '{skill_id}' not found.")
+        raise YarvelleError("YRV-800-005", context={"skill_id": skill_id})
 
     if skill.type in ("bundled", "system") and getattr(user, "role", "member") != "admin":
-        raise HTTPException(
-            status_code=HTTP_403_FORBIDDEN,
+        raise YarvelleError(
+            "YRV-300-004",
+            context={"skill_id": skill_id},
             detail=f"Cannot modify system/bundled skill '{skill_id}'. Only custom skills can be updated.",
         )
 
@@ -458,11 +464,12 @@ async def delete_skill(
     skill = res.scalar_one_or_none()
 
     if skill is None:
-        raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail=f"Skill '{skill_id}' not found.")
+        raise YarvelleError("YRV-800-005", context={"skill_id": skill_id})
 
     if skill.type in ("bundled", "system"):
-        raise HTTPException(
-            status_code=HTTP_403_FORBIDDEN,
+        raise YarvelleError(
+            "YRV-300-004",
+            context={"skill_id": skill_id},
             detail=f"Cannot delete bundled or system skill '{skill_id}'.",
         )
 
@@ -569,8 +576,9 @@ async def create_skill_doc(
     )
     res = await db.execute(stmt)
     if res.scalar_one_or_none() is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
+        raise YarvelleError(
+            "YRV-500-012",
+            context={"skill_id": skill_id, "doc_name": payload.name},
             detail=f"Document '{payload.name}' already exists for skill '{skill_id}'.",
         )
 
@@ -616,8 +624,9 @@ async def get_skill_doc(
 ) -> DocDetailResponse:
     """Reads a reference document from the skill's knowledge base."""
     if not DOC_FILENAME_REGEX.match(doc_name):
-        raise HTTPException(
-            status_code=HTTP_400_BAD_REQUEST,
+        raise YarvelleError(
+            "YRV-100-011",
+            context={"doc_name": doc_name},
             detail="Invalid document filename.",
         )
 
@@ -665,9 +674,9 @@ async def get_skill_doc(
                 type="bundled",
             )
 
-    raise HTTPException(
-        status_code=HTTP_404_NOT_FOUND,
-        detail=f"Document '{doc_name}' not found for skill '{skill_id}'.",
+    raise YarvelleError(
+        "YRV-800-006",
+        context={"doc_name": doc_name, "skill_id": skill_id},
     )
 
 
@@ -689,14 +698,14 @@ async def update_skill_doc(
     doc = res.scalar_one_or_none()
 
     if doc is None:
-        raise HTTPException(
-            status_code=HTTP_404_NOT_FOUND,
-            detail=f"Document '{doc_name}' not found for skill '{skill_id}'.",
+        raise YarvelleError(
+            "YRV-800-006",
+            context={"doc_name": doc_name, "skill_id": skill_id},
         )
 
     if doc.type == "bundled" and getattr(user, "role", "member") != "admin":
-        raise HTTPException(
-            status_code=HTTP_403_FORBIDDEN,
+        raise YarvelleError(
+            "YRV-300-006",
             detail="Cannot modify bundled reference document without administrative privileges.",
         )
 
@@ -743,14 +752,14 @@ async def delete_skill_doc(
     doc = res.scalar_one_or_none()
 
     if doc is None:
-        raise HTTPException(
-            status_code=HTTP_404_NOT_FOUND,
-            detail=f"Document '{doc_name}' not found for skill '{skill_id}'.",
+        raise YarvelleError(
+            "YRV-800-006",
+            context={"doc_name": doc_name, "skill_id": skill_id},
         )
 
     if doc.type == "bundled" and getattr(user, "role", "member") != "admin":
-        raise HTTPException(
-            status_code=HTTP_403_FORBIDDEN,
+        raise YarvelleError(
+            "YRV-300-006",
             detail="Cannot delete bundled reference document without administrative privileges.",
         )
 

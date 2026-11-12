@@ -18,22 +18,20 @@ import logging
 from typing import Any, AsyncIterator, Dict, List, Literal, Optional
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from yarvelle_core.api.deps import get_current_user, resolve_owner_user_id
+from yarvelle_core.api.errors import ProblemDetailsRoute
 from yarvelle_core.api.profiles import auto_provision_primary_me_profile, get_user_profile_access
 from yarvelle_core.auth.ports import UserProfile
 from yarvelle_core.config import settings
 from yarvelle_core.db.models import Agent, ChatThread, Profile
 from yarvelle_core.db.session import get_db
 from yarvelle_core.constants.api import (
-    HTTP_400_BAD_REQUEST,
-    HTTP_404_NOT_FOUND,
-    HTTP_500_INTERNAL_SERVER_ERROR,
     ROUTE_CHAT,
     ROUTE_CHAT_THREADS,
     SSE_EVENT_ERROR,
@@ -45,13 +43,14 @@ from yarvelle_core.constants.paths import CHATS_DIR, DEFAULT_CHECKPOINTS_DB, SYS
 from yarvelle_core.engine.graph import create_async_sqlite_saver, resolve_checkpointer_path
 from yarvelle_core.engine.runner import execute_agent_run
 from yarvelle_core.engine.service import AgentExecutionService
+from yarvelle_core.errors import YarvelleError
 from yarvelle_core.schemas.chat import ChatRequestBody
 
 from yarvelle_core.logging import get_logger
 
 logger = get_logger("yarvelle_core.api.chat")
 
-router = APIRouter(tags=["Chat"])
+router = APIRouter(tags=["Chat"], route_class=ProblemDetailsRoute)
 
 
 @router.post(ROUTE_CHAT)
@@ -71,10 +70,10 @@ async def chat_stream(
     try:
         agent_id = request.get_agent_id()
     except ValueError as val_err:
-        raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail=str(val_err))
+        raise YarvelleError("YRV-100-002", cause=val_err, detail=str(val_err)) from val_err
 
     if not request.prompt or not request.prompt.strip():
-        raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="Parameter 'prompt' must not be empty.")
+        raise YarvelleError("YRV-100-001")
 
     agent_dir = settings.get_agents_dir() / agent_id
     if not agent_dir.is_dir():
@@ -85,12 +84,16 @@ async def chat_stream(
             a_stmt = select(Agent).where(Agent.id == agent_id)
             a_res = await db.execute(a_stmt)
             if a_res.scalar_one_or_none() is None:
-                raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail=f"Agent '{agent_id}' not found.")
+                raise YarvelleError("YRV-800-001", context={"agent_id": agent_id})
 
     raw_profile_id = request.get_profile_id()
     profile_id = (raw_profile_id or "").strip()
     if not profile_id:
-        raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="profile_id is required")
+        raise YarvelleError(
+            "YRV-100-004",
+            context={"parameter": "profile_id"},
+            detail="profile_id is required",
+        )
 
     if profile_id.lower() == "me":
         profile_record = await auto_provision_primary_me_profile(user, db)
@@ -100,12 +103,16 @@ async def chat_stream(
         p_res = await db.execute(p_stmt)
         profile_record = p_res.scalar_one_or_none()
         if profile_record is None:
-            raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail=f"Profile '{profile_id}' not found.")
+            raise YarvelleError("YRV-500-002", context={"profile_id": profile_id})
     access = await get_user_profile_access(profile_record, user, db)
     if access is None:
-        raise HTTPException(status_code=403, detail=f"Access denied to profile '{profile_id}'.")
+        raise YarvelleError("YRV-300-007", context={"profile_id": profile_id})
     if access == "view_paperwork":
-        raise HTTPException(status_code=403, detail="Access denied: permissions required for chat.")
+        raise YarvelleError(
+            "YRV-300-007",
+            context={"profile_id": profile_id},
+            detail="Access denied: permissions required for chat.",
+        )
 
     # Resolve thread ID for session persistence
     thread_id = request.get_thread_id() or f"thread_{agent_id}_{uuid.uuid4().hex[:12]}"
@@ -117,8 +124,8 @@ async def chat_stream(
     if existing_thread is not None:
         if owner_id and getattr(user, "role", "member") != "admin":
             if existing_thread.user_id is not None and existing_thread.user_id != owner_id:
-                raise HTTPException(
-                    status_code=403,
+                raise YarvelleError(
+                    "YRV-300-004",
                     detail="Access denied: conversation thread belongs to another user.",
                 )
         if existing_thread.profile_id:
@@ -128,7 +135,11 @@ async def chat_stream(
             if p_obj:
                 p_acc = await get_user_profile_access(p_obj, user, db)
                 if p_acc is None:
-                    raise HTTPException(status_code=403, detail="Access denied to conversation thread profile.")
+                    raise YarvelleError(
+                        "YRV-300-007",
+                        context={"profile_id": existing_thread.profile_id},
+                        detail="Access denied to conversation thread profile.",
+                    )
     else:
         new_thread = ChatThread(
             id=thread_id,
@@ -196,7 +207,7 @@ async def get_thread_history(
 ) -> Dict[str, Any]:
     """Retrieves conversation history and checkpoints for a given thread ID."""
     if not thread_id or not thread_id.strip():
-        raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="Parameter 'thread_id' is required.")
+        raise YarvelleError("YRV-100-004", context={"parameter": "thread_id"})
 
     clean_thread_id = thread_id.strip()
     owner_id = resolve_owner_user_id(user)
@@ -207,8 +218,8 @@ async def get_thread_history(
     if thread_record is not None:
         if owner_id and getattr(user, "role", "member") != "admin":
             if thread_record.user_id is not None and thread_record.user_id != owner_id:
-                raise HTTPException(
-                    status_code=403,
+                raise YarvelleError(
+                    "YRV-300-004",
                     detail="Access denied: conversation thread belongs to another user.",
                 )
         if thread_record.profile_id:
@@ -218,14 +229,19 @@ async def get_thread_history(
             if p_obj:
                 p_acc = await get_user_profile_access(p_obj, user, db)
                 if p_acc is None or p_acc == "view_paperwork":
-                    raise HTTPException(status_code=403, detail="Access denied to conversation thread profile.")
+                    raise YarvelleError(
+                        "YRV-300-007",
+                        context={"profile_id": thread_record.profile_id},
+                        detail="Access denied to conversation thread profile.",
+                    )
             elif getattr(user, "role", "member") != "admin":
-                raise HTTPException(status_code=403, detail="Access denied to conversation thread profile.")
+                raise YarvelleError(
+                    "YRV-300-007",
+                    context={"profile_id": thread_record.profile_id},
+                    detail="Access denied to conversation thread profile.",
+                )
     elif owner_id and getattr(user, "role", "member") != "admin":
-        raise HTTPException(
-            status_code=HTTP_404_NOT_FOUND,
-            detail=f"Thread '{clean_thread_id}' not found.",
-        )
+        raise YarvelleError("YRV-800-008", context={"thread_id": clean_thread_id})
 
     db_path = resolve_checkpointer_path()
     if not db_path.is_file() and settings.workspace_root:
@@ -234,7 +250,7 @@ async def get_thread_history(
             db_path = ws_db
 
     if not db_path.is_file():
-        raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail=f"No checkpoints found for thread '{clean_thread_id}'.")
+        raise YarvelleError("YRV-800-009", context={"thread_id": clean_thread_id})
 
     try:
         async with create_async_sqlite_saver(db_path) as saver:
@@ -242,7 +258,7 @@ async def get_thread_history(
             checkpoint_tuple = await saver.aget_tuple(config)
 
             if not checkpoint_tuple or not checkpoint_tuple.checkpoint:
-                raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail=f"Thread '{clean_thread_id}' not found.")
+                raise YarvelleError("YRV-800-008", context={"thread_id": clean_thread_id})
 
             channel_values = checkpoint_tuple.checkpoint.get("channel_values", {})
             raw_messages = channel_values.get("messages", [])
@@ -273,11 +289,11 @@ async def get_thread_history(
                 "followUpSuggestions": channel_values.get("follow_up_suggestions", []),
                 "count": len(serialized_messages),
             }
-    except HTTPException:
+    except YarvelleError:
         raise
-    except Exception:
+    except Exception as exc:
         logger.exception("Failed to load thread history")
-        raise HTTPException(status_code=HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to load thread history.")
+        raise YarvelleError("YRV-800-010", cause=exc) from exc
 
 
 @router.delete("/chat/threads")
@@ -291,7 +307,7 @@ async def delete_thread_history(
     """Deletes conversation thread tracking entity."""
     clean_thread_id = (thread_id or "").strip()
     if not clean_thread_id:
-        raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="Parameter 'thread_id' is required.")
+        raise YarvelleError("YRV-100-004", context={"parameter": "thread_id"})
 
     owner_id = resolve_owner_user_id(user)
     stmt = select(ChatThread).where(ChatThread.id == clean_thread_id)
@@ -301,8 +317,8 @@ async def delete_thread_history(
     if thread_record is not None:
         if owner_id and getattr(user, "role", "member") != "admin":
             if thread_record.user_id is not None and thread_record.user_id != owner_id:
-                raise HTTPException(
-                    status_code=403,
+                raise YarvelleError(
+                    "YRV-300-004",
                     detail="Access denied: conversation thread belongs to another user.",
                 )
         if thread_record.profile_id:
@@ -312,9 +328,17 @@ async def delete_thread_history(
             if p_obj:
                 p_acc = await get_user_profile_access(p_obj, user, db)
                 if p_acc != "manage" and getattr(user, "role", "member") != "admin":
-                    raise HTTPException(status_code=403, detail="Access denied: manage permissions required to delete conversation thread.")
+                    raise YarvelleError(
+                        "YRV-300-007",
+                        context={"profile_id": thread_record.profile_id},
+                        detail="Access denied: manage permissions required to delete conversation thread.",
+                    )
             elif getattr(user, "role", "member") != "admin":
-                raise HTTPException(status_code=403, detail="Access denied to conversation thread profile.")
+                raise YarvelleError(
+                    "YRV-300-007",
+                    context={"profile_id": thread_record.profile_id},
+                    detail="Access denied to conversation thread profile.",
+                )
         await db.delete(thread_record)
         await db.commit()
 

@@ -15,15 +15,17 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from pydantic import BaseModel, Field
 
 from yarvelle_core.api.deps import get_auth, get_current_user, get_settings
+from yarvelle_core.api.errors import ProblemDetailsRoute
 from yarvelle_core.auth.ports import AuthPort, UserProfile
 from yarvelle_core.config import settings
+from yarvelle_core.errors import YarvelleError
 from yarvelle_core.settings.ports import SettingsPort
 
-router = APIRouter()
+router = APIRouter(route_class=ProblemDetailsRoute)
 
 
 class RegisterUserRequest(BaseModel):
@@ -77,16 +79,16 @@ def validate_password_complexity(password: Optional[str]) -> None:
     - Contains at least one digit or special character.
     """
     if not password or len(password) < 10:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        raise YarvelleError(
+            "YRV-100-003",
             detail="Password must be at least 10 characters long.",
         )
     has_upper = any(c.isupper() for c in password)
     has_lower = any(c.islower() for c in password)
     has_digit_or_special = any(c.isdigit() or not c.isalnum() for c in password)
     if not (has_upper and has_lower and has_digit_or_special):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        raise YarvelleError(
+            "YRV-100-003",
             detail="Password must contain uppercase, lowercase, and a number or special character.",
         )
 
@@ -121,10 +123,11 @@ async def register(
             auth_provider="local",
         )
     except ValueError as err:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=str(err),
-        )
+        raise YarvelleError(
+            "YRV-500-012",
+            cause=err,
+            detail="User with this email or username already exists.",
+        ) from err
 
     # If this is the initial admin creation on first-run, automatically establish the session
     session_token = None
@@ -162,23 +165,18 @@ async def login(
     """Authenticates credentials and establishes a stateful HTTP-only session."""
     ident = body.identifier
     if not ident:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        raise YarvelleError(
+            "YRV-100-004",
+            context={"parameter": "username"},
             detail="Username or email is required.",
         )
 
     user = await auth_port.authenticate(ident, body.password)
     if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
-        )
+        raise YarvelleError("YRV-300-002")
 
     if user.status != "active":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Account is disabled",
-        )
+        raise YarvelleError("YRV-300-005")
 
     client_ip = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent")
@@ -260,8 +258,8 @@ async def reset_password(
     validate_password_complexity(body.new_password)
     success = await auth_port.reset_password(body.token, body.new_password)
     if not success:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        raise YarvelleError(
+            "YRV-100-002",
             detail="Invalid or expired token",
         )
     return {"success": True}
@@ -281,8 +279,8 @@ async def change_password(
         new_password=body.new_password,
     )
     if not success:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        raise YarvelleError(
+            "YRV-100-002",
             detail="Current password incorrect",
         )
     return {"success": True}

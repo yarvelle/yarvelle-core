@@ -15,12 +15,14 @@ from __future__ import annotations
 
 import hashlib
 from typing import Any, Dict, List, Tuple
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy import Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
+from yarvelle_core.api.errors import ProblemDetailsRoute
 from yarvelle_core.db.models import Base
 from yarvelle_core.engine.tool_registry import DataFlows, ToolSpec
+from yarvelle_core.errors import YarvelleError
 from yarvelle_core.schemas.tool import ToolResult
 from yarvelle_core.scope.context import require_scope
 from yarvelle_core.scope.mixin import ScopedMixin
@@ -59,13 +61,19 @@ def _check_finance_scope() -> None:
     try:
         require_scope("finance.accounts", level="read")
     except Exception as exc:
-        raise HTTPException(
-            status_code=403,
-            detail=f"Scope grant 'finance.accounts:read' required: {exc}",
+        raise YarvelleError(
+            "YRV-300-008",
+            cause=exc,
+            context={"scope": "finance.accounts", "level": "read"},
+            detail="Scope grant 'finance.accounts:read' required.",
         ) from exc
 
 
-synthetic_finance_router = APIRouter(prefix="/test-finance", tags=["test_finance"])
+synthetic_finance_router = APIRouter(
+    prefix="/test-finance",
+    tags=["test_finance"],
+    route_class=ProblemDetailsRoute,
+)
 
 
 @synthetic_finance_router.get("/accounts", dependencies=[Depends(_check_finance_scope)])

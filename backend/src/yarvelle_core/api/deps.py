@@ -15,11 +15,12 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from yarvelle_core import identity
+from yarvelle_core.errors.base import YarvelleError
 from yarvelle_core.auth.adapters.disabled_adapter import (
     DEFAULT_STEWARD_USER,
     DisabledAuthAdapter,
@@ -92,23 +93,21 @@ async def get_current_user(
 
 
     if not token:
-        raise HTTPException(
-            status_code=401,
-            detail="Authentication required",
+        raise YarvelleError(
+            "YRV-300-001",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
     validated = await auth_port.validate_session(token)
     if validated is None:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid or expired session",
+        raise YarvelleError(
+            "YRV-300-003",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
     user = validated[0] if isinstance(validated, (tuple, list)) else validated
     if user.status != "active":
-        raise HTTPException(status_code=403, detail="Account is disabled")
+        raise YarvelleError("YRV-300-005")
 
     return user
 
@@ -118,10 +117,7 @@ async def require_admin(
 ) -> UserProfile:
     """FastAPI dependency requiring the current user to have administrative privileges."""
     if user.role != "admin":
-        raise HTTPException(
-            status_code=403,
-            detail="Administrative privileges required",
-        )
+        raise YarvelleError("YRV-300-006")
     return user
 
 

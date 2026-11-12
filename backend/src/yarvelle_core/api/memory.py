@@ -16,7 +16,7 @@ from __future__ import annotations
 import inspect
 import logging
 from typing import List, Optional
-from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query
+from fastapi import APIRouter, Body, Depends, Path, Query
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,16 +26,13 @@ from yarvelle_core.api.deps import (
     get_current_user,
     resolve_owner_user_id,
 )
+from yarvelle_core.api.errors import ProblemDetailsRoute
 from yarvelle_core.api.profiles import get_user_profile_access
 from yarvelle_core.auth.ports import UserProfile
 from yarvelle_core.config import settings
-from yarvelle_core.constants.api import (
-    HTTP_400_BAD_REQUEST,
-    HTTP_404_NOT_FOUND,
-    HTTP_500_INTERNAL_SERVER_ERROR,
-)
 from yarvelle_core.db.models import Profile
 from yarvelle_core.db.session import get_db
+from yarvelle_core.errors import YarvelleError
 from yarvelle_core.logging import sanitize_log_value
 from yarvelle_core.memory.ports.memory_port import MemoryPort, MemoryTier
 from yarvelle_core.schemas.memory import (
@@ -48,20 +45,21 @@ from yarvelle_core.schemas.memory import (
 
 logger = logging.getLogger("yarvelle_core.api.memory")
 
-router = APIRouter()
+router = APIRouter(route_class=ProblemDetailsRoute)
 
 
 def _validate_memory_key(key: str) -> str:
     """Validates and cleans a memory key against empty, path traversal, or null bytes."""
     if not key or not key.strip():
-        raise HTTPException(
-            status_code=HTTP_400_BAD_REQUEST,
+        raise YarvelleError(
+            "YRV-100-004",
+            context={"parameter": "key"},
             detail="Memory key must not be empty.",
         )
     clean_key = key.strip()
     if any(seq in clean_key for seq in ("\x00", "..", "/", "\\")):
-        raise HTTPException(
-            status_code=HTTP_400_BAD_REQUEST,
+        raise YarvelleError(
+            "YRV-100-011",
             detail="Memory key contains invalid characters or path traversal sequences.",
         )
     return clean_key
@@ -73,8 +71,8 @@ def _validate_namespace(namespace: Optional[str]) -> str:
         return "default"
     clean_ns = namespace.strip()
     if any(seq in clean_ns for seq in ("\x00", "..", "\\")):
-        raise HTTPException(
-            status_code=HTTP_400_BAD_REQUEST,
+        raise YarvelleError(
+            "YRV-100-011",
             detail="Memory namespace contains invalid characters or path traversal sequences.",
         )
     return clean_ns
@@ -126,23 +124,32 @@ async def _enforce_profile_memory_access(
 ) -> str:
     clean_id = (profile_id or "").strip()
     if not clean_id:
-        raise HTTPException(
-            status_code=HTTP_400_BAD_REQUEST,
+        raise YarvelleError(
+            "YRV-100-004",
+            context={"parameter": "profile_id"},
             detail="profile_id is required",
         )
     p_stmt = select(Profile).where(Profile.id == clean_id)
     p_res = await db.execute(p_stmt)
     prof = p_res.scalar_one_or_none()
     if prof is None:
-        raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail=f"Profile '{clean_id}' not found.")
+        raise YarvelleError("YRV-500-002", context={"profile_id": clean_id})
 
     access = await get_user_profile_access(prof, user, db)
     if access is None:
-        raise HTTPException(status_code=403, detail=f"Access denied to profile '{clean_id}'.")
+        raise YarvelleError("YRV-300-007", context={"profile_id": clean_id})
     if access == "view_paperwork":
-        raise HTTPException(status_code=403, detail="Access denied: permissions required for memory operations.")
+        raise YarvelleError(
+            "YRV-300-007",
+            context={"profile_id": clean_id},
+            detail="Access denied: permissions required for memory operations.",
+        )
     if require_manage and access != "manage" and getattr(user, "role", "member") != "admin":
-        raise HTTPException(status_code=403, detail="Access denied: manage permissions required to mutate memories.")
+        raise YarvelleError(
+            "YRV-300-007",
+            context={"profile_id": clean_id},
+            detail="Access denied: manage permissions required to mutate memories.",
+        )
     return clean_id
 
 
@@ -169,12 +176,13 @@ async def recall_memories(
         tier_clean = tier.strip().lower()
         try:
             parsed_tier = MemoryTier(tier_clean)
-        except ValueError:
+        except ValueError as err:
             valid_tiers = [t.value for t in MemoryTier]
-            raise HTTPException(
-                status_code=HTTP_400_BAD_REQUEST,
+            raise YarvelleError(
+                "YRV-100-002",
+                cause=err,
                 detail=f"Invalid memory tier '{tier}'. Must be one of: {valid_tiers}",
-            )
+            ) from err
 
     try:
         res = port.recall(
@@ -187,6 +195,8 @@ async def recall_memories(
             records = await res
         else:
             records = res
+    except YarvelleError:
+        raise
     except Exception as exc:
         clean_q = sanitize_log_value(query or "")
         clean_ns_log = sanitize_log_value(effective_ns)
@@ -197,10 +207,11 @@ async def recall_memories(
             exc,
             exc_info=True,
         )
-        raise HTTPException(
-            status_code=HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to recall memories: {str(exc)}",
-        )
+        raise YarvelleError(
+            "YRV-500-014",
+            cause=exc,
+            detail="Failed to recall memories.",
+        ) from exc
 
     return [MemoryRecordResponse.model_validate(r) for r in records]
 
@@ -261,6 +272,8 @@ async def delete_all_memories(
             deleted_count = await res
         else:
             deleted_count = res
+    except YarvelleError:
+        raise
     except Exception as exc:
         clean_ns_log = sanitize_log_value(effective_ns)
         logger.error(
@@ -269,10 +282,11 @@ async def delete_all_memories(
             exc,
             exc_info=True,
         )
-        raise HTTPException(
-            status_code=HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to bulk delete memories: {str(exc)}",
-        )
+        raise YarvelleError(
+            "YRV-500-014",
+            cause=exc,
+            detail="Failed to bulk delete memories.",
+        ) from exc
 
     return MemoryBulkDeleteResponse(
         deleted=True,
@@ -301,6 +315,8 @@ async def get_memory(
             record = await res
         else:
             record = res
+    except YarvelleError:
+        raise
     except Exception as exc:
         clean_key_log = sanitize_log_value(clean_key)
         clean_ns_log = sanitize_log_value(effective_ns)
@@ -311,15 +327,16 @@ async def get_memory(
             exc,
             exc_info=True,
         )
-        raise HTTPException(
-            status_code=HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve memory: {str(exc)}",
-        )
+        raise YarvelleError(
+            "YRV-500-014",
+            cause=exc,
+            detail="Failed to retrieve memory.",
+        ) from exc
 
     if record is None:
-        raise HTTPException(
-            status_code=HTTP_404_NOT_FOUND,
-            detail=f"Memory record '{clean_key}' not found in namespace '{effective_ns}'.",
+        raise YarvelleError(
+            "YRV-500-006",
+            context={"key": clean_key, "namespace": effective_ns},
         )
 
     return MemoryRecordResponse.model_validate(record)
@@ -347,12 +364,13 @@ async def update_memory(
         tier_clean = body.tier.strip().lower()
         try:
             parsed_tier = MemoryTier(tier_clean)
-        except ValueError:
+        except ValueError as err:
             valid_tiers = [t.value for t in MemoryTier]
-            raise HTTPException(
-                status_code=HTTP_400_BAD_REQUEST,
+            raise YarvelleError(
+                "YRV-100-002",
+                cause=err,
                 detail=f"Invalid memory tier '{body.tier}'. Must be one of: {valid_tiers}",
-            )
+            ) from err
 
     try:
         # If tier was not specified in update, try preserving existing tier
@@ -387,7 +405,7 @@ async def update_memory(
             record = await updated
         else:
             record = updated
-    except HTTPException:
+    except YarvelleError:
         raise
     except Exception as exc:
         clean_key_log = sanitize_log_value(clean_key)
@@ -399,14 +417,15 @@ async def update_memory(
             exc,
             exc_info=True,
         )
-        raise HTTPException(
-            status_code=HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update memory record: {str(exc)}",
-        )
+        raise YarvelleError(
+            "YRV-500-014",
+            cause=exc,
+            detail="Failed to update memory record.",
+        ) from exc
 
     if record is None:
-        raise HTTPException(
-            status_code=HTTP_500_INTERNAL_SERVER_ERROR,
+        raise YarvelleError(
+            "YRV-500-014",
             detail="Memory record was not found after update.",
         )
 
@@ -433,6 +452,8 @@ async def delete_memory(
             deleted = await res
         else:
             deleted = res
+    except YarvelleError:
+        raise
     except Exception as exc:
         clean_key_log = sanitize_log_value(clean_key)
         clean_ns_log = sanitize_log_value(effective_ns)
@@ -443,10 +464,11 @@ async def delete_memory(
             exc,
             exc_info=True,
         )
-        raise HTTPException(
-            status_code=HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete memory record: {str(exc)}",
-        )
+        raise YarvelleError(
+            "YRV-500-014",
+            cause=exc,
+            detail="Failed to delete memory record.",
+        ) from exc
 
     return MemoryDeleteResponse(
         deleted=bool(deleted),

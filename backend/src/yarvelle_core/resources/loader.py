@@ -413,6 +413,31 @@ class ResourceLoader:
                     overlay = loaded
                     break
 
+        error_prefix = getattr(pack, "error_prefix", None)
+        provides = getattr(pack, "provides", None)
+        errors_file = getattr(provides, "errors_file", None) if provides is not None else None
+        if error_prefix or errors_file:
+            from yarvelle_core.errors.catalog import register_pack_error_catalog
+
+            candidates = [errors_file] if errors_file else ["resources/errors.yaml"]
+            for err_candidate in candidates:
+                if not err_candidate:
+                    continue
+                try:
+                    err_path = resolver.resolve_path(err_candidate)
+                except PackResourceError:
+                    if errors_file:
+                        raise
+                    continue
+                if err_path.is_file():
+                    eff_prefix = str(error_prefix or "").strip().upper()
+                    if not eff_prefix:
+                        loaded_err = resolver.load_yaml(err_candidate)
+                        eff_prefix = str((loaded_err or {}).get("prefix") or "").strip().upper()
+                    if eff_prefix:
+                        register_pack_error_catalog(pack.id, eff_prefix, err_path)
+                    break
+
         with self._lock:
             self._pack_resolvers[pack.id] = resolver
             self._pack_routing_overlays[pack.id] = overlay
@@ -421,6 +446,9 @@ class ResourceLoader:
 
     def unregister_pack(self, pack_id: str) -> None:
         """Drop a previously registered pack resolver and its routing overlay."""
+        from yarvelle_core.errors.catalog import unregister_pack_error_catalog
+
+        unregister_pack_error_catalog(pack_id)
         with self._lock:
             self._pack_resolvers.pop(pack_id, None)
             self._pack_routing_overlays.pop(pack_id, None)
@@ -734,9 +762,14 @@ class ResourceLoader:
     # =========================================================================
 
     def format_error(self, error_key: str, **kwargs: Any) -> str:
-        """Formats error message template for given error key safely."""
+        """Formats error message template for a given ``YRV-XXX-YYY`` code or slug."""
+        from yarvelle_core.errors.catalog import get_error_catalog
+
+        spec = get_error_catalog().get(error_key)
+        if spec is not None and self.resources_dir == Path(__file__).parent.resolve():
+            return spec.format_message((), kwargs)
         err_def = self.get_errors().get("errors", {}).get(error_key, {})
-        msg_template = str(err_def.get("message", error_key))
+        msg_template = str(err_def.get("template") or err_def.get("message", error_key))
         try:
             safe_kwargs = collections.defaultdict(str, kwargs)
             return msg_template.format_map(safe_kwargs)
@@ -744,9 +777,14 @@ class ResourceLoader:
             return msg_template
 
     def get_error_status_code(self, error_key: str) -> int:
-        """Returns the HTTP status code for given error key."""
+        """Returns the HTTP status code for a given ``YRV-XXX-YYY`` code or slug."""
+        from yarvelle_core.errors.catalog import get_error_catalog
+
+        spec = get_error_catalog().get(error_key)
+        if spec is not None and self.resources_dir == Path(__file__).parent.resolve():
+            return spec.http_status
         err_def = self.get_errors().get("errors", {}).get(error_key, {})
-        return int(err_def.get("status_code", 500))
+        return int(err_def.get("http_status", err_def.get("status_code", 500)))
 
 
 _LOADER_LOCK = threading.Lock()

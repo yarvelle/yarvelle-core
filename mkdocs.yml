@@ -71,3 +71,5 @@ nav:
       - 0010 - Stateless OAuth PKCE Relay: adr/0010-oauth-relay-and-stateless-callback.md
       - 0011 - Internationalization & Multilingual Architecture: adr/0011-internationalization-and-multilingual-architecture.md
       - 0012 - Declarative Tool Specifications: adr/0012-declarative-tool-specifications.md
+      - 0013 - Unified Error Taxonomy: adr/0013-unified-error-taxonomy.md
+      - 0014 - Domain Neutrality & Handlebars Prompts: adr/0014-domain-neutrality-and-handlebars-prompts.md

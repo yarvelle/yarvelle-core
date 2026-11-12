@@ -26,21 +26,20 @@ import re
 from typing import Any, Dict, List, Optional
 import uuid
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from yarvelle_core.api.deps import get_current_user, resolve_owner_user_id
+from yarvelle_core.api.errors import ProblemDetailsRoute
 from yarvelle_core.api.profiles import get_user_profile_access
 from yarvelle_core.auth.ports import UserProfile
 from yarvelle_core.config import settings
-from yarvelle_core.constants.api import (
-    HTTP_400_BAD_REQUEST,
-    ROUTE_ATTACHMENTS,
-)
+from yarvelle_core.constants.api import ROUTE_ATTACHMENTS
 from yarvelle_core.db.models import Attachment, Job, Profile, ProfileAccess
 from yarvelle_core.db.session import get_db
+from yarvelle_core.errors import YarvelleError
 from yarvelle_core.logging import get_logger
 from yarvelle_core.storage.cas import get_cas_path, read_cas_file, store_cas_file
 from yarvelle_core.storage.factory import get_storage_adapter
@@ -49,7 +48,7 @@ from yarvelle_core.tools.attach_read import extract_text_from_pdf_bytes
 
 logger = get_logger("yarvelle_core.api.attachments")
 
-router = APIRouter(tags=["Attachments"])
+router = APIRouter(tags=["Attachments"], route_class=ProblemDetailsRoute)
 
 ALLOWED_EXTENSIONS: set[str] = {
     ".txt",
@@ -97,16 +96,18 @@ async def upload_attachment(
 ) -> Dict[str, Any]:
     """Uploads a document via StoragePort, recording metadata and SHA-256 hash in yarvelle_core.db."""
     if not file or not file.filename:
-        raise HTTPException(
-            status_code=HTTP_400_BAD_REQUEST,
+        raise YarvelleError(
+            "YRV-100-004",
+            context={"parameter": "file"},
             detail="No file uploaded or missing filename.",
         )
 
     # 1. Validate file extension
     ext = Path(file.filename).suffix.lower()
     if ext not in ALLOWED_EXTENSIONS:
-        raise HTTPException(
-            status_code=HTTP_400_BAD_REQUEST,
+        raise YarvelleError(
+            "YRV-100-007",
+            context={"extension": ext},
             detail=f"Unsupported file format '{ext}'. Allowed formats: {', '.join(sorted(ALLOWED_EXTENSIONS))}.",
         )
 
@@ -118,18 +119,20 @@ async def upload_attachment(
         p_res = await db.execute(p_stmt)
         prof = p_res.scalar_one_or_none()
         if prof is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found.")
+            raise YarvelleError("YRV-500-002", context={"profile_id": profile_id}, detail="Profile not found.")
 
         access = await get_user_profile_access(prof, user, db)
         if access is None:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+            raise YarvelleError(
+                "YRV-300-007",
+                context={"profile_id": profile_id},
                 detail="Access denied: no permission for target profile.",
             )
         # Uploading attachments requires management/self/guardian access
         if access not in ("manage", "self", "guardian") and getattr(user, "role", "member") != "admin":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+            raise YarvelleError(
+                "YRV-300-007",
+                context={"profile_id": profile_id},
                 detail="Access denied: manage permissions required to upload attachments for this profile.",
             )
 
@@ -138,8 +141,9 @@ async def upload_attachment(
     file_size = len(content)
 
     if file_size > MAX_FILE_SIZE:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+        raise YarvelleError(
+            "YRV-100-006",
+            context={"size_bytes": file_size, "max_bytes": MAX_FILE_SIZE},
             detail=f"File size exceeds maximum limit of 10MB ({(file_size / (1024 * 1024)):.2f}MB).",
         )
 
@@ -163,10 +167,11 @@ async def upload_attachment(
         )
     except Exception as storage_err:
         logger.error("storage_save_failed", filename=sanitized_name, error=str(storage_err))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to save attachment to storage: {storage_err}",
-        )
+        raise YarvelleError(
+            "YRV-500-013",
+            cause=storage_err,
+            detail="Failed to save attachment to storage.",
+        ) from storage_err
 
     # 5. Determine extraction status and enqueue background extraction if applicable
     extractable_extensions = {
@@ -325,12 +330,13 @@ async def list_attachments(
         p_res = await db.execute(p_stmt)
         prof = p_res.scalar_one_or_none()
         if prof is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found.")
+            raise YarvelleError("YRV-500-002", context={"profile_id": profile_id}, detail="Profile not found.")
 
         access = await get_user_profile_access(prof, user, db)
         if access is None:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+            raise YarvelleError(
+                "YRV-300-007",
+                context={"profile_id": profile_id},
                 detail="Access denied: no permission for target profile.",
             )
         stmt = select(Attachment).where(Attachment.profile_id == profile_id).order_by(Attachment.created_at.desc())
@@ -434,8 +440,9 @@ async def download_attachment(
 
     # 2. Authorize caller access & resolve physical file
     if att is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+        raise YarvelleError(
+            "YRV-500-004",
+            context={"filename": attachment_id},
             detail=f"Attachment '{attachment_id}' not found.",
         )
 
@@ -444,20 +451,22 @@ async def download_attachment(
         p_res = await db.execute(p_stmt)
         prof = p_res.scalar_one_or_none()
         if prof is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+            raise YarvelleError(
+                "YRV-500-002",
+                context={"profile_id": att.profile_id},
                 detail="Profile not found.",
             )
         access = await get_user_profile_access(prof, user, db)
         if access is None:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+            raise YarvelleError(
+                "YRV-300-007",
+                context={"profile_id": att.profile_id},
                 detail="Access denied: no permission for attachment profile.",
             )
     elif owner_id and not is_admin:
         if att.user_id is not None and att.user_id != owner_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+            raise YarvelleError(
+                "YRV-300-004",
                 detail="Access denied: attachment belongs to another user.",
             )
 
@@ -500,8 +509,9 @@ async def download_attachment(
                 )
 
         if stored_file is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+            raise YarvelleError(
+                "YRV-500-004",
+                context={"filename": attachment_id},
                 detail=f"Attachment '{attachment_id}' not found in storage.",
             )
 
@@ -555,8 +565,9 @@ async def delete_attachment(
     att = res.scalar_one_or_none()
 
     if att is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+        raise YarvelleError(
+            "YRV-500-004",
+            context={"filename": attachment_id},
             detail=f"Attachment '{attachment_id}' not found.",
         )
 
@@ -568,14 +579,15 @@ async def delete_attachment(
         if prof is not None:
             access = await get_user_profile_access(prof, user, db)
             if access not in ("manage", "self", "guardian") and not is_admin:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
+                raise YarvelleError(
+                    "YRV-300-007",
+                    context={"profile_id": att.profile_id},
                     detail="Access denied: manage permissions required to delete attachment for this profile.",
                 )
     elif owner_id and not is_admin:
         if att.user_id is not None and att.user_id != owner_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+            raise YarvelleError(
+                "YRV-300-004",
                 detail="Access denied: attachment belongs to another user.",
             )
 

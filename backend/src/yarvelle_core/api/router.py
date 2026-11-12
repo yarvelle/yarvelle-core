@@ -16,6 +16,7 @@ from typing import Any, List, Optional, Sequence, Union
 from fastapi import APIRouter, Depends
 
 from yarvelle_core.api.admin import router as admin_router
+from yarvelle_core.api.errors import ProblemDetailsRoute, ensure_problem_details_routes
 from yarvelle_core.api.scope_guard import require_pack_scope
 from yarvelle_core.api.approvals import router as approvals_router
 from yarvelle_core.api.attachments import router as attachments_router
@@ -73,6 +74,7 @@ def mount_router_contributions(
     """Mounts a deterministic list of RouterContribution instances onto target router."""
     contribs = contributions if contributions is not None else get_default_router_contributions()
     for contrib in contribs:
+        ensure_problem_details_routes(contrib.router)
         app_router.include_router(
             contrib.router,
             prefix=contrib.prefix,
@@ -80,6 +82,7 @@ def mount_router_contributions(
             dependencies=build_contribution_dependencies(contrib),
             include_in_schema=contrib.include_in_schema,
         )
+    ensure_problem_details_routes(app_router)
     return app_router
 
 
@@ -122,7 +125,7 @@ def build_contribution_dependencies(contrib: RouterContribution) -> List[Any]:
     return deps
 
 
-router = APIRouter()
+router = APIRouter(route_class=ProblemDetailsRoute)
 mount_router_contributions(router)
 api_router = router
 

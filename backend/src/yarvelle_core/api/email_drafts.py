@@ -17,14 +17,16 @@ import json
 import logging
 from typing import Any, Callable, Coroutine, Dict, List, Literal, Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Body, Depends, Query, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from yarvelle_core.api.deps import get_current_user, get_db, resolve_owner_user_id
+from yarvelle_core.api.errors import ProblemDetailsRoute
 from yarvelle_core.api.profiles import get_user_profile_access
 from yarvelle_core.auth.ports import UserProfile
+from yarvelle_core.errors import YarvelleError
 from yarvelle_core.platform.email_drafts import (
     NO_AUTO_SEND_NOTICE,
     build_mailto_uri,
@@ -39,7 +41,7 @@ from yarvelle_core.db.models import Profile, utc_now
 
 logger = logging.getLogger("yarvelle_core.api.email_drafts")
 
-router = APIRouter(tags=["email-and-school"])
+router = APIRouter(tags=["email-and-school"], route_class=ProblemDetailsRoute)
 
 
 # ============================================================================
@@ -59,8 +61,9 @@ def require_profile_access(
     ) -> Profile:
         clean_id = (profile_id or "").strip()
         if not clean_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+            raise YarvelleError(
+                "YRV-100-004",
+                context={"parameter": "profile_id"},
                 detail="profile_id path parameter is required.",
             )
 
@@ -68,27 +71,30 @@ def require_profile_access(
         res = await db.execute(stmt)
         profile = res.scalar_one_or_none()
         if profile is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Profile '{clean_id}' not found.",
+            raise YarvelleError(
+                "YRV-500-002",
+                context={"profile_id": clean_id},
             )
 
         access = await get_user_profile_access(profile, user, db)
         if access is None:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+            raise YarvelleError(
+                "YRV-300-007",
+                context={"profile_id": clean_id},
                 detail="Access denied: you do not have permission for this profile.",
             )
 
         if required_access == "manage" and access != "manage":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+            raise YarvelleError(
+                "YRV-300-007",
+                context={"profile_id": clean_id},
                 detail="Access denied: management permissions required.",
             )
 
         if required_access == "view_records" and access not in ("manage", "view_records"):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+            raise YarvelleError(
+                "YRV-300-007",
+                context={"profile_id": clean_id},
                 detail="Access denied: view permissions required.",
             )
 
@@ -214,8 +220,9 @@ async def post_profile_email_draft(
             created_by_user_id=actor_id,
         )
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        raise YarvelleError(
+            "YRV-100-003",
+            cause=exc,
             detail=str(exc),
         ) from exc
 
@@ -236,9 +243,9 @@ async def get_profile_email_draft_eml(
     """Exports an `EmailDraft` as an RFC 5322 `.eml` message with `X-Unsent: 1`."""
     draft = await get_email_draft(db, profile_id=profile.id, draft_id=draft_id)
     if draft is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"EmailDraft '{draft_id}' not found for profile '{profile.id}'.",
+        raise YarvelleError(
+            "YRV-500-010",
+            context={"draft_id": draft_id, "profile_id": profile.id},
         )
 
     eml_content = export_draft_as_eml(draft)
@@ -282,9 +289,9 @@ async def delete_profile_email_draft(
     """Deletes a local `EmailDraft` row."""
     deleted = await delete_email_draft(db, profile_id=profile.id, draft_id=draft_id)
     if not deleted:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"EmailDraft '{draft_id}' not found for profile '{profile.id}'.",
+        raise YarvelleError(
+            "YRV-500-010",
+            context={"draft_id": draft_id, "profile_id": profile.id},
         )
     return {
         "id": draft_id,
@@ -319,8 +326,9 @@ async def post_stage_gmail_messages(
             label_filter=payload.label_filter,
         )
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        raise YarvelleError(
+            "YRV-100-003",
+            cause=exc,
             detail=str(exc),
         ) from exc
 
@@ -351,8 +359,8 @@ async def post_confirm_gmail_staged_item(
         )
     except ValueError as exc:
         msg = str(exc)
-        code = status.HTTP_404_NOT_FOUND if "not found" in msg.lower() else status.HTTP_400_BAD_REQUEST
-        raise HTTPException(status_code=code, detail=msg) from exc
+        err_code = "YRV-500-001" if "not found" in msg.lower() else "YRV-100-003"
+        raise YarvelleError(err_code, cause=exc, detail=msg) from exc
 
     return result
 

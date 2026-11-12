@@ -15,13 +15,14 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional, Union
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from yarvelle_core.api.auth import validate_password_complexity
 from yarvelle_core.api.deps import get_auth, get_settings, require_admin
+from yarvelle_core.api.errors import ProblemDetailsRoute
 from yarvelle_core.auth.adapters.disabled_adapter import DisabledAuthAdapter
 from yarvelle_core.auth.adapters.sql_adapter import SqlAuthAdapter
 from yarvelle_core.auth.ports import AuthPort, UserProfile, UserUpdate
@@ -29,9 +30,10 @@ from yarvelle_core.config import settings as app_settings
 from yarvelle_core.constants.defaults import DEFAULT_VERSION
 from yarvelle_core.db.models import PasswordReset, Session, SystemSetting, User
 from yarvelle_core.db.session import get_db, get_engine, sanitize_db_url
+from yarvelle_core.errors import YarvelleError
 from yarvelle_core.settings.ports import SECRET_MASK, SettingsPort
 
-router = APIRouter(dependencies=[Depends(require_admin)])
+router = APIRouter(dependencies=[Depends(require_admin)], route_class=ProblemDetailsRoute)
 
 
 class UpdateSettingsRequest(BaseModel):
@@ -139,8 +141,8 @@ async def create_user_endpoint(
 ) -> Dict[str, Any]:
     """Admin creates a new user account."""
     if body.role not in ("admin", "steward", "member"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        raise YarvelleError(
+            "YRV-100-002",
             detail="Role must be one of: 'admin', 'steward', 'member'.",
         )
     validate_password_complexity(body.password)
@@ -155,10 +157,11 @@ async def create_user_endpoint(
             auth_provider="local",
         )
     except ValueError as err:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=str(err),
-        )
+        raise YarvelleError(
+            "YRV-500-012",
+            cause=err,
+            detail="User with this email or username already exists.",
+        ) from err
 
     if user.role != body.role:
         updated = await auth_port.update_user(user.id, UserUpdate(role=body.role))
@@ -177,22 +180,22 @@ async def patch_user_endpoint(
 ) -> Dict[str, Any]:
     """Admin modifies user role, status, name, or email."""
     if body.role is not None and body.role not in ("admin", "steward", "member"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        raise YarvelleError(
+            "YRV-100-002",
             detail="Role must be one of: 'admin', 'steward', 'member'.",
         )
     if body.status is not None and body.status not in ("active", "disabled"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        raise YarvelleError(
+            "YRV-100-002",
             detail="Status must be one of: 'active', 'disabled'.",
         )
 
     updates = body.model_dump(exclude_unset=True)
     user = await auth_port.update_user(user_id, updates=updates)
     if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"User '{user_id}' not found.",
+        raise YarvelleError(
+            "YRV-500-003",
+            context={"user_id": user_id},
         )
 
     if body.email and not isinstance(auth_port, DisabledAuthAdapter):
@@ -256,31 +259,31 @@ async def reset_user_password_endpoint(
         async with session_factory() as session:
             user = await session.get(User, user_id)
             if user is None:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"User '{user_id}' not found.",
+                raise YarvelleError(
+                    "YRV-500-003",
+                    context={"user_id": user_id},
                 )
             user_email = user.email
     else:
         user = await db.get(User, user_id)
         if user is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"User '{user_id}' not found.",
+            raise YarvelleError(
+                "YRV-500-003",
+                context={"user_id": user_id},
             )
         user_email = user.email
 
     token = await auth_port.create_password_reset_token(user_email)
     if not token:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        raise YarvelleError(
+            "YRV-100-005",
             detail="Failed to create password reset token.",
         )
 
     success = await auth_port.reset_password(token, body.new_password)
     if not success:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        raise YarvelleError(
+            "YRV-100-005",
             detail="Failed to reset password.",
         )
 
@@ -296,8 +299,8 @@ async def delete_user_endpoint(
 ) -> Dict[str, Any]:
     """Admin deletes user account. Prevents self-deletion."""
     if user_id == current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        raise YarvelleError(
+            "YRV-100-005",
             detail="Cannot delete own account",
         )
 
@@ -309,9 +312,9 @@ async def delete_user_endpoint(
         async with session_factory() as session:
             user = await session.get(User, user_id)
             if user is None:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"User '{user_id}' not found.",
+                raise YarvelleError(
+                    "YRV-500-003",
+                    context={"user_id": user_id},
                 )
             await auth_port.revoke_all_sessions(user_id)
             await session.delete(user)
@@ -319,9 +322,9 @@ async def delete_user_endpoint(
     else:
         user = await db.get(User, user_id)
         if user is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"User '{user_id}' not found.",
+            raise YarvelleError(
+                "YRV-500-003",
+                context={"user_id": user_id},
             )
         await auth_port.revoke_all_sessions(user_id)
         await db.delete(user)

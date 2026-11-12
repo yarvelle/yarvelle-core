@@ -16,14 +16,16 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from yarvelle_core.api.connections import require_profile_access
 from yarvelle_core.api.deps import get_current_user, get_db, resolve_owner_user_id
+from yarvelle_core.api.errors import ProblemDetailsRoute
 from yarvelle_core.auth.ports import UserProfile
+from yarvelle_core.errors import YarvelleError
 from yarvelle_core.platform.routines import (
     create_standing_routine,
     execute_standing_routine,
@@ -36,7 +38,7 @@ from yarvelle_core.logging import get_logger
 
 logger = get_logger("yarvelle_core.api.routines")
 
-router = APIRouter(tags=["routines"])
+router = APIRouter(tags=["routines"], route_class=ProblemDetailsRoute)
 
 
 # ============================================================================
@@ -188,9 +190,9 @@ async def create_profile_routine(
             description=payload.description,
         )
     except PermissionError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        raise YarvelleError("YRV-300-004", cause=exc, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise YarvelleError("YRV-100-003", cause=exc, detail=str(exc)) from exc
 
     serialized = _serialize_routine(routine)
     return {
@@ -214,8 +216,9 @@ async def update_profile_routine(
     """Updates routine status (`active`, `paused`, `revoked`)."""
     target = (payload.status or payload.action or "").strip()
     if not target:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        raise YarvelleError(
+            "YRV-100-004",
+            context={"parameter": "status"},
             detail="Either 'status' or 'action' is required.",
         )
 
@@ -229,8 +232,13 @@ async def update_profile_routine(
             actor_user_id=actor_id,
         )
     except ValueError as exc:
-        code = status.HTTP_404_NOT_FOUND if "not found" in str(exc).lower() else status.HTTP_400_BAD_REQUEST
-        raise HTTPException(status_code=code, detail=str(exc)) from exc
+        err_code = "YRV-500-008" if "not found" in str(exc).lower() else "YRV-100-005"
+        raise YarvelleError(
+            err_code,
+            cause=exc,
+            context={"routine_id": routine_id, "profile_id": profile.id},
+            detail=str(exc),
+        ) from exc
 
     serialized = _serialize_routine(routine)
     return {
@@ -258,9 +266,9 @@ async def trigger_profile_routine_run(
     res = await db.execute(stmt)
     routine = res.scalar_one_or_none()
     if routine is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Routine '{routine_id}' not found for profile '{profile.id}'.",
+        raise YarvelleError(
+            "YRV-500-008",
+            context={"routine_id": routine_id, "profile_id": profile.id},
         )
 
     taint_flag = bool(payload.taint) if payload is not None else False
@@ -271,7 +279,7 @@ async def trigger_profile_routine_run(
             taint=taint_flag,
         )
     except PermissionError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        raise YarvelleError("YRV-300-004", cause=exc, detail=str(exc)) from exc
 
 
 @router.patch(
@@ -297,10 +305,15 @@ async def update_profile_connection_autonomy(
             actor_user_id=actor_id,
         )
     except PermissionError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        raise YarvelleError("YRV-300-004", cause=exc, detail=str(exc)) from exc
     except ValueError as exc:
-        code = status.HTTP_404_NOT_FOUND if "not found" in str(exc).lower() else status.HTTP_400_BAD_REQUEST
-        raise HTTPException(status_code=code, detail=str(exc)) from exc
+        err_code = "YRV-500-009" if "not found" in str(exc).lower() else "YRV-100-003"
+        raise YarvelleError(
+            err_code,
+            cause=exc,
+            context={"connection_id": connection_id, "profile_id": profile.id},
+            detail=str(exc),
+        ) from exc
 
     return {
         "id": conn.id,
@@ -367,7 +380,12 @@ async def reapprove_connection_mcp_pin(
             actor_user_id=actor_id,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        raise YarvelleError(
+            "YRV-500-001",
+            cause=exc,
+            context={"connection_id": connection_id, "tool_name": tool_name},
+            detail=str(exc),
+        ) from exc
 
     serialized = _serialize_mcp_pin(pin)
     return {
