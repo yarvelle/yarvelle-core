@@ -41,6 +41,7 @@ from yarvelle_core.audit.logger import _file_lock
 from yarvelle_core.audit.redaction import redact_audit_event
 from yarvelle_core.config import settings
 from yarvelle_core.constants.paths import DEFAULT_AUDIT_LOG_FILE, LOGS_DIR
+from yarvelle_core.resources.loader import get_resource_loader
 from yarvelle_core.workflows.deliberation.blackboard import BlackboardManager
 from yarvelle_core.workflows.nodes.base import BaseNode
 from yarvelle_core.workflows.state import CritiqueStance
@@ -104,10 +105,25 @@ class ResponseSynthesizerNode(BaseNode):
 
     @staticmethod
     def _without_footer(text: str) -> str:
-        """Drops a trailing copy of the canonical footer so it is added only once."""
+        """Drops trailing copies of known canonical or OutputGuardrailNode footers."""
         body = str(text or "").rstrip()
-        if body.endswith(CANONICAL_DISCLAIMER):
-            body = body[: -len(CANONICAL_DISCLAIMER)].rstrip()
+        known_footers = [CANONICAL_DISCLAIMER]
+        try:
+            header_text = get_resource_loader().get_disclaimer_header_text()
+            if header_text:
+                known_footers.append(f"*Disclaimer: {header_text}*")
+                known_footers.append(f"Disclaimer: {header_text}")
+        except Exception:
+            pass
+
+        changed = True
+        while changed and body:
+            changed = False
+            for footer in known_footers:
+                if footer and body.endswith(footer):
+                    body = body[: -len(footer)].rstrip()
+                    changed = True
+                    break
         return body
 
     def synthesize_deliberation(self, state: Dict[str, Any]) -> str:

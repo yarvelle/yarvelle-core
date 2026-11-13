@@ -321,7 +321,10 @@ def strip_reference_doc_preamble(text: str) -> str:
         return text
     import re
     pattern = r"^(?:(?:\*|_){0,2}(?:(?:Based on|According to|From) (?:the )?(?:provided )?reference (?:document|guide|material|checklist|information|docs?)(?: provided)?)[,:]?(?:\*|_){0,2}[,:]?\s*)"
-    cleaned = re.sub(pattern, "", text.lstrip(), flags=re.IGNORECASE).lstrip("*_ \t")
+    stripped = text.lstrip()
+    if not re.match(pattern, stripped, flags=re.IGNORECASE):
+        return text
+    cleaned = re.sub(pattern, "", stripped, flags=re.IGNORECASE).lstrip("*_ \t")
     if cleaned and cleaned != text:
         cleaned = cleaned[0].upper() + cleaned[1:] if len(cleaned) > 1 else cleaned.upper()
     return cleaned
@@ -1110,6 +1113,7 @@ class AgentExecutionService:
                     effective_tools=effective_tools,
                 )
 
+                pending_post_tool_reset = False
                 async for event in compiled_graph.astream_events(initial_input, config=graph_config, version="v2"):
                     ev_kind = event.get("event")
 
@@ -1130,9 +1134,28 @@ class AgentExecutionService:
                         if chunk and getattr(chunk, "content", None):
                             content_str = chunk.content
                             if isinstance(content_str, str) and content_str:
+                                if pending_post_tool_reset:
+                                    accumulated_text = ""
+                                    pending_post_tool_reset = False
                                 accumulated_text += content_str
                                 if not self._buffer_answer:
                                     yield self.format_token_event(content_str)
+
+                    elif ev_kind == "on_chat_model_end":
+                        node_name = event.get("metadata", {}).get("langgraph_node")
+                        tags = event.get("tags") or []
+                        if (
+                            (node_name and node_name in NON_STREAMING_NODES)
+                            or is_subagent_token(event.get("metadata"))
+                            or "internal" in tags
+                            or "no_stream" in tags
+                            or "suggestion" in tags
+                        ):
+                            continue
+
+                        out_msg = event.get("data", {}).get("output")
+                        if out_msg is not None and getattr(out_msg, "tool_calls", None):
+                            pending_post_tool_reset = True
 
                     # Forward custom node events (tools, refusals, suggestions)
                     elif ev_kind == "on_custom_event":
@@ -1218,12 +1241,16 @@ class AgentExecutionService:
                             yield {"type": name, **filtered}
 
                     elif ev_kind == "on_chain_end":
-                        if not refusal_triggered and not accumulated_text:
+                        if not refusal_triggered and (
+                            not accumulated_text
+                            or (pending_post_tool_reset and not approval_required_triggered)
+                        ):
                             chain_out = event.get("data", {}).get("output", {})
                             if isinstance(chain_out, dict):
                                 out_text = chain_out.get("output")
                                 if out_text and isinstance(out_text, str):
                                     accumulated_text = out_text
+                                    pending_post_tool_reset = False
                                     if not self._buffer_answer:
                                         yield self.format_token_event(out_text)
 
