@@ -104,10 +104,25 @@ class ResponseSynthesizerNode(BaseNode):
 
     @staticmethod
     def _without_footer(text: str) -> str:
-        """Drops a trailing copy of the canonical footer so it is added only once."""
+        """Drops trailing canonical or constituent disclaimer footers so a single footer is emitted."""
+        import re
+
         body = str(text or "").rstrip()
-        if body.endswith(CANONICAL_DISCLAIMER):
-            body = body[: -len(CANONICAL_DISCLAIMER)].rstrip()
+        trailing_disclaimer_re = re.compile(
+            r"(?:\n+|\A)\s*(?:\*|_){0,2}\s*disclaimer\s*:\s*[^\n]+(?:\*|_){0,2}\s*\Z",
+            flags=re.IGNORECASE,
+        )
+        changed = True
+        while changed and body:
+            changed = False
+            if body.endswith(CANONICAL_DISCLAIMER):
+                body = body[: -len(CANONICAL_DISCLAIMER)].rstrip()
+                changed = True
+                continue
+            updated = trailing_disclaimer_re.sub("", body).rstrip()
+            if updated != body:
+                body = updated
+                changed = True
         return body
 
     def synthesize_deliberation(self, state: Dict[str, Any]) -> str:
