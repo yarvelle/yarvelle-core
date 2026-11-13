@@ -118,6 +118,9 @@ def test_output_guardrail_preserves_leading_bold_markdown() -> None:
 
 
 def test_degraded_multi_agent_synthesis_strips_constituent_middle_disclaimers() -> None:
+    from yarvelle_core.resources.loader import get_resource_loader
+
+    guardrail_header = get_resource_loader().get_disclaimer_header_text()
     node = ResponseSynthesizerNode(
         agent_titles={
             "budget-planner": "Budget Planner",
@@ -130,7 +133,7 @@ def test_degraded_multi_agent_synthesis_strips_constituent_middle_disclaimers() 
         "specialist_outputs": {
             "budget-planner": (
                 "Keep hotel spend under $200/night.\n\n"
-                "*Disclaimer: Yarvelle Core agents provide automated computational assistance.*"
+                f"*Disclaimer: {guardrail_header}*"
             ),
             "trip-organizer": (
                 "Book morning trains between cities.\n\n"
