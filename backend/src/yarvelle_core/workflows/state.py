@@ -97,6 +97,7 @@ class AgentState(TypedDict, total=False):
 
     # Routing and orchestration state
     current_agent: str
+    last_active_agent: Optional[str]
     next_step: str
     routed_subgraph: Optional[str]
 
@@ -181,6 +182,9 @@ class AgentState(TypedDict, total=False):
     # Multi-Agent Blackboard Deliberation State (R1-R3)
     deliberation_state: Optional[Dict[str, Any]]
 
+    # Monotone Taint Tracking (AU-19)
+    is_tainted: bool
+
 
 # Routing results that describe one turn only. They are cleared when a turn
 # starts so a previous turn's route, notices or hand-offs never carry over.
@@ -240,9 +244,16 @@ def turn_start_values(turn_id: Optional[str] = None, explicit_agent: Optional[st
     return values
 
 
-def turn_end_values() -> Dict[str, Any]:
-    """State updates that end a turn: the caller's one-turn choices are dropped."""
-    return {k: None for k in TURN_INPUT_FIELDS}
+def turn_end_values(state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """State updates that end a turn: caller's one-turn choices are dropped, last active agent kept."""
+    values: Dict[str, Any] = {k: None for k in TURN_INPUT_FIELDS}
+    if state is not None:
+        active = state.get("current_agent") or state.get("agent_id")
+        if active and active not in ("orchestrator", "supervisor", "unknown"):
+            values["last_active_agent"] = active
+        elif state.get("last_active_agent"):
+            values["last_active_agent"] = state.get("last_active_agent")
+    return values
 
 
 SLUG_REGEX: re.Pattern[str] = re.compile(r"^[a-z0-9_-]{1,64}$")
