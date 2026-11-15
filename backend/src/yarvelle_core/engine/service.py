@@ -316,17 +316,30 @@ def strip_internal_suggestion_leakage(text: str) -> str:
 
 
 def strip_reference_doc_preamble(text: str) -> str:
-    """Strips robotic 'Based on the provided reference document/guide...' opening phrases."""
+    """Strips robotic 'Based on the provided reference document/tool output...' opening phrases."""
     if not text:
         return text
     import re
-    pattern = r"^(?:(?:\*|_){0,2}(?:(?:Based on|According to|From) (?:the )?(?:provided )?reference (?:document|guide|material|checklist|information|docs?)(?: provided)?)[,:]?(?:\*|_){0,2}[,:]?\s*)"
+    pattern = r"^(?:(?:\*|_){0,2}(?:(?:Based on|According to|From) (?:the )?(?:provided )?(?:reference (?:document|guide|material|checklist|information|docs?)|tool (?:output|results?|data))(?: provided)?)[,:]?(?:\*|_){0,2}[,:]?\s*)"
     stripped = text.lstrip()
-    if not re.match(pattern, stripped, flags=re.IGNORECASE):
+    match = re.match(pattern, stripped, flags=re.IGNORECASE)
+    if not match:
         return text
-    cleaned = re.sub(pattern, "", stripped, flags=re.IGNORECASE).lstrip("*_ \t")
+    cleaned = stripped[match.end():]
+    # Do not strip leading markdown asterisks/underscores if they form markdown syntax like **Summary:**
+    is_markdown_syntax = bool(re.match(r"^(\*{1,2}|_{1,2})[^\*\n_]+(\1)", cleaned))
+    if not is_markdown_syntax:
+        cleaned = cleaned.lstrip("*_ \t")
+    else:
+        cleaned = cleaned.lstrip(" \t")
     if cleaned and cleaned != text:
-        cleaned = cleaned[0].upper() + cleaned[1:] if len(cleaned) > 1 else cleaned.upper()
+        m_md = re.match(r"^(\*{1,2}|_{1,2})(\w)(.*)$", cleaned, flags=re.DOTALL)
+        if m_md:
+            cleaned = f"{m_md.group(1)}{m_md.group(2).upper()}{m_md.group(3)}"
+        elif len(cleaned) > 1:
+            cleaned = cleaned[0].upper() + cleaned[1:]
+        else:
+            cleaned = cleaned.upper()
     return cleaned
 
 
@@ -1014,12 +1027,14 @@ class AgentExecutionService:
             # Per-turn results (answer, refusal, reflection count, error)
             # start fresh so the previous turn's never carry over.
             **turn_reset_values(),
-            "document_dossiers": [],
+            "document_dossiers": kwargs.get("document_dossiers", []),
             "store_bodies": effective_store_bodies,
             "allow_assist": allow_assist,
             "attachments": attachments or [],
-            "notes": [],
+            "notes": kwargs.get("notes", []),
             "execution_plan": kwargs.get("execution_plan"),
+            "is_tainted": bool(kwargs.get("is_tainted", False)),
+            "last_active_agent": kwargs.get("last_active_agent"),
         }
         for opt_k in ("target_agents", "scopes", "deliberation_config"):
             if opt_k in kwargs:
@@ -1077,8 +1092,8 @@ class AgentExecutionService:
         # 6. Stream Execution Events
         try:
             async with _resolve_checkpointer() as checkpointer:
-                # If checkpointer already holds prior messages for this thread, only append the new user turn
-                if checkpointer is not None and len(initial_messages) > 1:
+                # If checkpointer already holds prior messages or channel state for this thread
+                if checkpointer is not None:
                     try:
                         cp_lookup_cfg = {"configurable": {"thread_id": thread_id}}
                         existing_tup = None
@@ -1087,9 +1102,32 @@ class AgentExecutionService:
                         elif hasattr(checkpointer, "get_tuple"):
                             existing_tup = checkpointer.get_tuple(cp_lookup_cfg)
                         if existing_tup and getattr(existing_tup, "checkpoint", None):
-                            cp_msgs = existing_tup.checkpoint.get("channel_values", {}).get("messages", [])
-                            if cp_msgs:
+                            cp_channels = existing_tup.checkpoint.get("channel_values", {})
+                            cp_msgs = cp_channels.get("messages", [])
+                            if cp_msgs and len(initial_messages) > 1:
                                 initial_input["messages"] = [HumanMessage(content=user_content)]
+
+                            # Preserve multi-turn state channels if not explicitly provided in current request
+                            if not attachments and cp_channels.get("attachments"):
+                                initial_input["attachments"] = cp_channels["attachments"]
+                            if (
+                                not kwargs.get("document_dossiers")
+                                and not attachments
+                                and cp_channels.get("document_dossiers")
+                            ):
+                                initial_input["document_dossiers"] = cp_channels["document_dossiers"]
+                            if not kwargs.get("notes") and cp_channels.get("notes"):
+                                initial_input["notes"] = cp_channels["notes"]
+
+                            # Restore monotone taint state
+                            if bool(cp_channels.get("is_tainted", False)):
+                                initial_input["is_tainted"] = True
+                                if tool_context is not None and getattr(tool_context, "taint", None) is not None:
+                                    tool_context.taint.set()
+
+                            # Preserve last active agent for conversational affinity
+                            if not kwargs.get("last_active_agent") and cp_channels.get("last_active_agent"):
+                                initial_input["last_active_agent"] = cp_channels["last_active_agent"]
                     except Exception:
                         pass
 
@@ -1241,6 +1279,14 @@ class AgentExecutionService:
                             yield {"type": name, **filtered}
 
                     elif ev_kind == "on_chain_end":
+                        ev_node = event.get("name") or event.get("metadata", {}).get("langgraph_node")
+                        if ev_node == "reflection":
+                            refl_out = event.get("data", {}).get("output", {})
+                            if isinstance(refl_out, dict) and refl_out.get("next_step") == "agent":
+                                pending_post_tool_reset = True
+                                if self._buffer_answer:
+                                    accumulated_text = ""
+
                         if not refusal_triggered and (
                             not accumulated_text
                             or (pending_post_tool_reset and not approval_required_triggered)
@@ -1565,22 +1611,79 @@ class AgentExecutionService:
 
         active_model = self.model or create_chat_model(provider="ollama")
 
-        graph_config = {
-            "configurable": {
-                "thread_id": thread_id,
-                "user_id": user_id or "default_user",
-                "profile_id": profile_id or rec_profile_id,
-                "approval_id": approval_id,
-            }
-        }
-        if app_store:
-            graph_config["configurable"]["approval_store"] = app_store
-
         tools_arg = kwargs.get("tools")
         effective_tools = tools_arg if tools_arg is not None else (getattr(self, "allowed_tools", None) or None)
         execution_context = kwargs.get("execution_context")
 
         async with _resolve_checkpointer() as cp:
+            # Check if checkpoint already holds monotone taint state
+            cp_tainted = False
+            if cp is not None:
+                try:
+                    cp_lookup_cfg = {"configurable": {"thread_id": thread_id}}
+                    existing_tup = None
+                    if hasattr(cp, "aget_tuple"):
+                        existing_tup = await cp.aget_tuple(cp_lookup_cfg)
+                    elif hasattr(cp, "get_tuple"):
+                        existing_tup = cp.get_tuple(cp_lookup_cfg)
+                    if existing_tup and getattr(existing_tup, "checkpoint", None):
+                        cp_channels = existing_tup.checkpoint.get("channel_values", {})
+                        cp_tainted = bool(cp_channels.get("is_tainted", False))
+                except Exception:
+                    pass
+
+            from yarvelle_core.engine.tool_exec import ToolContext, TaintFlag
+
+            tool_context = kwargs.get("tool_context")
+            if tool_context is None:
+                eff_user_id = str(user_id or "default_user").strip()
+                eff_profile_id = str(profile_id or rec_profile_id or "default_profile").strip()
+                agent_obj = None
+                if agent_id:
+                    try:
+                        agent_obj = self._agent_registry().get(agent_id)
+                    except Exception:
+                        pass
+                if agent_obj is None:
+                    agent_obj = getattr(self, "agent", None)
+
+                eff_tools = tuple(effective_tools or (getattr(agent_obj, "tools", None) if agent_obj else None) or ())
+                ws_root = self.workspace_root.resolve()
+                skills_dir = (ws_root / SKILLS_DIR).resolve()
+                try:
+                    tool_context = ToolContext(
+                        user_id=eff_user_id,
+                        profile_id=eff_profile_id,
+                        principal="user",
+                        run_id=thread_id,
+                        mode="local",
+                        autonomy="A1",
+                        taint=TaintFlag(initial=cp_tainted),
+                        workspace_root=ws_root,
+                        skills_dir=skills_dir,
+                        agent=agent_obj,
+                        effective_tools=eff_tools,
+                        skills=tuple(getattr(agent_obj, "skills", ()) if agent_obj else ()),
+                    )
+                except Exception as tc_err:
+                    logger.debug("Failed constructing resume ToolContext: %s", tc_err)
+                    tool_context = None
+            else:
+                if cp_tainted and getattr(tool_context, "taint", None) is not None:
+                    tool_context.taint.set()
+
+            graph_config = {
+                "configurable": {
+                    "thread_id": thread_id,
+                    "tool_context": tool_context,
+                    "user_id": user_id or "default_user",
+                    "profile_id": profile_id or rec_profile_id,
+                    "approval_id": approval_id,
+                }
+            }
+            if app_store:
+                graph_config["configurable"]["approval_store"] = app_store
+
             compiled_graph = self._build_execution_graph(
                 active_model=active_model,
                 checkpointer=cp,

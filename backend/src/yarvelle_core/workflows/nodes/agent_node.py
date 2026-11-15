@@ -36,12 +36,14 @@ class AgentNode(BaseNode):
         model: Optional[BaseChatModel] = None,
         tools: Optional[Sequence[Any]] = None,
         system_prompt: Optional[str] = None,
+        safety_policy: Optional[Any] = None,
         name: str = "agent",
     ) -> None:
         super().__init__(name=name)
         self.model = model
         self.tools = tools or []
         self.system_prompt = system_prompt
+        self.safety_policy = safety_policy
 
     def assemble_system_prompt(self, state: Dict[str, Any]) -> str:
         """Assembles the system prompt including safety preamble and agent instructions."""
@@ -61,7 +63,8 @@ class AgentNode(BaseNode):
 
         if agent_manifest is not None:
             from yarvelle_core.engine.prompt_builder import build_system_prompt
-            return build_system_prompt(agent_manifest)
+            active_policy = self.safety_policy if self.safety_policy is not None else state.get("safety_policy")
+            return build_system_prompt(agent_manifest, safety_policy=active_policy)
 
         loader = get_resource_loader()
         prompts = loader.get_prompts()
@@ -98,9 +101,30 @@ class AgentNode(BaseNode):
                 else:
                     lc_messages.append(HumanMessage(content=content))
 
-        # Inject system prompt at index 0 if not already present
-        if system_prompt and not (lc_messages and isinstance(lc_messages[0], SystemMessage)):
-            lc_messages = [SystemMessage(content=system_prompt)] + lc_messages
+        # On reflection retry, strip rejected non-tool assistant drafts and surface critique
+        if int(state.get("reflection_count", 0) or 0) > 0:
+            from yarvelle_core.workflows.nodes.reflection_node import (
+                append_ephemeral_reflection_reminder,
+                build_reflection_directive,
+                strip_current_turn_assistant_drafts,
+            )
+
+            lc_messages = strip_current_turn_assistant_drafts(lc_messages)
+            lc_messages = append_ephemeral_reflection_reminder(lc_messages, state)
+            reflection_directive = build_reflection_directive(state)
+            if reflection_directive:
+                system_prompt = (
+                    f"{system_prompt}\n\n{reflection_directive}"
+                    if system_prompt
+                    else reflection_directive
+                )
+
+        # Inject or update system prompt at index 0 so specialist prompt instructions refresh on routing
+        if system_prompt:
+            if lc_messages and isinstance(lc_messages[0], SystemMessage):
+                lc_messages[0] = SystemMessage(content=system_prompt)
+            else:
+                lc_messages = [SystemMessage(content=system_prompt)] + lc_messages
 
         # Resolve model
         model = self.model or state.get("model")

@@ -606,7 +606,29 @@ class HybridRouter:
             )
             raise
         except Exception as err:
-            logger.warning("Main agent failed: %s", type(err).__name__)
+            err_str = str(err).lower()
+            is_unsupported_tools = any(
+                phrase in err_str
+                for phrase in (
+                    "does not support tools",
+                    "does not support tool",
+                    "tools not supported",
+                    "tools are not supported",
+                    "tool calling not supported",
+                    "tool calling is not supported",
+                    "function calling not supported",
+                    "function calling is not supported",
+                    "does not support function",
+                    "does not support functions",
+                )
+            )
+            if is_unsupported_tools:
+                logger.warning(
+                    "Main agent model does not support tools (%s); falling back to default agent.",
+                    err,
+                )
+            else:
+                logger.warning("Main agent failed: %s (%s)", type(err).__name__, err)
             fallback = self._default_decision("main_agent_failed")
             await store_turn_tasks(
                 self.task_sink,

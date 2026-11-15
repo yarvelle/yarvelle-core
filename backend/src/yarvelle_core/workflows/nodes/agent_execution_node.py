@@ -52,6 +52,7 @@ class AgentExecutionNode(BaseNode):
         registry: Optional[AgentRegistry] = None,
         tool_registry: Optional[Any] = None,
         default_tools: Optional[Sequence[Any]] = None,
+        safety_policy: Optional[Any] = None,
         name: str = "agent_execution",
     ) -> None:
         super().__init__(name=name)
@@ -59,6 +60,7 @@ class AgentExecutionNode(BaseNode):
         self._registry = registry
         self.tool_registry = tool_registry
         self.default_tools = list(default_tools) if default_tools is not None else None
+        self.safety_policy = safety_policy
 
     @property
     def registry(self) -> AgentRegistry:
@@ -79,24 +81,53 @@ class AgentExecutionNode(BaseNode):
         elif isinstance(manifest.persona, dict):
             persona = manifest.persona.get("instructions") or manifest.persona.get("role") or ""
 
-        loader = get_resource_loader()
-        forbidden_rules = getattr(manifest, "forbidden", []) or []
-        if not forbidden_rules:
-            forbidden_rules = loader.get_refusal_patterns().get("default_forbidden_intents", [])
-
-        forbidden_str = ", ".join(forbidden_rules) if forbidden_rules else "policy prohibited actions"
-        safety_preamble = loader.get_safety_preamble_template().format(
-            forbidden_str=forbidden_str
+        skill_ids = list(getattr(manifest, "skills", []) or [])
+        agent_manifest_id = getattr(manifest, "id", "") or str(state.get("current_agent") or state.get("agent_id") or "")
+        raw_loaded_skills = (
+            self.registry.get_loaded_skills(agent_manifest_id)
+            if agent_manifest_id and hasattr(self.registry, "get_loaded_skills")
+            else []
         )
+        loaded_skills = (
+            list(raw_loaded_skills)
+            if isinstance(raw_loaded_skills, (list, tuple))
+            else []
+        )
+        loaded_map = {sk.id: sk for sk in loaded_skills}
+
+        active_policy = self.safety_policy if self.safety_policy is not None else state.get("safety_policy")
+        if (
+            active_policy is not None
+            and hasattr(active_policy, "get_preamble")
+            and callable(active_policy.get_preamble)
+        ):
+            safety_preamble = str(active_policy.get_preamble(manifest, loaded_skills) or "")
+        else:
+            loader = get_resource_loader()
+            forbidden_rules = getattr(manifest, "forbidden", []) or []
+            if not forbidden_rules:
+                forbidden_rules = loader.get_refusal_patterns().get("default_forbidden_intents", [])
+
+            forbidden_str = ", ".join(forbidden_rules) if forbidden_rules else "policy prohibited actions"
+            safety_preamble = loader.get_safety_preamble_template().format(
+                forbidden_str=forbidden_str
+            )
 
         orchestrator_instructions = state.get("orchestrator_instructions", "")
 
         # Extract companion skills declared in manifest.skills
         declared_skills: List[Dict[str, Any]] = []
-        skill_ids = list(getattr(manifest, "skills", []) or [])
-        agent_manifest_id = getattr(manifest, "id", "") or str(state.get("current_agent") or state.get("agent_id") or "")
-        loaded_skills = self.registry.get_loaded_skills(agent_manifest_id) if agent_manifest_id else []
-        loaded_map = {sk.id: sk for sk in loaded_skills}
+
+        def _format_skill_tier1_summary(desc: str, refs: Any) -> str:
+            ref_names = [str(r).strip() for r in (refs or ()) if str(r).strip()]
+            if ref_names:
+                doc_hint = (
+                    "(Instructions available on-demand via skill-docs. "
+                    f"Available reference docs: {', '.join(ref_names)})"
+                )
+            else:
+                doc_hint = "(Instructions available on-demand via skill-docs; doc: SKILL.md)"
+            return f"Summary: {desc}\n{doc_hint}" if desc else doc_hint
 
         seen_skill_ids = set()
         for s_item in skill_ids:
@@ -105,52 +136,47 @@ class AgentExecutionNode(BaseNode):
                 sk_obj = loaded_map.get(sk_id) or self.registry.get_skill(sk_id)
                 if sk_obj is not None:
                     desc = sk_obj.description or ""
-                    tier1_summary = (
-                        f"Summary: {desc}\n(Instructions available on-demand via skill-docs)"
-                        if desc
-                        else "(Instructions available on-demand via skill-docs)"
-                    )
                     declared_skills.append({
                         "name": sk_obj.name,
                         "id": sk_obj.id,
-                        "instructions": tier1_summary,
+                        "instructions": _format_skill_tier1_summary(
+                            desc, getattr(sk_obj, "references", ())
+                        ),
                         "description": desc,
                     })
                 else:
                     declared_skills.append({
                         "name": sk_id.replace("-", " ").title(),
                         "id": sk_id,
-                        "instructions": "(Instructions available on-demand via skill-docs)",
+                        "instructions": _format_skill_tier1_summary("", ()),
                         "description": "",
                     })
                 seen_skill_ids.add(sk_id)
             elif hasattr(s_item, "id"):
                 sk_id = getattr(s_item, "id")
                 desc = getattr(s_item, "description", "") or ""
-                tier1_summary = (
-                    f"Summary: {desc}\n(Instructions available on-demand via skill-docs)"
-                    if desc
-                    else "(Instructions available on-demand via skill-docs)"
+                sk_obj = loaded_map.get(sk_id) or self.registry.get_skill(sk_id)
+                refs = getattr(s_item, "references", ()) or (
+                    getattr(sk_obj, "references", ()) if sk_obj is not None else ()
                 )
                 declared_skills.append({
                     "name": getattr(s_item, "name", sk_id),
                     "id": sk_id,
-                    "instructions": tier1_summary,
+                    "instructions": _format_skill_tier1_summary(desc, refs),
                     "description": desc,
                 })
                 seen_skill_ids.add(sk_id)
             elif isinstance(s_item, dict):
                 sk_id = s_item.get("id", "skill")
                 desc = s_item.get("description", "") or ""
-                tier1_summary = (
-                    f"Summary: {desc}\n(Instructions available on-demand via skill-docs)"
-                    if desc
-                    else "(Instructions available on-demand via skill-docs)"
+                sk_obj = loaded_map.get(sk_id) or self.registry.get_skill(sk_id)
+                refs = s_item.get("references") or (
+                    getattr(sk_obj, "references", ()) if sk_obj is not None else ()
                 )
                 declared_skills.append({
                     "name": s_item.get("name") or sk_id,
                     "id": sk_id,
-                    "instructions": tier1_summary,
+                    "instructions": _format_skill_tier1_summary(desc, refs),
                     "description": desc,
                 })
                 seen_skill_ids.add(sk_id)
@@ -158,15 +184,12 @@ class AgentExecutionNode(BaseNode):
         for sk in loaded_skills:
             if sk.id not in seen_skill_ids:
                 desc = sk.description or ""
-                tier1_summary = (
-                    f"Summary: {desc}\n(Instructions available on-demand via skill-docs)"
-                    if desc
-                    else "(Instructions available on-demand via skill-docs)"
-                )
                 declared_skills.append({
                     "name": sk.name,
                     "id": sk.id,
-                    "instructions": tier1_summary,
+                    "instructions": _format_skill_tier1_summary(
+                        desc, getattr(sk, "references", ())
+                    ),
                     "description": desc,
                 })
                 seen_skill_ids.add(sk.id)
@@ -421,9 +444,30 @@ class AgentExecutionNode(BaseNode):
                     continue
             lc_messages.append(msg)
 
-        # Prepend system prompt if not already present
-        if system_prompt and not (lc_messages and isinstance(lc_messages[0], SystemMessage)):
-            lc_messages = [SystemMessage(content=system_prompt)] + lc_messages
+        # On reflection retry, strip rejected non-tool assistant drafts so the prompt ends cleanly on user/tool context
+        if int(state.get("reflection_count", 0) or 0) > 0:
+            from yarvelle_core.workflows.nodes.reflection_node import (
+                append_ephemeral_reflection_reminder,
+                build_reflection_directive,
+                strip_current_turn_assistant_drafts,
+            )
+
+            lc_messages = strip_current_turn_assistant_drafts(lc_messages)
+            lc_messages = append_ephemeral_reflection_reminder(lc_messages, state)
+            reflection_directive = build_reflection_directive(state)
+            if reflection_directive:
+                system_prompt = (
+                    f"{system_prompt}\n\n{reflection_directive}"
+                    if system_prompt
+                    else reflection_directive
+                )
+
+        # Inject or update system prompt at index 0 so specialist prompt instructions refresh on routing
+        if system_prompt:
+            if lc_messages and isinstance(lc_messages[0], SystemMessage):
+                lc_messages[0] = SystemMessage(content=system_prompt)
+            else:
+                lc_messages = [SystemMessage(content=system_prompt)] + lc_messages
 
         # 4. Resolve and bind model
         model = self.model or state.get("model")
