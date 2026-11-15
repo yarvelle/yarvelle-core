@@ -77,6 +77,7 @@ class ToolNode(BaseNode):
         from yarvelle_core.engine.tool_exec import (
             EgressBlockedError,
             SqlApprovalStore,
+            TaintFlag,
             ToolContext,
             ToolSpec,
             compute_payload_hash,
@@ -147,6 +148,8 @@ class ToolNode(BaseNode):
                         "Security invariant violation: ToolContext requires a non-empty 'profile_id'. Fail-closed."
                     )
                 ctx = raw_ctx
+                if state.get("is_tainted") and getattr(ctx, "taint", None) is not None:
+                    ctx.taint.set()
             else:
                 has_pid_key = "profile_id" in configurable or "profile_id" in state
                 p_val = configurable.get("profile_id") if "profile_id" in configurable else state.get("profile_id")
@@ -175,6 +178,7 @@ class ToolNode(BaseNode):
                     profile_id=p_id,
                     run_id=run_id,
                     autonomy=autonomy,  # type: ignore
+                    taint=TaintFlag(initial=bool(state.get("is_tainted"))),
                     workspace_root=ws_root,
                     skills_dir=skills_dir,
                     agent=agent_obj,
@@ -496,11 +500,15 @@ class ToolNode(BaseNode):
                 )
                 last_tool_output = output_val
 
+        current_tainted = bool(state.get("is_tainted")) or bool(
+            getattr(getattr(ctx, "taint", None), "is_tainted", False)
+        )
         return {
             "messages": tool_messages,
             "tool_messages": tool_messages,
             "tool_traces": tool_traces,
             "tool_output": last_tool_output,
+            "is_tainted": current_tainted,
             "next_step": "tool_validator",
         }
 

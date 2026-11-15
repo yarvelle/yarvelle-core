@@ -473,12 +473,14 @@ class GraphBuilder:
                     registry=self.registry,
                     tool_registry=self.tool_registry,
                     default_tools=self.tools,
+                    safety_policy=self.safety_policy,
                 )
             else:
                 agent_node = AgentNode(
                     model=bound_model or self.model,
                     tools=self.tools,
                     system_prompt=self.system_prompt,
+                    safety_policy=self.safety_policy,
                 )
         builder_allowed_tools = (
             self.tools
@@ -790,7 +792,7 @@ class GraphBuilder:
             res = audit_node(state) if callable(audit_node) else audit_node.execute(state)
             if inspect.isawaitable(res):
                 res = await res
-            return {**(res or {}), **turn_end_values()}
+            return {**(res or {}), **turn_end_values(state)}
 
         builder.add_node("audit", _audit_wrapper)
         if self.include_error_node:

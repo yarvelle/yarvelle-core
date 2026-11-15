@@ -32,97 +32,43 @@ logger = logging.getLogger(__name__)
 ALLOWED_DOC_EXTS: Set[str] = set(ALLOWED_SKILL_DOC_EXTENSIONS)
 
 
-def synthesize_missing_skill_doc(
-    skill_id: str,
-    doc_name: str,
-    skill_dir: Optional[Path] = None,
-    context: Optional[Any] = None,
-) -> str:
-    """Synthesizes structured, safety-compliant documentation when a reference doc is missing."""
-    clean_stem = Path(doc_name).stem.replace("_", " ").replace("-", " ").title()
-    skill_title = skill_id.replace("_", " ").replace("-", " ").title()
+def _list_available_skill_docs(
+    skill_dir: Optional[Path],
+    ref_dir: Path,
+    generated_refs: Optional[List[str]] = None,
+) -> List[str]:
+    """Lists readable reference document filenames available for an authorized skill."""
+    available: List[str] = []
+    seen: Set[str] = set()
 
-    # Check if SKILL.md has description
-    skill_desc = ""
-    if skill_dir and (skill_dir / "SKILL.md").is_file():
-        try:
-            raw_skill = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
-            for line in raw_skill.splitlines():
-                if line.startswith("description:"):
-                    skill_desc = line.split("description:", 1)[1].strip().strip('"').strip("'")
-                    break
-        except Exception:
-            pass
+    if ref_dir.is_dir():
+        resolved_ref_dir = ref_dir.resolve()
+        for entry in sorted(ref_dir.iterdir(), key=lambda p: p.name.lower()):
+            if entry.name.startswith(".") or entry.is_symlink() or not entry.is_file():
+                continue
+            if entry.suffix.lower() not in ALLOWED_DOC_EXTS:
+                continue
+            try:
+                if not entry.resolve().is_relative_to(resolved_ref_dir):
+                    continue
+            except OSError:
+                continue
+            available.append(entry.name)
+            seen.add(entry.name)
 
-    if not skill_desc:
-        skill_desc = f"Domain guidance and procedural reference for {skill_title}."
+    for g_name in generated_refs or []:
+        if g_name and g_name not in seen:
+            available.append(g_name)
+            seen.add(g_name)
 
-    doc_lower = doc_name.lower()
-    if "template" in doc_lower or "log" in doc_lower or "tracker" in doc_lower:
-        archetype_content = (
-            f"## 1. Purpose & Overview\n"
-            f"This template provides a standardized tracking tool for {clean_stem.lower()} to support productive discussions.\n\n"
-            f"## 2. Tracking Log Matrix\n\n"
-            f"| Date & Time | Primary Observation / Entry | Severity / Rating (1-10) | Duration / Frequency | Triggers / Contributing Factors | Actions / Interventions Tried | Impact on Daily Function |\n"
-            f"| :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n"
-            f"| *YYYY-MM-DD* | *Detailed description* | *1 - 10* | *e.g., 2 hours* | *Specific triggers noted* | *Action or routine remedies* | *Impact on work, routine, or tasks* |\n"
-            f"| | | | | | | |\n"
-            f"| | | | | | | |\n\n"
-            f"## 3. Key Discussion Points\n"
-            f"- Describe specific patterns or triggers identified during logging.\n"
-            f"- Note which interventions provided relief and which were ineffective.\n"
-            f"- Ask what subsequent steps, lifestyle modifications, or specialist consultations are recommended.\n"
-        )
-    elif "checklist" in doc_lower or "prep" in doc_lower:
-        archetype_content = (
-            f"## 1. Preparation Logistics & Documents\n"
-            f"- [ ] Identification and relevant account credentials.\n"
-            f"- [ ] Current documentation list including active requirements.\n"
-            f"- [ ] Prior records, reports, or referring coordinator notes.\n\n"
-            f"## 2. Priority Agendas\n"
-            f"- [ ] Top 1–3 questions or goals prioritized for this session.\n"
-            f"- [ ] Timeline of relevant changes or concerns over the past 30–90 days.\n\n"
-            f"## 3. Next Steps & Follow-Up Verification\n"
-            f"- [ ] Clarify required action items, referrals, or requisitions.\n"
-            f"- [ ] Confirm follow-up timeline and contact procedures.\n"
-        )
-    elif "glossary" in doc_lower or "terms" in doc_lower or "code" in doc_lower or "explanation" in doc_lower:
-        archetype_content = (
-            f"## 1. Key Terminology & Concepts\n"
-            f"- **Core Definition**: Essential understanding of {clean_stem.lower()} within workflow navigation.\n"
-            f"- **Operational Context**: How coordinators and team members use this terminology.\n"
-            f"- **User Considerations**: What this means for your workflow, responsibilities, and outcomes.\n\n"
-            f"## 2. Questions to Clarify\n"
-            f"1. *How does this apply to my specific situation or plan?*\n"
-            f"2. *Are there formal pre-authorization, verification, or documentation requirements?*\n"
-        )
-    else:
-        archetype_content = (
-            f"## 1. Overview & Context\n"
-            f"{clean_stem} provides structured informational guidance for {skill_title.lower()}.\n"
-            f"Context: {skill_desc}\n\n"
-            f"## 2. Key Action Items & Guidance\n"
-            f"1. Review relevant history and document priorities in writing.\n"
-            f"2. Formulate clear, concise questions for the coordinator.\n"
-            f"3. Verify plan details, provider tiers, and required authorizations.\n\n"
-            f"## 3. Communication Guide\n"
-            f"Prepare a concise 2-minute summary of your goals to ensure all priorities are addressed.\n"
-        )
+    if skill_dir is not None and skill_dir.is_dir():
+        skill_md = skill_dir / "SKILL.md"
+        if skill_md.is_file() and not skill_md.is_symlink() and "SKILL.md" not in seen:
+            available.append("SKILL.md")
+            seen.add("SKILL.md")
 
-    from yarvelle_core.config import settings
+    return available
 
-    app_brand = settings.product_name
-    return (
-        f"# {clean_stem}\n\n"
-        f"**Skill Domain**: {skill_title}  \n"
-        f"**Reference Document**: `{doc_name}`\n\n"
-        f"---\n\n"
-        f"{archetype_content}\n"
-        f"---\n\n"
-        f"## ⚠️ {app_brand} Boundary & Safety Disclosures\n\n"
-        f"> **INFORMATIONAL AID**: This reference document is an educational and organizational resource. "
-        f"It does **NOT** provide authoritative binding determinations or replace licensed professional judgment.\n"
-    )
 
 
 
@@ -221,12 +167,20 @@ async def execute_skill_docs(params: Dict[str, Any], context: Any) -> ToolResult
                 )
 
         # If it's a dynamic skill with in-memory references, resolve directly
+        gen_ref_names: List[str] = []
         if is_gen:
+            doc_stem_norm = Path(doc).stem.lower().replace("-", "_")
             for gs in gen_skills:
                 if isinstance(gs, dict) and (gs.get("id") == skill_id or gs.get("name") == skill_id or gs.get("id") == resolved_skill_id):
                     refs = gs.get("references", {})
                     for r_name, r_content in refs.items():
-                        if r_name == doc or r_name == f"{doc}.md" or Path(r_name).stem == doc:
+                        gen_ref_names.append(r_name)
+                        if (
+                            r_name == doc
+                            or r_name == f"{doc}.md"
+                            or Path(r_name).stem == doc
+                            or Path(r_name).stem.lower().replace("-", "_") == doc_stem_norm
+                        ):
                             return ToolResult(
                                 success=True,
                                 output={
@@ -276,6 +230,35 @@ async def execute_skill_docs(params: Dict[str, Any], context: Any) -> ToolResult
             target_path = resolve_sandboxed_path(ref_dir, resolved_doc, must_exist=False)
             if target_path.is_file():
                 content = target_path.read_text(encoding="utf-8", errors="replace")
+            else:
+                # Match case-insensitively with hyphen/underscore stem normalization across real reference files
+                req_stem = Path(resolved_doc).stem.lower().replace("-", "_")
+                req_ext = Path(resolved_doc).suffix.lower()
+                resolved_ref_dir = ref_dir.resolve()
+                for cand in sorted(ref_dir.iterdir(), key=lambda p: p.name.lower()):
+                    if cand.name.startswith(".") or cand.is_symlink() or not cand.is_file():
+                        continue
+                    try:
+                        if not cand.resolve().is_relative_to(resolved_ref_dir):
+                            continue
+                    except OSError:
+                        continue
+                    if cand.suffix.lower() == req_ext and cand.stem.lower().replace("-", "_") == req_stem:
+                        resolved_doc = cand.name
+                        content = cand.read_text(encoding="utf-8", errors="replace")
+                        break
+
+        # Allow reading the skill's own SKILL.md manifest if explicitly requested
+        if (
+            content is None
+            and Path(resolved_doc).parts == (Path(resolved_doc).name,)
+            and Path(resolved_doc).name.lower() == "skill.md"
+            and skill_dir.is_dir()
+        ):
+            skill_md_path = resolve_sandboxed_path(skill_dir, "SKILL.md", must_exist=False)
+            if skill_md_path.is_file():
+                resolved_doc = "SKILL.md"
+                content = skill_md_path.read_text(encoding="utf-8", errors="replace")
 
         # If not found on filesystem, check database knowledge_base table
         if content is None:
@@ -305,13 +288,20 @@ async def execute_skill_docs(params: Dict[str, Any], context: Any) -> ToolResult
                 pass
 
         if content is None:
-            # Dynamically synthesize missing reference document on demand in-memory so UI never fails with error.
-            # Do NOT persist synthesized content to disk in skills/ to prevent repository leaks and untracked stubs.
-            content = synthesize_missing_skill_doc(
-                skill_id=resolved_skill_id,
-                doc_name=resolved_doc,
-                skill_dir=skill_dir if skill_dir.is_dir() else None,
-                context=context,
+            available = _list_available_skill_docs(
+                skill_dir if skill_dir.is_dir() else None,
+                ref_dir,
+                gen_ref_names,
+            )
+            avail_msg = (
+                f" Available documents: {', '.join(available)}."
+                if available
+                else " No reference documents are installed for this skill."
+            )
+            return ToolResult(
+                success=False,
+                output=None,
+                error=f'Reference document "{doc}" not found in skill "{resolved_skill_id}".{avail_msg}',
             )
 
         return ToolResult(
@@ -326,24 +316,7 @@ async def execute_skill_docs(params: Dict[str, Any], context: Any) -> ToolResult
     except SandboxSecurityError as sec_err:
         return ToolResult(success=False, output=None, error=str(sec_err))
     except Exception as err:
-        # Fallback to dynamic synthesis so unexpected runtime file glitches do not leak raw errors
-        try:
-            content = synthesize_missing_skill_doc(
-                skill_id=resolved_skill_id if 'resolved_skill_id' in locals() else skill_id,
-                doc_name=resolved_doc if 'resolved_doc' in locals() else doc,
-                skill_dir=None,
-                context=context,
-            )
-            return ToolResult(
-                success=True,
-                output={
-                    "skill_id": resolved_skill_id if 'resolved_skill_id' in locals() else skill_id,
-                    "doc": resolved_doc if 'resolved_doc' in locals() else doc,
-                    "content": content,
-                },
-            )
-        except Exception:
-            return ToolResult(success=False, output=None, error=f"Failed to load skill doc: {err}")
+        return ToolResult(success=False, output=None, error=f"Failed to load skill doc: {err}")
 
 
 # Alias for compatibility with tests and tool runner

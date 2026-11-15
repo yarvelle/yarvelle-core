@@ -144,6 +144,33 @@ def compose_tier1_classifier_prompt(
 TIER1_DOMAIN_CLASSIFIER_PROMPT = compose_tier1_classifier_prompt()
 
 
+def is_conversational_follow_up(prompt_text: str) -> bool:
+    """Detects short conversational follow-ups lacking domain keywords."""
+    if not prompt_text:
+        return False
+    text = prompt_text.strip()
+    words = text.split()
+    if len(words) > 20 or len(text) > 150:
+        return False
+
+    lower = text.lower().rstrip("?.!,; ")
+    follow_up_cues = (
+        "why", "how", "what", "can you", "could you", "tell me",
+        "explain", "elaborate", "and then", "what about", "what if",
+        "so", "why is that", "tell me more", "go on", "please explain",
+        "yes", "no", "okay", "ok", "sure", "thanks", "thank you",
+        "got it", "i see", "understood", "what does that mean",
+        "is that", "does that", "will that", "should i",
+    )
+    if any(lower == cue or lower.startswith(cue + " ") or lower.startswith(cue + "'") for cue in follow_up_cues):
+        return True
+    if text.endswith("?") and len(words) <= 10:
+        return True
+    if len(words) <= 5:
+        return True
+    return False
+
+
 
 class OrchestratorDecision(BaseModel):
     """Structured output schema for the dynamic orchestrator routing decision."""
@@ -1040,9 +1067,25 @@ class OrchestratorNode(BaseNode):
             classified = True
 
         if decision is None or not str(decision.agent_id).strip():
-            decision = self._fallback_to_default("main_agent_failed", state)
-            if decision is None:
-                return self._no_route_error("routing produced no agent")
+            last_active = state.get("last_active_agent")
+            if (
+                last_active
+                and not candidates
+                and is_conversational_follow_up(prompt_text)
+                and (
+                    self.registry.get(last_active) is not None
+                    or (self.default_agent and last_active == self.default_agent)
+                )
+            ):
+                decision = OrchestratorDecision(
+                    agent_id=last_active,
+                    reasoning=f"Conversational affinity maintained for follow-up query with '{last_active}'.",
+                    instructions="",
+                )
+            else:
+                decision = self._fallback_to_default("main_agent_failed", state)
+                if decision is None:
+                    return self._no_route_error("routing produced no agent")
 
         # 3. The selected agent must be registered; no silent substitution
         selected_id = str(decision.agent_id).strip().lower().replace("_", "-")
@@ -1128,5 +1171,6 @@ __all__ = [
     "TIER1_DOMAIN_CLASSIFIER_PROMPT",
     "compose_tier1_classifier_prompt",
     "DEFAULT_ROUTING_HINTS",
+    "is_conversational_follow_up",
 ]
 

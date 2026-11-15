@@ -163,7 +163,7 @@ class ResponseSynthesizerNode(BaseNode):
 
         # Taint detection
         tainted_props = [p for p in proposals.values() if getattr(p, "tainted", False)]
-        run_tainted = bool(state.get("tainted"))
+        run_tainted = bool(state.get("tainted") or state.get("is_tainted"))
 
         sections: List[str] = []
 
