@@ -109,6 +109,42 @@ export function Calendar({
     return days;
   }, [currentDate]);
 
+  // Generate days in active week for week view (Sunday to Saturday)
+  const weekDays = React.useMemo(() => {
+    const startOfWeek = new Date(currentDate);
+    const day = startOfWeek.getDay();
+    startOfWeek.setDate(startOfWeek.getDate() - day);
+    startOfWeek.setHours(0, 0, 0, 0);
+
+    return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((dayName, idx) => {
+      const d = new Date(startOfWeek);
+      d.setDate(startOfWeek.getDate() + idx);
+      return {
+        dayName,
+        date: d,
+        dayNumber: d.getDate(),
+      };
+    });
+  }, [currentDate]);
+
+  const isEventOnDate = (ev: CalendarEvent, targetDate: Date) => {
+    const evStart = typeof ev.start === 'string' ? new Date(ev.start) : ev.start;
+    const targetYear = targetDate.getFullYear();
+    const targetMonth = String(targetDate.getMonth() + 1).padStart(2, '0');
+    const targetDay = String(targetDate.getDate()).padStart(2, '0');
+    const targetDateStr = `${targetYear}-${targetMonth}-${targetDay}`;
+    const evStr = typeof ev.start === 'string' ? ev.start : ev.start.toISOString();
+    if (evStr.startsWith(targetDateStr)) return true;
+    return (
+      (evStart.getUTCFullYear() === targetDate.getUTCFullYear() &&
+        evStart.getUTCMonth() === targetDate.getUTCMonth() &&
+        evStart.getUTCDate() === targetDate.getUTCDate()) ||
+      (evStart.getFullYear() === targetDate.getFullYear() &&
+        evStart.getMonth() === targetDate.getMonth() &&
+        evStart.getDate() === targetDate.getDate())
+    );
+  };
+
   return (
     <div
       data-slot="calendar"
@@ -220,25 +256,29 @@ export function Calendar({
       {activeView === 'week' && (
         <div data-slot="week-view" className="mt-4 p-4 text-center text-sm text-fg-muted">
           <div className="grid grid-cols-7 gap-2">
-            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((dayName, idx) => (
-              <div key={idx} className="rounded-lg border border-border p-2 bg-surface-2">
-                <div className="font-semibold text-fg text-xs pb-1">{dayName}</div>
-                <div className="space-y-1 mt-2">
-                  {events.slice(0, 2).map((ev) => (
-                    <div
-                      key={ev.id}
-                      onClick={() => onSelectEvent?.(ev)}
-                      className={cn(
-                        'cursor-pointer rounded p-1 text-[11px] truncate text-start',
-                        ev.conflict ? 'bg-danger-bg text-danger-fg' : 'bg-surface text-fg shadow-1'
-                      )}
-                    >
-                      {ev.title}
-                    </div>
-                  ))}
+            {weekDays.map(({ dayName, date, dayNumber }, idx) => {
+              const dayEvents = events.filter((ev) => isEventOnDate(ev, date));
+              return (
+                <div key={idx} className="rounded-lg border border-border p-2 bg-surface-2">
+                  <div className="font-semibold text-fg text-xs pb-1">{dayName}</div>
+                  <div className="text-[10px] text-fg-muted">{dayNumber}</div>
+                  <div className="space-y-1 mt-2">
+                    {dayEvents.map((ev) => (
+                      <div
+                        key={ev.id}
+                        onClick={() => onSelectEvent?.(ev)}
+                        className={cn(
+                          'cursor-pointer rounded p-1 text-[11px] truncate text-start',
+                          ev.conflict ? 'bg-danger-bg text-danger-fg' : 'bg-surface text-fg shadow-1'
+                        )}
+                      >
+                        {ev.title}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

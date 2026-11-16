@@ -740,7 +740,7 @@ async def execute_tool_call(
 
     # 2.5 Scope Authorization Verification
     from yarvelle_core.scope.context import (
-        DEFAULT_HEALTH_GRANTED_SCOPES,
+        DEFAULT_GRANTED_SCOPES,
         DEFAULT_SCOPE,
         current_scope_context,
         is_scope_granted,
@@ -757,8 +757,8 @@ async def execute_tool_call(
         tool_scopes = {DEFAULT_SCOPE}
 
     scope_ctx = current_scope_context()
-    granted_scopes = scope_ctx.granted_scopes if scope_ctx is not None else DEFAULT_HEALTH_GRANTED_SCOPES
-    pack_declared = scope_ctx.pack_declared_scopes if scope_ctx is not None else DEFAULT_HEALTH_GRANTED_SCOPES
+    granted_scopes = scope_ctx.granted_scopes if scope_ctx is not None else DEFAULT_GRANTED_SCOPES
+    pack_declared = scope_ctx.pack_declared_scopes if scope_ctx is not None else DEFAULT_GRANTED_SCOPES
 
     is_domain_neutral_core_tool = (
         spec.metadata.get("source") == "mcp_db_toolbox"

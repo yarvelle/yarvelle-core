@@ -45,6 +45,7 @@ from yarvelle_core.tools.spec_loader import (
     BoundDeclarativeTool,
     ToolSpecLoader,
     get_tool_spec_loader,
+    normalize_enabled_pack_ids,
 )
 
 logger = logging.getLogger("yarvelle_core.engine.tool_registry")
@@ -202,10 +203,14 @@ class ToolSpecRegistry:
         """Returns all tools registered by the specified pack."""
         return [spec for name, spec in self._tools.items() if self._tool_packs.get(name) == pack_id]
 
-    def list_for_enabled_packs(self, enabled_packs: Sequence[str]) -> List[ToolSpec]:
+    def list_for_enabled_packs(self, enabled_packs: Sequence[Any]) -> List[ToolSpec]:
         """Returns all core tools plus tools registered by any of the enabled packs."""
-        allowed = set(enabled_packs) | {"core"}
-        return [spec for name, spec in self._tools.items() if self._tool_packs.get(name) in allowed]
+        allowed = normalize_enabled_pack_ids(enabled_packs) | {"core"}
+        return [
+            spec
+            for name, spec in self._tools.items()
+            if str(self._tool_packs.get(name) or "").strip().lower() in allowed
+        ]
 
     def resolve(self, names: Sequence[str]) -> List[ToolSpec]:
         """Resolves a list of tool names to matching ToolSpec instances."""
@@ -275,10 +280,14 @@ CORE_TOOL_NAMES: Tuple[str, ...] = (
     "search_records",
     "create_reminder",
     "list_reminders",
+    "update_reminder",
+    "delete_reminder",
     "web_search",
     "calendar_suggest_slots",
     "calendar_create_event",
     "create_email_draft",
+    "list_email_drafts",
+    "delete_email_draft",
     "gmail_list_messages",
     "gmail_send_message",
 )
@@ -337,7 +346,7 @@ def _make_core_builtin_specs(loader: Optional[ToolSpecLoader] = None) -> List[To
 
 def _load_entrypoint_pack_tools(
     registry: ToolSpecRegistry,
-    enabled_packs: Optional[Sequence[str]],
+    enabled_packs: Optional[Sequence[Any]],
 ) -> None:
     """Registers tools exposed by installed `yarvelle.packs` entry points matching `enabled_packs`."""
     try:
@@ -347,7 +356,7 @@ def _load_entrypoint_pack_tools(
         discovered_eps = all_eps.get("yarvelle.packs", [])
 
     allowed_ids: Optional[Set[str]] = (
-        {p.strip().lower() for p in enabled_packs if p and p.strip()}
+        normalize_enabled_pack_ids(enabled_packs)
         if enabled_packs is not None
         else None
     )
@@ -368,7 +377,7 @@ def _load_entrypoint_pack_tools(
 
 
 def create_default_registry(
-    enabled_packs: Optional[Sequence[str]] = None,
+    enabled_packs: Optional[Sequence[Any]] = None,
     *,
     loader: Optional[ToolSpecLoader] = None,
 ) -> ToolSpecRegistry:

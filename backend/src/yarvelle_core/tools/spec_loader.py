@@ -24,7 +24,7 @@ import json
 import logging
 from pathlib import Path
 import threading
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple, Union
 
 from pydantic import ValidationError
 import yaml
@@ -128,6 +128,21 @@ def _parse_manifest_file(path: Path, default_pack_id: str = "core") -> ToolSetMa
         raise ToolSpecValidationError(
             f"Schema validation failed for {path}:\n{exc}"
         ) from exc
+
+
+def normalize_enabled_pack_ids(enabled_packs: Sequence[Any]) -> Set[str]:
+    """Extracts normalized lowercase pack ID strings from string slugs or PackSpec objects."""
+    normalized: Set[str] = set()
+    for pack in enabled_packs:
+        if pack is None:
+            continue
+        raw_id = getattr(pack, "id", None) if not isinstance(pack, str) else pack
+        if raw_id is None:
+            continue
+        clean = str(raw_id).strip().lower()
+        if clean:
+            normalized.add(clean)
+    return normalized
 
 
 class ToolSpecLoader:
@@ -284,7 +299,7 @@ class ToolSpecLoader:
 
     def load_enabled_tools(
         self,
-        enabled_packs: Optional[Sequence[str]] = None,
+        enabled_packs: Optional[Sequence[Any]] = None,
     ) -> Tuple[BoundDeclarativeTool, ...]:
         """Returns core tools plus tools belonging to ``enabled_packs``.
 
@@ -297,7 +312,7 @@ class ToolSpecLoader:
             if enabled_packs is None:
                 target_packs = sorted(self._pack_sources.keys())
             else:
-                allowed = {p.strip().lower() for p in enabled_packs if p and p.strip()}
+                allowed = normalize_enabled_pack_ids(enabled_packs)
                 target_packs = [p for p in sorted(self._pack_sources.keys()) if p in allowed]
 
         for pack_id in target_packs:
@@ -340,6 +355,7 @@ __all__ = [
     "ToolSpecLoader",
     "ToolSpecValidationError",
     "get_tool_spec_loader",
+    "normalize_enabled_pack_ids",
     "register_pack_tool_manifest",
     "resolve_handler_entrypoint",
 ]

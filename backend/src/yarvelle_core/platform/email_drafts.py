@@ -34,7 +34,7 @@ from yarvelle_core.db.session import get_session_factory
 
 logger = logging.getLogger("yarvelle_core.platform.email_drafts")
 
-VALID_DRAFT_CATEGORIES = ("appointment", "school", "insurance", "general")
+VALID_DRAFT_CATEGORIES = ("appointment", "school", "inquiry", "administrative", "general")
 NO_AUTO_SEND_NOTICE = "Draft saved locally. Yarvelle Core never sends emails automatically in v1."
 AUTOMATED_DRAFT_EMAIL_HEADER_NOTE = (
     "Prepared locally by Yarvelle Core as an administrative aid. "
@@ -280,6 +280,50 @@ async def execute_create_email_draft(args: Dict[str, Any], ctx: Any = None) -> D
     return payload
 
 
+async def execute_list_email_drafts(args: Dict[str, Any], ctx: Any = None) -> Dict[str, Any]:
+    """Tool executor (`risk_tier="read"`) for listing local email drafts."""
+    profile_id = getattr(ctx, "profile_id", None) if ctx is not None else None
+    if ctx is None or not profile_id or not isinstance(profile_id, str) or not profile_id.strip():
+        raise ValueError(
+            "Security violation: ToolContext with a non-empty 'profile_id' is required for list_email_drafts."
+        )
+    clean_profile_id = profile_id.strip()
+    category = args.get("category") if isinstance(args, dict) else None
+
+    session_factory = (
+        getattr(ctx, "session_factory", None)
+        or (ctx.extra.get("session_factory") if isinstance(getattr(ctx, "extra", None), dict) else None)
+        or get_session_factory()
+    )
+    async with session_factory() as session:
+        drafts = await list_email_drafts(session, profile_id=clean_profile_id, category=category)
+    return {"drafts": [serialize_email_draft(d) for d in drafts], "total": len(drafts)}
+
+
+async def execute_delete_email_draft(args: Dict[str, Any], ctx: Any = None) -> Dict[str, Any]:
+    """Tool executor (`risk_tier="write_local"`) for deleting a local email draft."""
+    profile_id = getattr(ctx, "profile_id", None) if ctx is not None else None
+    if ctx is None or not profile_id or not isinstance(profile_id, str) or not profile_id.strip():
+        raise ValueError(
+            "Security violation: ToolContext with a non-empty 'profile_id' is required for delete_email_draft."
+        )
+    clean_profile_id = profile_id.strip()
+
+    draft_id = str(args.get("id") or args.get("draft_id") or "").strip()
+    if not draft_id:
+        raise ValueError("Parameter 'id' or 'draft_id' is required for delete_email_draft.")
+
+    session_factory = (
+        getattr(ctx, "session_factory", None)
+        or (ctx.extra.get("session_factory") if isinstance(getattr(ctx, "extra", None), dict) else None)
+        or get_session_factory()
+    )
+    async with session_factory() as session:
+        deleted = await delete_email_draft(session, profile_id=clean_profile_id, draft_id=draft_id)
+
+    return {"id": draft_id, "deleted": deleted, "profile_id": clean_profile_id}
+
+
 __all__ = [
     "AUTOMATED_DRAFT_EMAIL_HEADER_NOTE",
     "NO_AUTO_SEND_NOTICE",
@@ -288,6 +332,8 @@ __all__ = [
     "create_email_draft",
     "delete_email_draft",
     "execute_create_email_draft",
+    "execute_list_email_drafts",
+    "execute_delete_email_draft",
     "export_draft_as_eml",
     "get_email_draft",
     "list_email_drafts",

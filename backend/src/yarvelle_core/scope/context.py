@@ -19,7 +19,8 @@ from dataclasses import dataclass, field
 from typing import Any, Collection, FrozenSet, Iterator, Optional, Set, Union
 
 DEFAULT_SCOPE = "health"
-DEFAULT_HEALTH_GRANTED_SCOPES: FrozenSet[str] = frozenset({"health", "health.*"})
+DEFAULT_GRANTED_SCOPES: FrozenSet[str] = frozenset({"core", "core.*", "*"})
+DEFAULT_HEALTH_GRANTED_SCOPES = DEFAULT_GRANTED_SCOPES  # Deprecated alias
 
 
 class ScopeError(Exception):
@@ -85,7 +86,7 @@ class ScopeContext:
     actor: Optional[str] = None
     pack_id: Optional[str] = None
     scope: str = DEFAULT_SCOPE
-    granted_scopes: FrozenSet[str] = field(default_factory=lambda: DEFAULT_HEALTH_GRANTED_SCOPES)
+    granted_scopes: FrozenSet[str] = field(default_factory=lambda: DEFAULT_GRANTED_SCOPES)
     active_scopes: FrozenSet[str] = field(default_factory=lambda: frozenset({DEFAULT_SCOPE}))
     pack_declared_scopes: FrozenSet[str] = field(
         default_factory=lambda: frozenset({DEFAULT_SCOPE, f"{DEFAULT_SCOPE}.*"})
@@ -125,11 +126,11 @@ def current_scope() -> str:
 
 
 def current_granted_scopes() -> Set[str]:
-    """Returns the set of active granted scopes (defaults to {'health', 'health.*'})."""
+    """Returns the set of active granted scopes (defaults to {'core', 'core.*', '*'})."""
     ctx = _CURRENT_SCOPE_CONTEXT.get()
     if ctx is not None:
         return set(ctx.granted_scopes)
-    return set(DEFAULT_HEALTH_GRANTED_SCOPES)
+    return set(DEFAULT_GRANTED_SCOPES)
 
 
 @contextmanager
@@ -150,7 +151,7 @@ def scope_context(
         else (
             frozenset({scope, f"{scope}.*"})
             if scope != DEFAULT_SCOPE
-            else DEFAULT_HEALTH_GRANTED_SCOPES
+            else DEFAULT_GRANTED_SCOPES
         )
     )
     actives = frozenset(active_scopes) if active_scopes is not None else frozenset({scope})
@@ -160,7 +161,7 @@ def scope_context(
         else (
             frozenset({scope, f"{scope}.*"})
             if scope != DEFAULT_SCOPE
-            else DEFAULT_HEALTH_GRANTED_SCOPES
+            else DEFAULT_GRANTED_SCOPES
         )
     )
     reads = frozenset(declared_reads) if declared_reads is not None else frozenset()
@@ -185,13 +186,14 @@ def scope_context(
 def require_scope(scope: str, level: str = "read") -> None:
     """Enforces that the current execution context holds the required scope."""
     ctx = _CURRENT_SCOPE_CONTEXT.get()
-    granted = set(ctx.granted_scopes) if ctx else set(DEFAULT_HEALTH_GRANTED_SCOPES)
+    granted = set(ctx.granted_scopes) if ctx else set(DEFAULT_GRANTED_SCOPES)
     if not is_scope_granted(scope, granted):
         raise ScopeAccessDeniedError(scope, granted)
 
 
 __all__ = [
     "DEFAULT_SCOPE",
+    "DEFAULT_GRANTED_SCOPES",
     "DEFAULT_HEALTH_GRANTED_SCOPES",
     "ScopeError",
     "ScopeAccessDeniedError",

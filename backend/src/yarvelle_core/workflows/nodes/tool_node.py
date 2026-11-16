@@ -38,11 +38,13 @@ from langgraph.types import interrupt
 from yarvelle_core.engine.untrusted_content import wrap_tool_output
 from yarvelle_core.audit.redaction import redact_tool_args
 from yarvelle_core.config import settings
-from yarvelle_core.constants.api import SSE_EVENT_APPROVAL_REQUIRED
+from yarvelle_core.constants.api import SSE_EVENT_APPROVAL_REQUIRED, SSE_EVENT_ENTITY_CHANGED
 from yarvelle_core.constants.agents import UNKNOWN_AGENT_ID
 from yarvelle_core.db.session import get_session_factory
 from yarvelle_core.db.models import Approval
 from yarvelle_core.logging import get_logger
+from yarvelle_core.schemas.events import build_entity_changed_payload
+from yarvelle_core.scope.context import DEFAULT_SCOPE, current_scope
 from yarvelle_core.tools.registry import CLOSED_TOOL_DEFINITIONS, TOOL_EXECUTORS
 from yarvelle_core.workflows.nodes.base import BaseNode
 
@@ -126,10 +128,16 @@ class ToolNode(BaseNode):
         agent_obj = None
         skills_list = []
         try:
+            from yarvelle_core.agents.sources import _default_allowed_tools
+
             agent_dir = find_agent_dir(ws_root / "agents", str(agent_id))
             if agent_dir is None:
                 raise LookupError(f"agent '{agent_id}' has no folder under {ws_root / 'agents'}")
-            agent_obj, _, skills_list = load_agent(agent_dir, skills_dir)
+            agent_obj, _, skills_list = load_agent(
+                agent_dir,
+                skills_dir,
+                allowed_tools=_default_allowed_tools(),
+            )
         except Exception:
             agent_obj = type("Agent", (), {"id": agent_id, "skills": []})()
 
@@ -455,6 +463,18 @@ class ToolNode(BaseNode):
                     dur_ms = round((time.time() - t0) * 1000, 2)
                     output_val = res.output if res.success else {"error": res.error}
                     status = "success" if res.success else "error"
+                    if res.success and getattr(spec, "risk_tier", "read") in ("write_local", "write_external", "irreversible"):
+                        entity_payload = build_entity_changed_payload(
+                            tool_name=name,
+                            args=effective_args,
+                            output=res.output,
+                            profile_id=getattr(ctx, "profile_id", None) or state.get("profile_id") or "default_profile",
+                            scope=str(getattr(ctx, "scope", None) or current_scope() or DEFAULT_SCOPE),
+                        )
+                        try:
+                            await adispatch_custom_event(SSE_EVENT_ENTITY_CHANGED, entity_payload)
+                        except Exception as exc:
+                            logger.debug("Failed to dispatch entity_changed event: %s", exc)
                 else:
                     dur_ms = 0.0
                     output_val = {"error": "Tool execution was rejected by user.", "rejected": True}
@@ -494,6 +514,18 @@ class ToolNode(BaseNode):
                     "audit_logged": True,
                 })
                 output_val = res.output if res.success else {"error": res.error}
+                if res.success and getattr(spec, "risk_tier", "read") in ("write_local", "write_external", "irreversible"):
+                    entity_payload = build_entity_changed_payload(
+                        tool_name=name,
+                        args=args,
+                        output=res.output,
+                        profile_id=getattr(ctx, "profile_id", None) or state.get("profile_id") or "default_profile",
+                        scope=str(getattr(ctx, "scope", None) or current_scope() or DEFAULT_SCOPE),
+                    )
+                    try:
+                        await adispatch_custom_event(SSE_EVENT_ENTITY_CHANGED, entity_payload)
+                    except Exception as exc:
+                        logger.debug("Failed to dispatch entity_changed event: %s", exc)
                 tool_messages.append(
                     ToolMessage(
                         content=wrap_tool_output(name, output_val, trust=getattr(spec, "trust", None)),

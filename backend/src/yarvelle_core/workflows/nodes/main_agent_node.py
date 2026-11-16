@@ -27,55 +27,198 @@ import json
 import logging
 from pathlib import Path
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.tools import StructuredTool
-from pydantic import BaseModel, Field, create_model
+from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from yarvelle_core.agents.registry import AgentRegistry
 from yarvelle_core.config import settings
-from yarvelle_core.constants.api import SSE_EVENT_ORCHESTRATION_NOTICE, SSE_EVENT_TASK_STATUS
+from yarvelle_core.constants.api import (
+    SSE_EVENT_ENTITY_CHANGED,
+    SSE_EVENT_ORCHESTRATION_NOTICE,
+    SSE_EVENT_TASK_STATUS,
+)
 from yarvelle_core.constants.paths import SKILLS_DIR
 from yarvelle_core.engine.orchestration.reminder import MainAgentReminder
 from yarvelle_core.engine.orchestration.runtime import MAIN_AGENT_ID, HybridRouter, ToolResolver, TurnTaskSink
 from yarvelle_core.engine.orchestration.task_guard import AuditSink, TaskStatusSink
+from yarvelle_core.schemas.events import build_entity_changed_payload
 from yarvelle_core.schemas.orchestration import PackOrchestrationSpec, RouteSource
 from yarvelle_core.schemas.tool_spec import RESERVED_TOOL_CONTEXT_PARAMS
+from yarvelle_core.scope.context import DEFAULT_SCOPE
 from yarvelle_core.constants.agents import expand_workspace_note_tools
 from yarvelle_core.workflows.nodes.base import BaseNode
 
 logger = logging.getLogger(__name__)
 
 
-def _json_schema_to_args_model(tool_name: str, parameters: Dict[str, Any]) -> type[BaseModel]:
-    """Builds a Pydantic args_schema model from a ToolSpec JSON Schema object."""
-    type_map: Dict[str, Any] = {
-        "string": str,
-        "integer": int,
-        "number": float,
-        "boolean": bool,
-        "array": List[Any],
-        "object": Dict[str, Any],
-    }
-    properties = parameters.get("properties") if isinstance(parameters, dict) else None
-    required_set = set(parameters.get("required") or []) if isinstance(parameters, dict) else set()
+_JSON_PRIMITIVE_TYPES: Dict[str, Any] = {
+    "string": str,
+    "integer": int,
+    "number": float,
+    "boolean": bool,
+    "array": List[Any],
+    "object": Dict[str, Any],
+}
+
+
+def _model_name_prefix(raw: str) -> str:
+    return "".join(part.capitalize() for part in re.split(r"[^a-zA-Z0-9]+", raw) if part) or "Tool"
+
+
+def _resolve_schema_node(
+    node: Dict[str, Any],
+    root_defs: Mapping[str, Any],
+    *,
+    seen_refs: Optional[set[str]] = None,
+) -> Tuple[Dict[str, Any], bool]:
+    """Resolves local $ref / anyOf / oneOf JSON Schema nodes into a concrete branch and nullable flag."""
+    if not isinstance(node, dict):
+        return {}, False
+    resolved = dict(node)
+    nullable = False
+    visited = set(seen_refs or ())
+
+    ref = resolved.get("$ref")
+    if isinstance(ref, str) and ref.startswith("#/") and ref not in visited:
+        visited.add(ref)
+        parts = ref[2:].split("/")
+        target: Any = {"$defs": root_defs, "definitions": root_defs}
+        for part in parts:
+            target = target.get(part) if isinstance(target, Mapping) else None
+        if isinstance(target, Mapping):
+            merged = dict(target)
+            for meta_key in ("description", "default", "title"):
+                if meta_key in resolved and meta_key not in merged:
+                    merged[meta_key] = resolved[meta_key]
+            sub_node, sub_nullable = _resolve_schema_node(merged, root_defs, seen_refs=visited)
+            return sub_node, nullable or sub_nullable
+
+    for union_key in ("anyOf", "oneOf"):
+        variants = resolved.get(union_key)
+        if isinstance(variants, list):
+            non_null: List[Dict[str, Any]] = []
+            for opt in variants:
+                if not isinstance(opt, dict):
+                    continue
+                if opt.get("type") == "null":
+                    nullable = True
+                    continue
+                non_null.append(opt)
+            if len(non_null) == 1:
+                branch, branch_nullable = _resolve_schema_node(non_null[0], root_defs, seen_refs=visited)
+                merged = dict(branch)
+                for meta_key in ("description", "default", "title"):
+                    if meta_key in resolved and not merged.get(meta_key):
+                        merged[meta_key] = resolved[meta_key]
+                return merged, nullable or branch_nullable
+            if len(non_null) > 1:
+                return resolved, nullable
+
+    if resolved.get("type") == "null":
+        nullable = True
+    return resolved, nullable
+
+
+def _schema_to_python_type(
+    field_name: str,
+    prop_schema: Dict[str, Any],
+    root_defs: Mapping[str, Any],
+    model_prefix: str,
+) -> Tuple[Any, Dict[str, Any], bool]:
+    """Converts a JSON Schema property node to a Python/Pydantic annotation plus resolved metadata."""
+    resolved, is_nullable = _resolve_schema_node(prop_schema, root_defs)
+
+    nested_props = resolved.get("properties")
+    if isinstance(nested_props, dict) and nested_props:
+        sub_prefix = f"{model_prefix}{_model_name_prefix(field_name)}"
+        sub_model = _build_args_model_from_object(sub_prefix, resolved, root_defs, extra="allow")
+        return sub_model, resolved, is_nullable
+
+    schema_type = resolved.get("type")
+    if schema_type == "array":
+        items = resolved.get("items")
+        if isinstance(items, dict):
+            item_type, _, _ = _schema_to_python_type(f"{field_name}Item", items, root_defs, model_prefix)
+            return List[item_type], resolved, is_nullable  # type: ignore[valid-type]
+        return List[Any], resolved, is_nullable
+
+    if isinstance(schema_type, str) and schema_type in _JSON_PRIMITIVE_TYPES:
+        return _JSON_PRIMITIVE_TYPES[schema_type], resolved, is_nullable
+
+    if "anyOf" in resolved or "oneOf" in resolved:
+        return Any, resolved, is_nullable
+
+    return str, resolved, is_nullable
+
+
+def _build_args_model_from_object(
+    model_prefix: str,
+    schema_obj: Dict[str, Any],
+    root_defs: Mapping[str, Any],
+    *,
+    extra: str = "ignore",
+) -> type[BaseModel]:
+    properties = schema_obj.get("properties") if isinstance(schema_obj, dict) else None
+    required_set = set(schema_obj.get("required") or []) if isinstance(schema_obj, dict) else set()
     fields: Dict[str, Any] = {}
     if isinstance(properties, dict):
-        for prop_name, prop_schema in properties.items():
-            if prop_name in RESERVED_TOOL_CONTEXT_PARAMS or not isinstance(prop_schema, dict):
+        for prop_name, raw_prop_schema in properties.items():
+            if prop_name in RESERVED_TOOL_CONTEXT_PARAMS or not isinstance(raw_prop_schema, dict):
                 continue
-            py_type = type_map.get(str(prop_schema.get("type", "string")), Any)
-            desc = str(prop_schema.get("description") or "")
-            if prop_name in required_set and "default" not in prop_schema:
-                fields[prop_name] = (py_type, Field(..., description=desc))
+            py_type, resolved_prop, is_nullable = _schema_to_python_type(
+                prop_name, raw_prop_schema, root_defs, model_prefix
+            )
+            desc = str(resolved_prop.get("description") or raw_prop_schema.get("description") or "")
+            has_default = "default" in raw_prop_schema or "default" in resolved_prop
+            default_val = raw_prop_schema.get("default", resolved_prop.get("default"))
+            field_key = prop_name
+            field_alias: Optional[str] = None
+            if prop_name.startswith("_"):
+                base_key = prop_name.lstrip("_") or "u"
+                field_key = f"p_{base_key}"
+                while field_key in fields:
+                    field_key = f"{field_key}_"
+                field_alias = prop_name
+            field_kwargs: Dict[str, Any] = {"description": desc}
+            if field_alias is not None:
+                field_kwargs["alias"] = field_alias
+            if prop_name in required_set and not has_default and not is_nullable:
+                fields[field_key] = (py_type, Field(..., **field_kwargs))
             else:
-                fields[prop_name] = (
+                fields[field_key] = (
                     Optional[py_type],
-                    Field(default=prop_schema.get("default"), description=desc),
+                    Field(default=default_val, **field_kwargs),
                 )
-    model_name = "".join(part.capitalize() for part in re.split(r"[^a-zA-Z0-9]+", tool_name) if part) or "Tool"
-    return create_model(f"{model_name}Args", **fields)
+    return create_model(
+        f"{model_prefix}Args",
+        __config__=ConfigDict(extra=extra, populate_by_name=True),
+        **fields,
+    )
+
+
+def _json_schema_to_args_model(tool_name: str, parameters: Dict[str, Any]) -> type[BaseModel]:
+    """Builds a Pydantic args_schema model from a ToolSpec JSON Schema object."""
+    root_defs: Dict[str, Any] = {}
+    if isinstance(parameters, dict):
+        for defs_key in ("$defs", "definitions"):
+            block = parameters.get(defs_key)
+            if isinstance(block, dict):
+                root_defs.update(block)
+    return _build_args_model_from_object(_model_name_prefix(tool_name), parameters or {}, root_defs)
+
+
+def _to_plain_value(value: Any) -> Any:
+    """Recursively converts nested Pydantic models into plain JSON-serializable dicts/lists."""
+    if isinstance(value, BaseModel):
+        return value.model_dump(exclude_none=True, by_alias=True)
+    if isinstance(value, list):
+        return [_to_plain_value(item) for item in value]
+    if isinstance(value, dict):
+        return {k: _to_plain_value(v) for k, v in value.items()}
+    return value
 
 
 async def _dispatch(name: str, payload: Dict[str, Any]) -> None:
@@ -137,12 +280,32 @@ class MainAgentNode(BaseNode):
         run_id = str(state.get("thread_id") or state.get("turn_id") or "run-1")
         autonomy = str(state.get("autonomy") or "A1")
         is_tainted = bool(state.get("is_tainted"))
-        default_reg = create_default_registry()
+        enabled_packs = state.get("enabled_packs")
+        default_reg = create_default_registry(enabled_packs=enabled_packs)
         app_store = SqlApprovalStore()
 
         def _resolve_for_subagent(agent_id: str, names: List[str]) -> List[Any]:
-            expanded = expand_workspace_note_tools(list(names))
             agent_obj = self.router.registry.get(agent_id)
+            effective_names = list(names)
+            db_toolset_name = state.get("db_toolset") or getattr(agent_obj, "db_toolset", None)
+            if db_toolset_name:
+                try:
+                    from yarvelle_core.tools.mcp_db_toolbox import get_db_toolbox
+
+                    toolbox = get_db_toolbox()
+                    if str(db_toolset_name) == "auto":
+                        dom = str(getattr(agent_obj, "domain", "general") or "general")
+                        rc = str(getattr(agent_obj, "risk_class", "assist") or "assist")
+                        toolset_tools = toolbox.get_toolset_for_domain(dom, rc)
+                    else:
+                        toolset_tools = toolbox.get_toolset(str(db_toolset_name))
+                    for t_name in toolset_tools:
+                        if t_name not in effective_names:
+                            effective_names.append(t_name)
+                except Exception as err:
+                    logger.debug("MCP DB toolset expansion skipped: %s", err)
+
+            expanded = expand_workspace_note_tools(effective_names)
             ctx = ToolContext(
                 user_id=user_id,
                 profile_id=profile_id,
@@ -170,7 +333,16 @@ class MainAgentNode(BaseNode):
 
                 def _make_tool(bound_spec: ToolSpec, bound_args_model: type[BaseModel]) -> StructuredTool:
                     async def _arun(**kwargs: Any) -> str:
-                        clean_args = {k: v for k, v in kwargs.items() if v is not None}
+                        model_fields = bound_args_model.model_fields
+                        clean_args = {
+                            (
+                                (model_fields[k].alias or k)
+                                if k in model_fields
+                                else k
+                            ): _to_plain_value(v)
+                            for k, v in kwargs.items()
+                            if v is not None
+                        }
                         res = await execute_tool_call(
                             ctx,
                             bound_spec,
@@ -178,6 +350,24 @@ class MainAgentNode(BaseNode):
                             approval_store=app_store,
                             agent_id=agent_id,
                         )
+                        if (
+                            res.success
+                            and getattr(bound_spec, "risk_tier", "read") in ("write_local", "write_external", "irreversible")
+                        ):
+                            entity_payload = build_entity_changed_payload(
+                                tool_name=bound_spec.name,
+                                args=clean_args,
+                                output=res.output,
+                                profile_id=profile_id,
+                                scope=str(getattr(ctx, "scope", DEFAULT_SCOPE)),
+                            )
+                            try:
+                                from langchain_core.callbacks.manager import adispatch_custom_event
+
+                                await adispatch_custom_event(SSE_EVENT_ENTITY_CHANGED, entity_payload)
+                            except Exception as exc:
+                                logger.debug("Failed to dispatch entity_changed event from subagent tool: %s", exc)
+
                         payload = res.output if res.success else {"error": res.error or "Tool execution failed."}
                         return payload if isinstance(payload, str) else json.dumps(payload, default=str)
 

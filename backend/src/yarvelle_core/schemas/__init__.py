@@ -45,6 +45,10 @@ from yarvelle_core.schemas.tool_spec import (
     ToolExecutionBinding,
     ToolSetManifest,
 )
+from yarvelle_core.schemas.events import (
+    EntityChangedPayload,
+    build_entity_changed_payload,
+)
 from yarvelle_core.schemas.audit import (
     AuditEventType,
     AuditEvent,
@@ -158,6 +162,8 @@ __all__ = [
     "RouteSource",
     "SSEOrchestrationNoticeEvent",
     "SSETaskStatusEvent",
+    "EntityChangedPayload",
+    "build_entity_changed_payload",
 ]
 
 

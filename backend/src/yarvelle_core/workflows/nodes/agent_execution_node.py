@@ -82,12 +82,69 @@ def _extract_tool_name(tool_obj: Any) -> str:
     return str(tool_obj)
 
 
+def _simplify_nullable_schema_for_llm(node: Any) -> Any:
+    """Flattens single-branch nullable `anyOf`/`oneOf` JSON Schema nodes into explicit `type` fields."""
+    if isinstance(node, list):
+        return [_simplify_nullable_schema_for_llm(item) for item in node]
+    if not isinstance(node, dict):
+        return node
+
+    out: Dict[str, Any] = {}
+    for key, val in node.items():
+        if key == "properties" and isinstance(val, dict):
+            out[key] = {
+                prop_k: _simplify_nullable_schema_for_llm(prop_v)
+                for prop_k, prop_v in val.items()
+            }
+        elif key in ("$defs", "definitions") and isinstance(val, dict):
+            out[key] = {
+                def_k: _simplify_nullable_schema_for_llm(def_v)
+                for def_k, def_v in val.items()
+            }
+        else:
+            out[key] = _simplify_nullable_schema_for_llm(val)
+
+    for union_key in ("anyOf", "oneOf"):
+        variants = out.get(union_key)
+        if isinstance(variants, list):
+            non_null = [
+                opt
+                for opt in variants
+                if isinstance(opt, dict) and opt.get("type") != "null"
+            ]
+            if len(non_null) == 1:
+                branch = non_null[0]
+                out.pop(union_key, None)
+                for b_key, b_val in branch.items():
+                    if b_key in ("description", "default", "enum") and b_key in out and out[b_key] is not None:
+                        continue
+                    if (
+                        b_key == "properties"
+                        and isinstance(b_val, dict)
+                        and isinstance(out.get("properties"), dict)
+                    ):
+                        out["properties"] = {**b_val, **out["properties"]}
+                    else:
+                        out[b_key] = b_val
+                break
+    return out
+
+
 def _serialize_tool_for_binding(tool_obj: Any) -> Any:
     """Serializes ToolSpec objects into OpenAI function definitions for model.bind_tools()."""
     to_def = getattr(tool_obj, "to_tool_definition", None)
-    if callable(to_def):
-        return to_def()
-    return tool_obj
+    raw_def = to_def() if callable(to_def) else tool_obj
+    if isinstance(raw_def, dict):
+        copied = dict(raw_def)
+        if isinstance(copied.get("parameters"), dict):
+            copied["parameters"] = _simplify_nullable_schema_for_llm(copied["parameters"])
+        if isinstance(copied.get("function"), dict):
+            fn_copy = dict(copied["function"])
+            if isinstance(fn_copy.get("parameters"), dict):
+                fn_copy["parameters"] = _simplify_nullable_schema_for_llm(fn_copy["parameters"])
+            copied["function"] = fn_copy
+        return copied
+    return raw_def
 
 
 def _describe_tool_for_fallback(tool_obj: Any) -> Dict[str, Any]:
@@ -106,11 +163,11 @@ def _describe_tool_for_fallback(tool_obj: Any) -> Dict[str, Any]:
     args_schema = getattr(serialized, "args_schema", None)
     if args_schema is not None and hasattr(args_schema, "model_json_schema"):
         try:
-            parameters = args_schema.model_json_schema()
+            parameters = _simplify_nullable_schema_for_llm(args_schema.model_json_schema())
         except Exception:
             parameters = {}
     elif isinstance(getattr(serialized, "parameters", None), dict):
-        parameters = dict(serialized.parameters)
+        parameters = _simplify_nullable_schema_for_llm(dict(serialized.parameters))
     return {"name": name, "description": description, "parameters": parameters}
 
 
@@ -211,6 +268,59 @@ def _normalize_fallback_call_entry(entry: Any, allowed_names: set[str]) -> Optio
     }
 
 
+def _repair_json_brackets(candidate: str) -> Optional[str]:
+    """Repairs missing closing `]`/`}` delimiters in malformed JSON without altering string literals."""
+    if not candidate:
+        return None
+    stack: List[str] = []
+    out: List[str] = []
+    in_string = False
+    escaped = False
+
+    for ch in candidate:
+        if in_string:
+            out.append(ch)
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+
+        if ch == '"':
+            in_string = True
+            out.append(ch)
+        elif ch == "{":
+            stack.append("}")
+            out.append(ch)
+        elif ch == "[":
+            stack.append("]")
+            out.append(ch)
+        elif ch in ("}", "]"):
+            if not stack:
+                return None
+            if stack[-1] == ch:
+                stack.pop()
+                out.append(ch)
+            elif ch in stack:
+                while stack and stack[-1] != ch:
+                    out.append(stack.pop())
+                if stack and stack[-1] == ch:
+                    stack.pop()
+                    out.append(ch)
+            else:
+                return None
+        else:
+            out.append(ch)
+
+    if in_string:
+        return None
+    while stack:
+        out.append(stack.pop())
+    return "".join(out)
+
+
 def _parse_fallback_tool_calls(content: str, allowed_names: set[str]) -> List[Dict[str, Any]]:
     """Extracts validated tool_calls from a plain-text fallback response."""
     if not content or "{" not in content or not allowed_names:
@@ -226,10 +336,16 @@ def _parse_fallback_tool_calls(content: str, allowed_names: set[str]) -> List[Di
         candidates.append(content[first_brace : last_brace + 1].strip())
 
     for candidate in candidates:
+        parsed: Any = None
         try:
             parsed = json.loads(candidate)
         except json.JSONDecodeError:
-            continue
+            repaired = _repair_json_brackets(candidate)
+            if repaired and repaired != candidate:
+                try:
+                    parsed = json.loads(repaired)
+                except json.JSONDecodeError:
+                    parsed = None
         if not isinstance(parsed, dict):
             continue
         if isinstance(parsed.get("tool_calls"), list):
@@ -689,7 +805,7 @@ class AgentExecutionNode(BaseNode):
             if default_reg is None:
                 from yarvelle_core.engine.tool_registry import create_default_registry
 
-                default_reg = create_default_registry()
+                default_reg = create_default_registry(enabled_packs=state.get("enabled_packs"))
             spec = default_reg.get(t_name)
             if spec is not None:
                 resolved.append(_serialize_tool_for_binding(spec))
@@ -724,9 +840,13 @@ class AgentExecutionNode(BaseNode):
             ws_agent_dir = Path(state["workspace_root"]) / "agents" / agent_id
             if ws_agent_dir.is_dir():
                 try:
+                    from yarvelle_core.agents.sources import _default_allowed_tools
+
                     ws_skills_dir = Path(state["workspace_root"]) / "skills"
                     manifest, eff_tools, _ = load_agent(
-                        ws_agent_dir, ws_skills_dir if ws_skills_dir.is_dir() else None
+                        ws_agent_dir,
+                        ws_skills_dir if ws_skills_dir.is_dir() else None,
+                        allowed_tools=_default_allowed_tools(),
                     )
                     if hasattr(self.registry, "_agents"):
                         self.registry._agents[agent_id] = manifest
@@ -988,6 +1108,71 @@ class AgentExecutionNode(BaseNode):
             response = AIMessage(content=str(response))
 
         tool_calls = getattr(response, "tool_calls", []) or []
+        if not tool_calls and not str(getattr(response, "content", "") or "").strip():
+            try:
+                can_retry_tools = bool(tools and iteration_count < max_tool_iterations)
+                retry_after_tool = bool(lc_messages and isinstance(lc_messages[-1], ToolMessage))
+                retry_source = list(lc_messages)
+                if can_retry_tools:
+                    retry_instructions = _format_fallback_tool_instructions(
+                        tools, after_tool_result=retry_after_tool
+                    )
+                    if retry_source and isinstance(retry_source[0], SystemMessage):
+                        base_sys = str(retry_source[0].content or "")
+                        retry_source[0] = SystemMessage(
+                            content=(
+                                f"{base_sys}\n\n{retry_instructions}"
+                                if base_sys
+                                else retry_instructions
+                            )
+                        )
+                    else:
+                        retry_source.insert(0, SystemMessage(content=retry_instructions))
+                rendered_retry = _render_messages_for_non_tool_model(
+                    retry_source, force_plain_text=not can_retry_tools
+                )
+                retry_resp = await _invoke_unbound_no_stream(raw_model, rendered_retry)
+                if not isinstance(retry_resp, BaseMessage):
+                    retry_resp = AIMessage(content=str(retry_resp))
+                retry_text = str(getattr(retry_resp, "content", "") or "")
+                parsed_retry_calls = (
+                    _parse_fallback_tool_calls(retry_text, set(effective_tool_names))
+                    if can_retry_tools and effective_tool_names
+                    else []
+                )
+                if parsed_retry_calls:
+                    novel_calls = parsed_retry_calls
+                    if retry_after_tool:
+                        done_sigs = _completed_turn_tool_signatures(lc_messages)
+                        novel_calls = [
+                            c
+                            for c in parsed_retry_calls
+                            if (
+                                c["name"],
+                                json.dumps(c.get("args") or {}, sort_keys=True, default=str),
+                            )
+                            not in done_sigs
+                        ]
+                    if novel_calls:
+                        response = AIMessage(content="", tool_calls=novel_calls)
+                        tool_calls = novel_calls
+                    else:
+                        plain_retry = await _invoke_unbound_no_stream(
+                            raw_model,
+                            _render_messages_for_non_tool_model(lc_messages, force_plain_text=True),
+                        )
+                        if not isinstance(plain_retry, BaseMessage):
+                            plain_retry = AIMessage(content=str(plain_retry))
+                        if str(getattr(plain_retry, "content", "") or "").strip():
+                            response = plain_retry
+                elif getattr(retry_resp, "tool_calls", None):
+                    response = retry_resp
+                    tool_calls = list(getattr(retry_resp, "tool_calls", None) or [])
+                elif retry_text.strip():
+                    response = retry_resp
+            except Exception as empty_retry_exc:
+                logger.debug("Empty-response unbound retry skipped: %s", empty_retry_exc)
+
         if tool_calls and iteration_count >= max_tool_iterations:
             tool_calls = []
             if not str(getattr(response, "content", "") or "").strip():

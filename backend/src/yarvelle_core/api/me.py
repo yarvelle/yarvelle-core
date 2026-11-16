@@ -34,7 +34,7 @@ from yarvelle_core.schemas.profiles import (
     ProfileUiPreferenceResponse,
     ProfileUiPreferenceUpdate,
 )
-from yarvelle_core.scope.context import DEFAULT_HEALTH_GRANTED_SCOPES
+from yarvelle_core.scope.context import DEFAULT_GRANTED_SCOPES
 
 router = APIRouter(route_class=ProblemDetailsRoute)
 
@@ -176,7 +176,7 @@ async def get_ui_context(
         scopes = sorted(list({g.scope for g in grants}))
     else:
         # Default fallback scopes
-        scopes = sorted(list(DEFAULT_HEALTH_GRANTED_SCOPES))
+        scopes = sorted(list(DEFAULT_GRANTED_SCOPES))
 
     # 2. Resolve UI preferences (hidden panels)
     pref_res = await db.execute(

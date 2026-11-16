@@ -15,6 +15,7 @@ export interface NoteItem {
   content: string;
   createdAt: string;
   updatedAt: string;
+  type?: string;
   tags?: string[];
   pinned?: boolean;
   authorId?: string;
@@ -24,4 +25,25 @@ export interface NoteFilterOption {
   id: string;
   label: string;
   count?: number;
+}
+
+export interface NoteEditorData {
+  title: string;
+  content: string;
+  type?: string;
+  tags?: string[];
+  pinned?: boolean;
+}
+
+export interface NoteEditorProps {
+  initialNote?: Partial<NoteItem> & { type?: string };
+  initialTitle?: string;
+  initialContent?: string;
+  initialType?: string;
+  initialTags?: string[];
+  initialPinned?: boolean;
+  onSave: (noteData: NoteEditorData) => Promise<void> | void;
+  onCancel?: () => void;
+  className?: string;
+  isSaving?: boolean;
 }

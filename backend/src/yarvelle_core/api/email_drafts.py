@@ -29,6 +29,8 @@ from yarvelle_core.auth.ports import UserProfile
 from yarvelle_core.errors import YarvelleError
 from yarvelle_core.platform.email_drafts import (
     NO_AUTO_SEND_NOTICE,
+    VALID_DRAFT_CATEGORIES,
+    _sanitize_header_value,
     build_mailto_uri,
     create_email_draft,
     delete_email_draft,
@@ -114,7 +116,16 @@ class CreateEmailDraftRequest(BaseModel):
     recipient: Optional[str] = Field(None, max_length=320, description="Optional recipient email address")
     subject: str = Field(..., min_length=1, max_length=500, description="Email subject line")
     body: str = Field(..., min_length=1, description="Email plaintext body")
-    category: str = Field("general", max_length=64, description="Draft category: appointment, school, insurance, general")
+    category: str = Field("general", max_length=64, description="Draft category: appointment, school, inquiry, administrative, general")
+
+
+class UpdateEmailDraftRequest(BaseModel):
+    """Request schema for updating a local-only email draft (AU-60)."""
+
+    recipient: Optional[str] = Field(None, max_length=320, description="Optional recipient email address")
+    subject: Optional[str] = Field(None, min_length=1, max_length=500, description="Email subject line")
+    body: Optional[str] = Field(None, min_length=1, description="Email plaintext body")
+    category: Optional[str] = Field(None, max_length=64, description="Draft category")
 
 
 class StageGmailRequest(BaseModel):
@@ -274,6 +285,50 @@ async def get_profile_email_draft_eml(
         "auto_send": False,
         "notice": NO_AUTO_SEND_NOTICE,
     }
+
+
+@router.patch(
+    "/profiles/{profile_id}/email-drafts/{draft_id}",
+    summary="Partially update a local email draft",
+)
+async def patch_profile_email_draft(
+    profile_id: str,
+    draft_id: str,
+    payload: UpdateEmailDraftRequest,
+    profile: Profile = Depends(require_profile_access("manage")),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    """Partially updates a local `EmailDraft` row."""
+    draft = await get_email_draft(db, profile_id=profile.id, draft_id=draft_id)
+    if draft is None:
+        raise YarvelleError(
+            "YRV-500-010",
+            context={"draft_id": draft_id, "profile_id": profile.id},
+        )
+    if payload.recipient is not None:
+        draft.recipient = _sanitize_header_value(payload.recipient) or None
+    if payload.subject is not None:
+        clean_sub = _sanitize_header_value(payload.subject)
+        if clean_sub:
+            draft.subject = clean_sub[:500]
+    if payload.body is not None:
+        clean_body = str(payload.body).strip()
+        if clean_body:
+            draft.body = clean_body
+    if payload.category is not None:
+        clean_cat = payload.category.strip().lower()
+        if clean_cat not in VALID_DRAFT_CATEGORIES:
+            raise YarvelleError(
+                "YRV-100-003",
+                context={"category": payload.category},
+                detail=f"Invalid draft category '{payload.category}'. Must be one of: {sorted(VALID_DRAFT_CATEGORIES)}",
+            )
+        draft.category = clean_cat
+    draft.updated_at = utc_now()
+    await db.commit()
+    await db.refresh(draft)
+    return serialize_email_draft(draft)
+
 
 
 @router.delete(

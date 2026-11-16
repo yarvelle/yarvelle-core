@@ -33,7 +33,7 @@ import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Union
 
 from yarvelle_core.agents.errors import AgentNotFoundError, DuplicateAgentError
 from yarvelle_core.agents.sources import (
@@ -126,7 +126,20 @@ def _model_string(model: Any) -> Optional[str]:
 def _tool_definitions(_manifest: AgentManifest, tool_names: List[str]) -> List[Any]:
     from yarvelle_core.tools.registry import CLOSED_TOOL_DEFINITIONS
 
-    return [CLOSED_TOOL_DEFINITIONS[t] for t in tool_names if t in CLOSED_TOOL_DEFINITIONS]
+    definitions: List[Any] = []
+    default_reg = None
+    for t in tool_names:
+        if t in CLOSED_TOOL_DEFINITIONS:
+            definitions.append(CLOSED_TOOL_DEFINITIONS[t])
+            continue
+        if default_reg is None:
+            from yarvelle_core.engine.tool_registry import create_default_registry
+
+            default_reg = create_default_registry()
+        spec = default_reg.get(t)
+        if spec is not None:
+            definitions.append(spec.to_tool_definition())
+    return definitions
 
 
 class AgentRegistry:
@@ -141,12 +154,20 @@ class AgentRegistry:
         db_source: Optional[DbAgentSource] = None,
         tool_resolver: Optional[ToolResolver] = None,
         middleware_factory: Optional[MiddlewareFactory] = None,
+        allowed_tools: Optional[Iterable[str]] = None,
     ) -> None:
         self._agents_dir = Path(agents_dir).resolve() if agents_dir else None
         self._skills_dir = Path(skills_dir).resolve() if skills_dir else None
+        self._allowed_tools: Optional[Set[str]] = set(allowed_tools) if allowed_tools is not None else None
         file_sources: List[AgentSource] = []
         if self._agents_dir is not None:
-            file_sources.append(FilesystemAgentSource(self._agents_dir, self._skills_dir))
+            file_sources.append(
+                FilesystemAgentSource(
+                    self._agents_dir,
+                    self._skills_dir,
+                    allowed_tools=self._allowed_tools,
+                )
+            )
         file_sources.extend(sources or [])
         self._sources: List[AgentSource] = file_sources
         self._db_source = db_source
@@ -210,7 +231,10 @@ class AgentRegistry:
     def set_db_rows(self, rows: Sequence[Any]) -> None:
         """Replaces the stored-agent snapshot and reloads the catalog."""
         if self._db_source is None:
-            self._db_source = DbAgentSource(skills_dir=self._skills_dir)
+            self._db_source = DbAgentSource(
+                skills_dir=self._skills_dir,
+                allowed_tools=self._allowed_tools,
+            )
         self._db_source.set_rows(rows)
         self.reload()
 

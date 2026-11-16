@@ -24,6 +24,7 @@ import type {
   ChatMessage,
   ChatAttachment,
   ChatSlotHooks,
+  EntityChangedEvent,
 } from './types.js';
 
 interface ChatContextValue {
@@ -33,6 +34,7 @@ interface ChatContextValue {
   activeAttachments: ChatAttachment[];
   setActiveAttachments: React.Dispatch<React.SetStateAction<ChatAttachment[]>>;
   slotHooks?: ChatSlotHooks;
+  onEntityChanged?: (event: EntityChangedEvent) => void;
 }
 
 const ChatContext = React.createContext<ChatContextValue | null>(null);
@@ -51,6 +53,7 @@ export interface ChatRootProps {
   slotHooks?: ChatSlotHooks;
   children: React.ReactNode;
   className?: string;
+  onEntityChanged?: (event: EntityChangedEvent) => void;
 }
 
 export function ChatRoot({
@@ -60,6 +63,7 @@ export function ChatRoot({
   slotHooks,
   children,
   className,
+  onEntityChanged,
 }: ChatRootProps) {
   const [activeAttachments, setActiveAttachments] = React.useState<ChatAttachment[]>([]);
 
@@ -72,6 +76,7 @@ export function ChatRoot({
         activeAttachments,
         setActiveAttachments,
         slotHooks,
+        onEntityChanged,
       }}
     >
       <div

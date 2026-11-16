@@ -135,6 +135,53 @@ tools:
       kind: handler
       entrypoint: yarvelle_core.tools.builtin_handlers:exec_create_email_draft
 
+  - name: list_email_drafts
+    category: email
+    risk_tier: read
+    trust: trusted
+    data_sensitivity: restricted
+    context_params: [profile_id, user_id, scope]
+    description: >-
+      List local email drafts prepared for user review.
+    input_schema:
+      type: object
+      properties:
+        category:
+          type: string
+          description: Optional category filter.
+    metadata:
+      action: list_email_drafts
+      entity: email_draft
+      risk: read
+    binding:
+      kind: handler
+      entrypoint: yarvelle_core.tools.builtin_handlers:exec_list_email_drafts
+
+  - name: delete_email_draft
+    category: email
+    risk_tier: write_local
+    trust: trusted
+    data_sensitivity: restricted
+    context_params: [profile_id, user_id, scope]
+    description: >-
+      Delete an existing local email draft.
+    input_schema:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Unique email draft identifier.
+      required:
+        - id
+    metadata:
+      action: delete_email_draft
+      entity: email_draft
+      undoable: true
+      risk: write_local
+    binding:
+      kind: handler
+      entrypoint: yarvelle_core.tools.builtin_handlers:exec_delete_email_draft
+
   - name: gmail_list_messages
     category: email
     risk_tier: read
