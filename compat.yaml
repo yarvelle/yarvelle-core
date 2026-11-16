@@ -2,12 +2,20 @@
 # Defines supported pairings of core, @yarvelle/ui, and pack_api versions.
 
 matrix:
+  - core: "0.2.6"
+    ui: "0.2.6"
+    pack_api: 1
+    python: ">=3.12"
+    node: ">=20.0.0"
+    status: "active"
+    notes: "Dynamic ToolSpecRegistry pack tool validation, governed workspace-note MCP and profile-scoped REST CRUD, NoteEditor and Calendar CRUD controls in @yarvelle/ui, entity_changed SSE live invalidation, multi-turn continuity and streaming polish"
+
   - core: "0.2.5"
     ui: "0.2.5"
     pack_api: 1
     python: ">=3.12"
     node: ">=20.0.0"
-    status: "active"
+    status: "supported"
     notes: "Declarative yarvelle.tools/v1 tool specs, immutable YRV-XXX-YYY error taxonomy with RFC 7807 Problem Details, domain-neutral runtime identifiers and Handlebars prompts, bounded reminder/connection/audit queries, and @yarvelle/ui Tailwind preset/content-glob fixes"
 
   - core: "0.2.4"

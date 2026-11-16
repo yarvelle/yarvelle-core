@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.6] - 2026-11-16
+
+This release introduces governed workspace-note MCP and profile-scoped REST CRUD, dynamic `ToolSpecRegistry` pack tool validation, `entity_changed` SSE live invalidation (`yarvelle_core.schemas.events`), core routines/reminders/email-drafts CRUD parity, `NoteEditor` and `Calendar` CRUD controls in `@yarvelle/ui` 0.2.6, and multi-turn streaming/fallback hardening. `pack_api` stays 1.
+
+### Added
+- **Governed workspace-note MCP CRUD tools and structured JSON fallback** (#63). Added `create_workspace_note`, `get_workspace_note`, `list_workspace_notes`, `update_workspace_note`, `delete_workspace_note`, and `upsert_workspace_note` with database-backed storage and structured JSON fallback parsing in `AgentExecutionNode` for models without native `bind_tools`.
+- **Dynamic `ToolSpecRegistry` pack tool validation & LLM schema hardening** (#64, #68). Replaced static Phase 0 allowlists across `FilesystemAgentSource`, `DbAgentSource`, and `AgentRegistry` with dynamic `ToolSpecRegistry` validation (`normalize_enabled_pack_ids` accepts both pack ID slugs and `PackSpec` instances), added single-branch nullable `anyOf`/`oneOf` flattening for LLM tool binding, added missing-delimiter JSON bracket repair for fallback calls, and added a single unbound retry when bound models return empty toolless responses.
+- **Profile-scoped workspace notes REST API & `@yarvelle/ui` `NoteEditor`** (#65, #68). Added `Note.pinned` with Alembic migration `0015_add_notes_pinned`, profile- and scope-isolated `/api/v1/profiles/{profile_id}/notes` CRUD endpoints, and token-pure `NoteEditor` and interactive `NotesList` components in `@yarvelle/ui` 0.2.6.
+- **`entity_changed` SSE live invalidation & subagent schema enhancement** (#66, #68). Added `EntityChangedPayload` and `build_entity_changed_payload` in `yarvelle_core.schemas.events`, emitted and forwarded `entity_changed` custom stream events from `ToolNode` and `MainAgentNode` through `AgentExecutionService` into `ChatConnected` (`onEntityChanged`), and extended `_json_schema_to_args_model` for `$ref`, nullable unions, nested object models, and leading-underscore parameter aliases.
+- **Core entity CRUD parity & `Calendar` UI controls** (#67, #68). Completed REST and MCP CRUD parity across core routines, reminders, and email drafts, and added create, edit, and delete controls to `Calendar` in `@yarvelle/ui` 0.2.6.
+
+### Fixed
+- **Multi-turn state continuity, safety preambles, and grounded `skill-docs` reads** (#62). Preserved thread state continuity across turns, assembled dynamic safety preambles cleanly, refined follow-up routing, and grounded `skill-docs` reference reads.
+- **Multi-step streaming resets & Markdown formatting** (#61). Reset pre-tool stream text before post-tool synthesis, restricted `_without_footer` matching to canonical/guardrail footers, stripped middle disclaimers, and preserved leading bold Markdown formatting.
+- **Domain-neutral `/api/v1/me` cleanup** (#67, #68). Removed residual domain-specific wording from `api/me.py`.
+
+### Upgrade Notes
+- **Database schema (#65):** Alembic revision `0015_add_notes_pinned` adds `notes.pinned`. It applies automatically when `init_db()` or `alembic upgrade head` runs.
+- **Live query invalidation (#66):** Host UIs rendering `ChatConnected` can subscribe to `onEntityChanged` to invalidate domain queries whenever a tool mutates data.
+
 ## [0.2.5] - 2026-11-12
 
 This release adds declarative tool specifications (`yarvelle.tools/v1`), an immutable `YRV-XXX-YYY` error taxonomy with RFC 7807 Problem Details and MCP JSON-RPC mapping, domain-neutral runtime identifiers with overridable Handlebars prompt templates, bounded API and audit query paths, and Tailwind preset/content-scan fixes in `@yarvelle/ui` 0.2.5. `pack_api` stays 1.
