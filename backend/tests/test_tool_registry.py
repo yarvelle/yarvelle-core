@@ -55,10 +55,10 @@ def test_toolspec_registry_registration_and_filtering():
     assert t2 in tools_finance
 
 
-def test_core_builtin_specs_contains_24_tools():
-    """Verify core defines exactly the 24 generic tool specs."""
+def test_core_builtin_specs_contains_28_tools():
+    """Verify core defines exactly the 28 generic tool specs."""
     specs = _make_core_builtin_specs()
-    assert len(specs) == 24
+    assert len(specs) == 28
     names = {s.name for s in specs}
     assert "attach-read" in names
     assert "workspace-note" in names
@@ -67,3 +67,7 @@ def test_core_builtin_specs_contains_24_tools():
     assert "skill-docs" in names or "skill_docs" in names
     assert "create_reminder" in names
     assert "list_reminders" in names
+    assert "update_reminder" in names
+    assert "delete_reminder" in names
+    assert "list_email_drafts" in names
+    assert "delete_email_draft" in names
