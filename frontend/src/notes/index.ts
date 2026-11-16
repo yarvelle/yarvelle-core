@@ -13,3 +13,5 @@ export * from './types.js';
 export * from './RecordSearch.js';
 export * from './NotesList.js';
 export * from './NoteView.js';
+export * from './NoteEditor.js';
+

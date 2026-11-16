@@ -156,3 +156,25 @@ export interface ChatSlotHooks {
   messageRenderer?: (message: ChatMessage) => React.ReactNode;
 }
 
+export interface EntityChangedEvent {
+  type: 'entity_changed';
+  entity_type: string;
+  entity: string;
+  entity_id: string;
+  record_id: string;
+  action: 'created' | 'updated' | 'deleted' | string;
+  profile_id: string;
+  scope: string;
+  tool: string;
+  timestamp: string;
+}
+
+export interface ChatProps {
+  threadId?: string;
+  messages?: ChatMessage[];
+  onSendMessage?: (content: string, attachments?: ChatAttachment[]) => Promise<void> | void;
+  loading?: boolean;
+  onEntityChanged?: (event: EntityChangedEvent) => void;
+  className?: string;
+}
+

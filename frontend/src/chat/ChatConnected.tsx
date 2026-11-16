@@ -11,7 +11,8 @@
 
 import * as React from 'react';
 import { Chat, ChatRoot, ChatThread, ChatComposer } from './Chat.js';
-import type { ChatMessage, ChatAttachment, ChatSlotHooks } from './types.js';
+import type { ChatMessage, ChatAttachment, ChatSlotHooks, EntityChangedEvent } from './types.js';
+import { parseSseChunk } from '../lib/sse/index.js';
 
 export interface ChatConnectedProps {
   threadId: string;
@@ -19,6 +20,7 @@ export interface ChatConnectedProps {
   slotHooks?: ChatSlotHooks;
   className?: string;
   onMessageSent?: (msg: ChatMessage) => void;
+  onEntityChanged?: (event: EntityChangedEvent) => void;
 }
 
 export function ChatConnected({
@@ -27,6 +29,7 @@ export function ChatConnected({
   slotHooks,
   className,
   onMessageSent,
+  onEntityChanged,
 }: ChatConnectedProps) {
   const [messages, setMessages] = React.useState<ChatMessage[]>(initialMessages);
   const [loading, setLoading] = React.useState(false);
@@ -55,18 +58,73 @@ export function ChatConnected({
         throw new Error(`Server returned status ${res.status}`);
       }
 
-      const data = await res.json();
-      const assistantMessage: ChatMessage = {
-        id: data.id || Math.random().toString(36).substring(2, 9),
-        role: 'assistant',
-        content: data.content || data.reply || '',
-        createdAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        toolTraces: data.toolTraces,
-        executionPlan: data.executionPlan,
-        approval: data.approval,
-      };
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('event-stream') && res.body) {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let assistantContent = '';
+        let toolTraces: any[] | undefined = undefined;
+        let executionPlan: any[] | undefined = undefined;
+        let approval: any = undefined;
 
-      setMessages((prev) => [...prev, assistantMessage]);
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value, { stream: true });
+          const parsed = parseSseChunk(chunk, buffer);
+          buffer = parsed.remainingBuffer;
+
+          for (const ev of parsed.events) {
+            try {
+              const evData = JSON.parse(ev.data);
+              if (ev.event === 'token' || evData.type === 'token') {
+                assistantContent += (evData.delta || '');
+              } else if (ev.event === 'entity_changed' || evData.type === 'entity_changed') {
+                onEntityChanged?.(evData as EntityChangedEvent);
+              } else if (ev.event === 'approval_required' || evData.type === 'approval_required') {
+                approval = evData;
+              }
+            } catch {
+              // Non-JSON SSE event data
+            }
+          }
+        }
+
+        const assistantMessage: ChatMessage = {
+          id: Math.random().toString(36).substring(2, 9),
+          role: 'assistant',
+          content: assistantContent,
+          createdAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          toolTraces,
+          executionPlan,
+          approval,
+        };
+
+        setMessages((prev) => [...prev, assistantMessage]);
+      } else {
+        const data = await res.json();
+        if (data.entityChanged && onEntityChanged) {
+          onEntityChanged(data.entityChanged);
+        } else if (Array.isArray(data.events) && onEntityChanged) {
+          for (const ev of data.events) {
+            if (ev.type === 'entity_changed') {
+              onEntityChanged(ev);
+            }
+          }
+        }
+        const assistantMessage: ChatMessage = {
+          id: data.id || Math.random().toString(36).substring(2, 9),
+          role: 'assistant',
+          content: data.content || data.reply || '',
+          createdAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          toolTraces: data.toolTraces,
+          executionPlan: data.executionPlan,
+          approval: data.approval,
+        };
+
+        setMessages((prev) => [...prev, assistantMessage]);
+      }
     } catch (err) {
       console.error('Failed to send message:', err);
       const errorMessage: ChatMessage = {
@@ -89,6 +147,7 @@ export function ChatConnected({
       loading={loading}
       slotHooks={slotHooks}
       className={className}
+      onEntityChanged={onEntityChanged}
     >
       <ChatThread />
       <ChatComposer />
