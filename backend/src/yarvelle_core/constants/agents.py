@@ -17,7 +17,7 @@ execution defaults, eliminating hardcoded string literals across runtime nodes.
 
 from __future__ import annotations
 
-from typing import FrozenSet
+from typing import FrozenSet, List, Sequence, Set, Tuple
 
 # ============================================================================
 # 1. Agent Identifiers
@@ -93,6 +93,8 @@ EXPANDED_PHASE_0_REGISTRY: FrozenSet[str] = frozenset({
     "db_inspect_schema",
     "db_execute_query",
     "db_mutate_records",
+    "create_workspace_note",
+    "update_workspace_note",
     "upsert_workspace_note",
     "list_workspace_notes",
     "get_workspace_note",
@@ -103,6 +105,34 @@ EXPANDED_PHASE_0_REGISTRY: FrozenSet[str] = frozenset({
     "create_email_draft_record",
     "list_email_draft_records",
 })
+
+WORKSPACE_NOTE_MCP_TOOLS: Tuple[str, ...] = (
+    "create_workspace_note",
+    "get_workspace_note",
+    "list_workspace_notes",
+    "update_workspace_note",
+    "delete_workspace_note",
+    "upsert_workspace_note",
+)
+_WORKSPACE_NOTE_MCP_SET: Set[str] = set(WORKSPACE_NOTE_MCP_TOOLS)
+
+
+def expand_workspace_note_tools(tool_names: Sequence[str]) -> List[str]:
+    """Expands `workspace-note` or any note MCP tool into the full note CRUD tool suite.
+
+    Strictly preserves agents that declare zero note tools (returns `tool_names`
+    unchanged when neither `workspace-note` nor any `*_workspace_note*` tool is present).
+    """
+    existing = [str(t).strip() for t in tool_names if str(t).strip()]
+    present = set(existing)
+    if "workspace-note" not in present and not (present & _WORKSPACE_NOTE_MCP_SET):
+        return existing
+    expanded = list(existing)
+    for mcp_tool in WORKSPACE_NOTE_MCP_TOOLS:
+        if mcp_tool not in present:
+            expanded.append(mcp_tool)
+            present.add(mcp_tool)
+    return expanded
 
 
 # ============================================================================
@@ -155,4 +185,6 @@ __all__ = [
     "TOOL_VALIDATE_GROUNDING",
     "TOOL_WORKSPACE_NOTE",
     "UNKNOWN_AGENT_ID",
+    "WORKSPACE_NOTE_MCP_TOOLS",
+    "expand_workspace_note_tools",
 ]

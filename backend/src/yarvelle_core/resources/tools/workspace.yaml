@@ -41,10 +41,10 @@ tools:
     phase_0_closed: true
     context_params: [profile_id, user_id, scope]
     description: >-
-      Save a new markdown note into the workspace notes directory and return its saved
-      relative and absolute paths. Only use this when explicitly asked to record, save,
-      or write a note. Do NOT call this tool when the user is merely asking questions
-      about existing notes, their locations, or their file paths.
+      Save a markdown note into the workspace notes directory and persist it to the
+      profile's workspace notes database. Prefer create_workspace_note, get_workspace_note,
+      list_workspace_notes, update_workspace_note, and delete_workspace_note for
+      structured note management. Only call this when asked to record, save, or write a note.
     input_schema:
       type: object
       properties:
@@ -60,6 +60,208 @@ tools:
     binding:
       kind: handler
       entrypoint: yarvelle_core.tools.builtin_handlers:exec_workspace_note
+
+  - name: create_workspace_note
+    category: workspace
+    risk_tier: write_local
+    trust: trusted
+    data_sensitivity: internal
+    phase_0_closed: false
+    context_params: [profile_id, user_id, scope]
+    description: >-
+      Create a new persistent workspace note in the database for the active profile.
+      Automatically generates a unique URL-safe slug from the title if slug is omitted.
+    input_schema:
+      type: object
+      properties:
+        title:
+          type: string
+          description: Human-readable title of the workspace note.
+        content:
+          type: string
+          description: Markdown body content of the workspace note.
+        slug:
+          type: string
+          description: Optional URL-safe identifier (auto-derived from title if omitted, with collision suffixing).
+        type:
+          type: string
+          description: Note category ('general', 'summary', 'checklist', 'scratchpad', 'prep').
+        tags_json:
+          type: string
+          description: JSON array string of taxonomy tags (e.g. '["summary", "action-items"]').
+        linked_appointment_id:
+          type: string
+          description: Optional linked entity or event UUID.
+      required:
+        - title
+        - content
+    binding:
+      kind: handler
+      entrypoint: yarvelle_core.tools.builtin_handlers:exec_create_workspace_note
+
+  - name: get_workspace_note
+    category: workspace
+    risk_tier: read
+    trust: trusted
+    data_sensitivity: internal
+    phase_0_closed: false
+    context_params: [profile_id, user_id, scope]
+    description: >-
+      Retrieve the full markdown content and metadata of a specific saved workspace note by note_id or slug.
+    input_schema:
+      type: object
+      properties:
+        note_id:
+          type: string
+          description: Exact UUID of the saved note.
+        slug:
+          type: string
+          description: URL-safe slug of the saved note (used when note_id is omitted).
+        identifier:
+          type: string
+          description: Legacy alias matching either note_id or slug.
+    binding:
+      kind: handler
+      entrypoint: yarvelle_core.tools.builtin_handlers:exec_get_workspace_note
+
+  - name: list_workspace_notes
+    category: workspace
+    risk_tier: read
+    trust: trusted
+    data_sensitivity: internal
+    phase_0_closed: false
+    context_params: [profile_id, user_id, scope]
+    description: >-
+      List saved workspace notes for the active profile, ordered by most recently
+      updated, with optional type, tag, or keyword query filters.
+    input_schema:
+      type: object
+      properties:
+        type:
+          type: string
+          description: Optional note category filter ('scratchpad', 'prep', 'summary', 'general', 'checklist').
+        tag:
+          type: string
+          description: Optional tag filter matched against the note's tags list.
+        query:
+          type: string
+          description: Optional case-insensitive search term matching title, content, or slug.
+        limit:
+          type: integer
+          description: Maximum number of notes to return (1 to 100).
+        offset:
+          type: integer
+          description: Zero-based pagination offset.
+    binding:
+      kind: handler
+      entrypoint: yarvelle_core.tools.builtin_handlers:exec_list_workspace_notes
+
+  - name: update_workspace_note
+    category: workspace
+    risk_tier: write_local
+    trust: trusted
+    data_sensitivity: internal
+    phase_0_closed: false
+    context_params: [profile_id, user_id, scope]
+    description: >-
+      Update an existing persistent workspace note identified by note_id or slug.
+      Performs a partial update: any omitted field preserves its existing saved value.
+    input_schema:
+      type: object
+      properties:
+        note_id:
+          type: string
+          description: Exact UUID of the saved note to update (provide note_id or slug).
+        slug:
+          type: string
+          description: Current URL-safe slug of the saved note to update (used if note_id is omitted).
+        identifier:
+          type: string
+          description: Legacy alias matching either note_id or slug.
+        new_slug:
+          type: string
+          description: Optional new URL-safe slug when renaming the note identifier.
+        title:
+          type: string
+          description: Updated title for the note.
+        content:
+          type: string
+          description: Updated markdown body content for the note.
+        type:
+          type: string
+          description: Updated note category ('general', 'summary', 'checklist', 'scratchpad', 'prep').
+        tags_json:
+          type: string
+          description: Updated JSON array string of tags.
+        linked_appointment_id:
+          type: string
+          description: Updated linked entity or event UUID.
+    binding:
+      kind: handler
+      entrypoint: yarvelle_core.tools.builtin_handlers:exec_update_workspace_note
+
+  - name: delete_workspace_note
+    category: workspace
+    risk_tier: write_local
+    trust: trusted
+    data_sensitivity: internal
+    phase_0_closed: false
+    context_params: [profile_id, user_id, scope]
+    description: >-
+      Delete a saved workspace note belonging to the active profile by note_id or slug.
+    input_schema:
+      type: object
+      properties:
+        note_id:
+          type: string
+          description: Exact UUID of the saved note to delete.
+        slug:
+          type: string
+          description: URL-safe slug of the saved note to delete (used when note_id is omitted).
+        identifier:
+          type: string
+          description: Legacy alias matching either note_id or slug.
+    binding:
+      kind: handler
+      entrypoint: yarvelle_core.tools.builtin_handlers:exec_delete_workspace_note
+
+  - name: upsert_workspace_note
+    category: workspace
+    risk_tier: write_local
+    trust: trusted
+    data_sensitivity: internal
+    phase_0_closed: false
+    context_params: [profile_id, user_id, scope]
+    description: >-
+      Create or update a profile-scoped workspace note, checklist, or structured
+      markdown summary in the notes table.
+    input_schema:
+      type: object
+      properties:
+        title:
+          type: string
+          description: Human-readable title of the note.
+        content:
+          type: string
+          description: Markdown body of the note.
+        slug:
+          type: string
+          description: Unique URL-safe slug identifier for the note (auto-derived from title if omitted).
+        type:
+          type: string
+          description: Note category ('scratchpad', 'prep', 'summary', 'general').
+        tags_json:
+          type: string
+          description: JSON array string of taxonomy tags (e.g. '["planning", "q4"]').
+        linked_appointment_id:
+          type: string
+          description: Optional linked entity or event UUID.
+      required:
+        - title
+        - content
+    binding:
+      kind: handler
+      entrypoint: yarvelle_core.tools.builtin_handlers:exec_upsert_workspace_note
 
   - name: skill-docs
     category: workspace

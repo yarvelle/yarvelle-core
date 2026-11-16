@@ -18,10 +18,11 @@ Prevents directory traversal, protects against symlink overwriting, and formats 
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import logging
 import os
 from pathlib import Path
 import re
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from yarvelle_core.constants.defaults import (
     DEFAULT_NOTE_AGENT_ID,
@@ -34,7 +35,10 @@ from yarvelle_core.constants.paths import (
     WORKSPACE_NOTES_DIR,
 )
 from yarvelle_core.schemas.tool import ToolResult
+from yarvelle_core.scope.context import DEFAULT_SCOPE, current_scope
 from yarvelle_core.tools.sandbox import SandboxSecurityError, resolve_sandboxed_path
+
+logger = logging.getLogger(__name__)
 
 
 async def execute_workspace_note(params: Dict[str, Any], context: Any) -> ToolResult:
@@ -112,7 +116,8 @@ async def execute_workspace_note(params: Dict[str, Any], context: Any) -> ToolRe
 
         target_path.write_text(frontmatter, encoding="utf-8")
 
-        # Also persist into relational database (yarvelle_core.db -> notes table) when not in an isolated test tmp_path
+        # Also persist into relational database via McpDatabaseToolbox when not in an isolated test tmp_path
+        db_note_id: Optional[str] = None
         is_isolated_test_workspace = bool(
             ws_root
             and not (Path(ws_root) / "backend").is_dir()
@@ -120,96 +125,46 @@ async def execute_workspace_note(params: Dict[str, Any], context: Any) -> ToolRe
         )
         if not is_isolated_test_workspace:
             try:
-                import hashlib
-                import json
-                import uuid
-                from sqlalchemy import select
-                from yarvelle_core.db.models import Job, Note, Profile
-                from yarvelle_core.db.session import get_session_factory
+                from yarvelle_core.tools.mcp_db_toolbox import get_db_toolbox
 
                 ctx_user_id = getattr(context, "user_id", None) if context is not None else None
                 ctx_profile_id = getattr(context, "profile_id", None) if context is not None else None
-                if ctx_user_id in ("default_user", ""):
-                    ctx_user_id = None
-                if ctx_profile_id in ("default_profile", ""):
-                    ctx_profile_id = None
+                active_profile_id = str(ctx_profile_id or "").strip() or "default_profile"
+                active_scope = (
+                    (getattr(context, "scope", None) if context is not None else None)
+                    or current_scope()
+                    or DEFAULT_SCOPE
+                )
+                display_title = title.strip()
+                if display_title == safe_title:
+                    display_title = (
+                        safe_title.replace("-", " ").replace("_", " ").strip().title()
+                        or title.strip()
+                    )
+                note_type = str(params.get("type") or agent_id or "general").strip() or "general"
 
-                factory = get_session_factory()
-                async with factory() as session:
-                    resolved_profile_id = ctx_profile_id
-                    resolved_user_id = ctx_user_id
-                    if resolved_profile_id and str(resolved_profile_id).lower() == "me" and resolved_user_id:
-                        prof_res = await session.execute(
-                            select(Profile).where(Profile.user_id == resolved_user_id).limit(1)
-                        )
-                        prof_obj = prof_res.scalar_one_or_none()
-                        if prof_obj is not None:
-                            resolved_profile_id = prof_obj.id
-                        else:
-                            resolved_profile_id = None
-                    elif resolved_profile_id:
-                        prof_res = await session.execute(
-                            select(Profile).where(Profile.id == resolved_profile_id).limit(1)
-                        )
-                        prof_obj = prof_res.scalar_one_or_none()
-                        if prof_obj is None:
-                            resolved_profile_id = None
-                        elif not resolved_user_id:
-                            resolved_user_id = prof_obj.user_id
-
-                    existing_stmt = select(Note).where(Note.slug == safe_title)
-                    if resolved_profile_id:
-                        existing_stmt = existing_stmt.where(Note.profile_id == resolved_profile_id)
-                    existing_res = await session.execute(existing_stmt.limit(1))
-                    existing_note = existing_res.scalar_one_or_none()
-                    now_dt = datetime.now(timezone.utc)
-                    display_title = title.strip()
-                    if display_title == safe_title:
-                        display_title = safe_title.replace("-", " ").replace("_", " ").strip().title() or title.strip()
-
-                    if existing_note is not None:
-                        existing_note.title = display_title
-                        existing_note.content = content.strip()
-                        existing_note.type = agent_id or existing_note.type or "general"
-                        existing_note.updated_at = now_dt
-                        note_id = existing_note.id
-                    else:
-                        note_id = str(uuid.uuid4())
-                        new_note = Note(
-                            id=note_id,
-                            type=agent_id or "general",
-                            user_id=resolved_user_id,
-                            profile_id=resolved_profile_id,
-                            slug=safe_title,
-                            title=display_title,
-                            content=content.strip(),
-                            tags_json="[]",
-                            created_at=now_dt,
-                            updated_at=now_dt,
-                        )
-                        session.add(new_note)
-
-                    if resolved_profile_id:
-                        content_hash = hashlib.sha256(content.strip().encode("utf-8")).hexdigest()[:12]
-                        index_job = Job(
-                            id=str(uuid.uuid4()),
-                            profile_id=resolved_profile_id,
-                            kind="index_doc",
-                            payload=json.dumps({
-                                "document_id": note_id,
-                                "profile_id": resolved_profile_id,
-                                "doc_type": "note",
-                            }),
-                            timezone="UTC",
-                            next_run_at=now_dt,
-                            idempotency_key=f"index:note:{note_id}:{content_hash}",
-                            status="pending",
-                        )
-                        session.add(index_job)
-
-                    await session.commit()
-            except Exception:
-                pass
+                db_res = await get_db_toolbox().execute(
+                    "upsert_workspace_note",
+                    {
+                        "slug": safe_title,
+                        "title": display_title,
+                        "content": content.strip(),
+                        "type": note_type,
+                    },
+                    profile_id=active_profile_id,
+                    user_id=str(ctx_user_id).strip() if ctx_user_id else None,
+                    scope=str(active_scope),
+                    ctx=context,
+                )
+                record = db_res.get("record") if isinstance(db_res, dict) else None
+                if isinstance(record, dict) and record.get("id"):
+                    db_note_id = str(record["id"])
+            except Exception as db_err:
+                logger.warning(
+                    "workspace-note DB persistence failed for slug '%s': %s",
+                    safe_title,
+                    db_err,
+                )
 
         try:
             rel_path = str(target_path.relative_to(ws_root_path))
@@ -218,19 +173,21 @@ async def execute_workspace_note(params: Dict[str, Any], context: Any) -> ToolRe
 
         abs_path = str(target_path.resolve())
 
-        return ToolResult(
-            success=True,
-            output={
-                "title": safe_title,
-                "slug": safe_title,
-                "display_title": title.strip(),
-                "filename": filename,
-                "path": rel_path,
-                "full_path": abs_path,
-                "absolute_path": abs_path,
-                "bytes_written": len(frontmatter.encode("utf-8")),
-            },
-        )
+        output_payload: Dict[str, Any] = {
+            "title": safe_title,
+            "slug": safe_title,
+            "display_title": title.strip(),
+            "filename": filename,
+            "path": rel_path,
+            "full_path": abs_path,
+            "absolute_path": abs_path,
+            "bytes_written": len(frontmatter.encode("utf-8")),
+            "db_saved": bool(db_note_id),
+        }
+        if db_note_id:
+            output_payload["note_id"] = db_note_id
+
+        return ToolResult(success=True, output=output_payload)
 
     except SandboxSecurityError as sec_err:
         return ToolResult(success=False, output=None, error=str(sec_err))
