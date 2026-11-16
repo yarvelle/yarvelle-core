@@ -760,6 +760,13 @@ async def execute_tool_call(
     granted_scopes = scope_ctx.granted_scopes if scope_ctx is not None else DEFAULT_HEALTH_GRANTED_SCOPES
     pack_declared = scope_ctx.pack_declared_scopes if scope_ctx is not None else DEFAULT_HEALTH_GRANTED_SCOPES
 
+    is_domain_neutral_core_tool = (
+        spec.metadata.get("source") == "mcp_db_toolbox"
+        or spec.metadata.get("pack_id") == "core"
+    )
+    if scope_ctx is not None and is_domain_neutral_core_tool and tool_scopes == {DEFAULT_SCOPE}:
+        tool_scopes = {scope_ctx.scope}
+
     for required_s in tool_scopes:
         if not is_scope_granted(required_s, granted_scopes) or not is_scope_granted(required_s, pack_declared):
             dur_ms = round((time.time() - t0) * 1000, 2)

@@ -153,6 +153,8 @@ PHASE_0_REGISTRY = frozenset({
     "db_inspect_schema",
     "db_execute_query",
     "db_mutate_records",
+    "create_workspace_note",
+    "update_workspace_note",
     "upsert_workspace_note",
     "list_workspace_notes",
     "get_workspace_note",

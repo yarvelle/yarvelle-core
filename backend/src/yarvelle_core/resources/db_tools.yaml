@@ -44,6 +44,106 @@ sources:
     description: DuckDB analytical SQL database source.
 
 tools:
+  create_workspace_note:
+    kind: sql
+    source: yarvelle-db
+    risk_tier: write_local
+    entity: note
+    description: >-
+      Create a new persistent workspace note in the database for the active profile.
+      Automatically generates a unique URL-safe slug from the title if slug is omitted.
+    statement: |
+      INSERT INTO notes (
+        id, type, user_id, profile_id, scope, slug, title, content, tags_json, locale, linked_appointment_id, created_at, updated_at
+      ) VALUES (
+        :id, :type, :user_id, :profile_id, :scope, :slug, :title, :content, :tags_json, :locale, :linked_appointment_id, :now, :now
+      )
+      RETURNING id, slug, title, content, type, tags_json, scope, profile_id, locale, created_at, updated_at;
+    parameters:
+      - name: title
+        type: string
+        description: Human-readable title of the workspace note.
+        required: true
+      - name: content
+        type: string
+        description: Markdown body content of the workspace note.
+        required: true
+      - name: slug
+        type: string
+        description: Optional URL-safe identifier (auto-derived from title if omitted, with collision suffixing).
+        required: false
+      - name: type
+        type: string
+        description: Note category ('general', 'summary', 'checklist', 'scratchpad', 'prep').
+        required: false
+        default: "general"
+      - name: tags_json
+        type: string
+        description: JSON array string of taxonomy tags (e.g. '["summary", "action-items"]').
+        required: false
+        default: "[]"
+      - name: linked_appointment_id
+        type: string
+        description: Optional linked entity or event UUID.
+        required: false
+
+  update_workspace_note:
+    kind: sql
+    source: yarvelle-db
+    risk_tier: write_local
+    entity: note
+    description: >-
+      Update an existing persistent workspace note identified by note_id or slug.
+      Performs a partial update: any omitted field preserves its existing saved value.
+    statement: |
+      UPDATE notes
+      SET title = COALESCE(:title, title),
+          content = COALESCE(:content, content),
+          type = COALESCE(:type, type),
+          tags_json = COALESCE(:tags_json, tags_json),
+          updated_at = :now
+      WHERE profile_id = :profile_id
+        AND scope = :scope
+        AND (id = :note_id OR slug = :slug)
+      RETURNING id, slug, title, content, type, tags_json, scope, profile_id, locale, created_at, updated_at;
+    parameters:
+      - name: note_id
+        type: string
+        description: Exact UUID of the saved note to update (provide note_id or slug).
+        required: false
+      - name: slug
+        type: string
+        description: Current URL-safe slug of the saved note to update (used if note_id is omitted).
+        required: false
+      - name: identifier
+        type: string
+        description: Legacy alias matching either note_id or slug.
+        required: false
+      - name: new_slug
+        type: string
+        description: Optional new URL-safe slug when renaming the note identifier.
+        required: false
+      - name: title
+        type: string
+        description: Updated title for the note.
+        required: false
+      - name: content
+        type: string
+        description: Updated markdown body content for the note.
+        required: false
+      - name: type
+        type: string
+        description: Updated note category ('general', 'summary', 'checklist', 'scratchpad', 'prep').
+        required: false
+      - name: tags_json
+        type: string
+        description: Updated JSON array string of tags.
+        required: false
+      - name: linked_appointment_id
+        type: string
+        description: Updated linked entity or event UUID.
+        required: false
+
   upsert_workspace_note:
     kind: sql
     source: yarvelle-db
@@ -68,10 +168,6 @@ tools:
         updated_at = excluded.updated_at
       RETURNING id, slug, title, type, scope, profile_id, locale, updated_at;
     parameters:
-      - name: slug
-        type: string
-        description: Unique URL-safe slug identifier for the note (e.g. 'weekly-review-2026-10').
-        required: true
       - name: title
         type: string
         description: Human-readable title of the note.
@@ -80,26 +176,22 @@ tools:
         type: string
         description: Markdown body of the note.
         required: true
+      - name: slug
+        type: string
+        description: Unique URL-safe slug identifier for the note (auto-derived from title if omitted).
+        required: false
       - name: type
         type: string
         description: Note category ('scratchpad', 'prep', 'summary', 'general').
         required: false
-        default: "scratchpad"
       - name: tags_json
         type: string
         description: JSON array string of taxonomy tags (e.g. '["planning", "q4"]').
         required: false
-        default: "[]"
-      - name: locale
-        type: string
-        description: IETF BCP 47 locale tag of the note content (e.g. 'en-US').
-        required: false
-        default: "en-US"
       - name: linked_appointment_id
         type: string
         description: Optional linked entity or event UUID.
         required: false
-        default: ""
 
   list_workspace_notes:
     kind: sql
@@ -107,18 +199,30 @@ tools:
     risk_tier: read
     entity: note
     description: >-
-      List recent profile-scoped workspace notes, optionally filtered by note type.
+      List saved workspace notes for the active profile, ordered by most recently
+      updated, with optional type, tag, or keyword query filters.
     statement: |
-      SELECT id, slug, title, type, scope, tags_json, locale, linked_appointment_id, created_at, updated_at
+      SELECT id, slug, title, content, type, scope, tags_json, locale, linked_appointment_id, created_at, updated_at
       FROM notes
       WHERE profile_id = :profile_id
+        AND scope = :scope
         AND (:type = '' OR type = :type)
       ORDER BY updated_at DESC
       LIMIT :limit;
     parameters:
       - name: type
         type: string
-        description: Optional note category filter ('scratchpad', 'prep', 'summary', 'general').
+        description: Optional note category filter ('scratchpad', 'prep', 'summary', 'general', 'checklist').
+        required: false
+        default: ""
+      - name: tag
+        type: string
+        description: Optional tag filter matched against the note's tags list.
+        required: false
+        default: ""
+      - name: query
+        type: string
+        description: Optional case-insensitive search term matching title, content, or slug.
         required: false
         default: ""
       - name: limit
@@ -126,6 +230,11 @@ tools:
         description: Maximum number of notes to return (1 to 100).
         required: false
         default: 20
+      - name: offset
+        type: integer
+        description: Zero-based pagination offset.
+        required: false
+        default: 0
 
   get_workspace_note:
     kind: sql
@@ -133,37 +242,55 @@ tools:
     risk_tier: read
     entity: note
     description: >-
-      Retrieve the full markdown content and metadata of a specific workspace note by slug or ID.
+      Retrieve the full markdown content and metadata of a specific saved workspace note by note_id or slug.
     statement: |
       SELECT id, slug, title, type, scope, content, tags_json, locale, linked_appointment_id, created_at, updated_at
       FROM notes
       WHERE profile_id = :profile_id
-        AND (slug = :identifier OR id = :identifier)
+        AND scope = :scope
+        AND (slug = :slug OR id = :note_id OR slug = :identifier OR id = :identifier)
       ORDER BY updated_at DESC
       LIMIT 1;
     parameters:
+      - name: note_id
+        type: string
+        description: Exact UUID of the saved note.
+        required: false
+      - name: slug
+        type: string
+        description: URL-safe slug of the saved note (used when note_id is omitted).
+        required: false
       - name: identifier
         type: string
-        description: Note slug or UUID identifier.
-        required: true
+        description: Legacy alias matching either note_id or slug.
+        required: false
 
   delete_workspace_note:
     kind: sql
     source: yarvelle-db
-    risk_tier: irreversible
+    risk_tier: write_local
     entity: note
     description: >-
-      Delete a specific workspace note belonging to the active profile by slug or ID.
+      Delete a saved workspace note belonging to the active profile by note_id or slug.
     statement: |
       DELETE FROM notes
       WHERE profile_id = :profile_id
-        AND (slug = :identifier OR id = :identifier)
+        AND scope = :scope
+        AND (slug = :slug OR id = :note_id OR slug = :identifier OR id = :identifier)
       RETURNING id, slug, title;
     parameters:
+      - name: note_id
+        type: string
+        description: Exact UUID of the saved note to delete.
+        required: false
+      - name: slug
+        type: string
+        description: URL-safe slug of the saved note to delete (used when note_id is omitted).
+        required: false
       - name: identifier
         type: string
-        description: Note slug or UUID identifier to delete.
-        required: true
+        description: Legacy alias matching either note_id or slug.
+        required: false
 
   create_profile_reminder:
     kind: sql
@@ -339,43 +466,56 @@ tools:
 
 toolsets:
   core_db:
-    - upsert_workspace_note
-    - list_workspace_notes
+    - create_workspace_note
     - get_workspace_note
+    - list_workspace_notes
+    - update_workspace_note
     - delete_workspace_note
+    - upsert_workspace_note
     - create_profile_reminder
     - list_profile_reminders
     - update_profile_reminder
     - create_email_draft_record
     - list_email_draft_records
   assist_db:
-    - upsert_workspace_note
-    - list_workspace_notes
+    - create_workspace_note
     - get_workspace_note
+    - list_workspace_notes
+    - update_workspace_note
+    - delete_workspace_note
+    - upsert_workspace_note
     - create_profile_reminder
     - list_profile_reminders
     - update_profile_reminder
   navigation_db:
-    - upsert_workspace_note
-    - list_workspace_notes
+    - create_workspace_note
     - get_workspace_note
+    - list_workspace_notes
+    - update_workspace_note
+    - delete_workspace_note
+    - upsert_workspace_note
     - create_profile_reminder
     - list_profile_reminders
     - update_profile_reminder
     - create_email_draft_record
     - list_email_draft_records
   wellness_db:
-    - upsert_workspace_note
-    - list_workspace_notes
+    - create_workspace_note
     - get_workspace_note
+    - list_workspace_notes
+    - update_workspace_note
+    - delete_workspace_note
+    - upsert_workspace_note
     - create_profile_reminder
     - list_profile_reminders
     - update_profile_reminder
   all_db_tools:
-    - upsert_workspace_note
-    - list_workspace_notes
+    - create_workspace_note
     - get_workspace_note
+    - list_workspace_notes
+    - update_workspace_note
     - delete_workspace_note
+    - upsert_workspace_note
     - create_profile_reminder
     - list_profile_reminders
     - update_profile_reminder

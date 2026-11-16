@@ -53,6 +53,42 @@ async def exec_workspace_note(args: Dict[str, Any], ctx: Any = None) -> Any:
     return await execute_workspace_note(args or {}, ctx)
 
 
+async def _invoke_db_note_tool(tool_name: str, args: Dict[str, Any], ctx: Any = None) -> Any:
+    from yarvelle_core.tools.mcp_db_toolbox import get_db_toolbox
+
+    return await get_db_toolbox().execute_tool(tool_name, args or {}, ctx)
+
+
+@builtin_tool_handler("create_workspace_note")
+async def exec_create_workspace_note(args: Dict[str, Any], ctx: Any = None) -> Any:
+    return await _invoke_db_note_tool("create_workspace_note", args, ctx)
+
+
+@builtin_tool_handler("get_workspace_note")
+async def exec_get_workspace_note(args: Dict[str, Any], ctx: Any = None) -> Any:
+    return await _invoke_db_note_tool("get_workspace_note", args, ctx)
+
+
+@builtin_tool_handler("list_workspace_notes")
+async def exec_list_workspace_notes(args: Dict[str, Any], ctx: Any = None) -> Any:
+    return await _invoke_db_note_tool("list_workspace_notes", args, ctx)
+
+
+@builtin_tool_handler("update_workspace_note")
+async def exec_update_workspace_note(args: Dict[str, Any], ctx: Any = None) -> Any:
+    return await _invoke_db_note_tool("update_workspace_note", args, ctx)
+
+
+@builtin_tool_handler("delete_workspace_note")
+async def exec_delete_workspace_note(args: Dict[str, Any], ctx: Any = None) -> Any:
+    return await _invoke_db_note_tool("delete_workspace_note", args, ctx)
+
+
+@builtin_tool_handler("upsert_workspace_note")
+async def exec_upsert_workspace_note(args: Dict[str, Any], ctx: Any = None) -> Any:
+    return await _invoke_db_note_tool("upsert_workspace_note", args, ctx)
+
+
 @builtin_tool_handler("skill-docs")
 async def exec_skill_docs(args: Dict[str, Any], ctx: Any = None) -> Any:
     from yarvelle_core.tools.skill_docs import execute_skill_docs
@@ -270,16 +306,22 @@ __all__ = [
     "exec_calendar_suggest_slots",
     "exec_create_email_draft",
     "exec_create_reminder",
+    "exec_create_workspace_note",
     "exec_delegate_to_agent",
+    "exec_delete_workspace_note",
     "exec_extract_document_dossier",
     "exec_extract_structured_data",
+    "exec_get_workspace_note",
     "exec_gmail_list_messages",
     "exec_gmail_send_message",
     "exec_list_agents",
     "exec_list_reminders",
+    "exec_list_workspace_notes",
     "exec_sanitize_pii",
     "exec_search_records",
     "exec_skill_docs",
+    "exec_update_workspace_note",
+    "exec_upsert_workspace_note",
     "exec_validate_grounding",
     "exec_web_search",
     "exec_workspace_note",

@@ -862,6 +862,9 @@ class AgentExecutionService:
         # 1. Load agent and verify risk class gating
         try:
             agent, effective_tools, skills = load_agent(agent_dir, skills_dir)
+            from yarvelle_core.tools.mcp_db_toolbox import expand_workspace_note_tools
+
+            effective_tools = expand_workspace_note_tools(list(effective_tools or []))
         except Exception as err:
             logger.error("Failed to load agent '%s': %s", effective_agent_id, err)
             yield self.format_error_event(f"Agent '{effective_agent_id}' failed to load: {err}")
@@ -1647,7 +1650,13 @@ class AgentExecutionService:
                 if agent_obj is None:
                     agent_obj = getattr(self, "agent", None)
 
-                eff_tools = tuple(effective_tools or (getattr(agent_obj, "tools", None) if agent_obj else None) or ())
+                from yarvelle_core.tools.mcp_db_toolbox import expand_workspace_note_tools
+
+                eff_tools = tuple(
+                    expand_workspace_note_tools(
+                        list(effective_tools or (getattr(agent_obj, "tools", None) if agent_obj else None) or ())
+                    )
+                )
                 ws_root = self.workspace_root.resolve()
                 skills_dir = (ws_root / SKILLS_DIR).resolve()
                 try:

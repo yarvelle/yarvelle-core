@@ -25,10 +25,12 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+import hashlib
 import json
 import logging
 import os
 from pathlib import Path
+import re
 from typing import (
     Any,
     Awaitable,
@@ -40,6 +42,7 @@ from typing import (
     Optional,
     Sequence,
     Set,
+    Tuple,
     Union,
 )
 import uuid
@@ -49,12 +52,16 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel, Field, create_model
 import sqlglot
-from sqlalchemy import select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 import yaml
 
 from yarvelle_core.connectors.mcp_remote import compute_mcp_schema_hash
-from yarvelle_core.db.models import Job, Note, Profile
+from yarvelle_core.constants.agents import (
+    WORKSPACE_NOTE_MCP_TOOLS,
+    expand_workspace_note_tools,
+)
+from yarvelle_core.db.models import Job, Note, Profile, User
 from yarvelle_core.db.schema_catalog import (
     SchemaCatalog,
     get_schema_catalog,
@@ -67,7 +74,7 @@ from yarvelle_core.engine.tool_registry import (
     ToolSpecRegistry,
 )
 from yarvelle_core.i18n import DEFAULT_LOCALE, canonicalize_locale, normalize_text_nfc
-from yarvelle_core.scope.context import DEFAULT_SCOPE, ScopeContext, scope_context
+from yarvelle_core.scope.context import DEFAULT_SCOPE, ScopeContext, current_scope, scope_context
 from yarvelle_core.tools.db_query_planner import DbQueryPlanner, SqlQueryPlan
 from yarvelle_core.tools.sql_ast_sandbox import (
     SqlOperation,
@@ -100,6 +107,7 @@ DYNAMIC_DB_TOOL_NAMES: Set[str] = {
     "db_execute_query",
     "db_mutate_records",
 }
+_WORKSPACE_NOTE_MCP_SET: Set[str] = set(WORKSPACE_NOTE_MCP_TOOLS)
 
 SqlSourceKind = Literal[
     "sql",
@@ -895,8 +903,16 @@ class McpDatabaseToolbox:
             )
 
         user_id = getattr(ctx, "user_id", None)
-        scope = getattr(ctx, "scope", None) or DEFAULT_SCOPE
+        scope = getattr(ctx, "scope", None) or current_scope() or DEFAULT_SCOPE
         safe_args = dict(args or {})
+        if (
+            tool_name in {"get_workspace_note", "update_workspace_note", "delete_workspace_note"}
+            and "id" in safe_args
+            and not any(
+                str(safe_args.get(k) or "").strip() for k in ("note_id", "slug", "identifier")
+            )
+        ):
+            safe_args["note_id"] = safe_args["id"]
         for reserved_key in RESERVED_CONTEXT_PARAMS:
             safe_args.pop(reserved_key, None)
 
@@ -985,6 +1001,9 @@ class McpDatabaseToolbox:
                 session=session,
             )
 
+        if tool_name in _WORKSPACE_NOTE_MCP_SET:
+            params = self._normalize_workspace_note_params(tool_name, params)
+
         cfg = self.get_tool_config(tool_name)
         args_model = self.build_pydantic_args_schema(tool_name)
         validated = args_model.model_validate(params)
@@ -1044,13 +1063,33 @@ class McpDatabaseToolbox:
                     await session.commit()
                 return hook_res
 
-        if tool_name == "upsert_workspace_note":
+        if tool_name in _WORKSPACE_NOTE_MCP_SET:
             active_scope = str(exec_params.get("scope") or DEFAULT_SCOPE)
             with scope_context(
                 scope=active_scope,
                 profile_id=str(exec_params["profile_id"]),
                 actor=exec_params.get("user_id"),
             ):
+                if tool_name == "create_workspace_note":
+                    return await self._handle_create_workspace_note(
+                        session, tool_name, cfg, exec_params
+                    )
+                if tool_name == "get_workspace_note":
+                    return await self._handle_get_workspace_note(
+                        session, tool_name, cfg, exec_params
+                    )
+                if tool_name == "list_workspace_notes":
+                    return await self._handle_list_workspace_notes(
+                        session, tool_name, cfg, exec_params
+                    )
+                if tool_name == "update_workspace_note":
+                    return await self._handle_update_workspace_note(
+                        session, tool_name, cfg, exec_params
+                    )
+                if tool_name == "delete_workspace_note":
+                    return await self._handle_delete_workspace_note(
+                        session, tool_name, cfg, exec_params
+                    )
                 return await self._handle_upsert_workspace_note(
                     session, tool_name, cfg, exec_params
                 )
@@ -1102,6 +1141,501 @@ class McpDatabaseToolbox:
             logger.debug("SQL dialect adaptation fallback for %s: %s", target_dialect, exc)
         return sql
 
+    @staticmethod
+    def _normalize_workspace_note_params(
+        tool_name: str, raw_params: Mapping[str, Any]
+    ) -> Dict[str, Any]:
+        """Normalizes common LLM argument aliases for workspace-note CRUD tools."""
+        params = dict(raw_params or {})
+
+        if "content" not in params or params["content"] is None:
+            for alt_key in ("note_content", "body", "text"):
+                if params.get(alt_key) is not None:
+                    params["content"] = params.pop(alt_key)
+                    break
+
+        if "tags_json" not in params or params["tags_json"] is None:
+            if "tags" in params and params["tags"] is not None:
+                params["tags_json"] = params.pop("tags")
+        if isinstance(params.get("tags_json"), (list, tuple, set)):
+            params["tags_json"] = json.dumps([str(x) for x in params["tags_json"]])
+
+        if tool_name in {"create_workspace_note", "upsert_workspace_note"}:
+            if not str(params.get("title") or "").strip() and str(params.get("note_title") or "").strip():
+                params["title"] = str(params.pop("note_title")).strip()
+        elif tool_name in {"get_workspace_note", "delete_workspace_note"}:
+            has_lookup = any(
+                str(params.get(k) or "").strip() for k in ("note_id", "slug", "identifier")
+            )
+            if not has_lookup:
+                for alt_key in ("note_title", "title", "name"):
+                    alt_val = str(params.get(alt_key) or "").strip()
+                    if alt_val:
+                        params["identifier"] = str(params.pop(alt_key)).strip()
+                        break
+        elif tool_name == "update_workspace_note":
+            has_lookup = any(
+                str(params.get(k) or "").strip() for k in ("note_id", "slug", "identifier")
+            )
+            if not has_lookup:
+                for alt_key in ("note_title", "title", "name"):
+                    alt_val = str(params.get(alt_key) or "").strip()
+                    if alt_val:
+                        params["identifier"] = str(params.pop(alt_key)).strip()
+                        break
+        elif tool_name == "list_workspace_notes":
+            if not str(params.get("query") or "").strip():
+                for alt_key in ("search", "q"):
+                    alt_val = str(params.get(alt_key) or "").strip()
+                    if alt_val:
+                        params["query"] = str(params.pop(alt_key)).strip()
+                        break
+
+        return params
+
+    @staticmethod
+    def _slugify_note_identifier(raw: str) -> str:
+        """Converts arbitrary title or slug text into a URL-safe bounded identifier."""
+        normalized = normalize_text_nfc(str(raw or "")).strip().lower()
+        slug = re.sub(r"[^a-z0-9]+", "-", normalized).strip("-")[:80]
+        return slug or "note"
+
+    @staticmethod
+    def _normalize_tags_json(raw: Any) -> Tuple[str, List[str]]:
+        """Parses list, JSON-array string, or comma-separated tags into canonical JSON."""
+        if raw is None or (isinstance(raw, str) and not raw.strip()):
+            return "[]", []
+        parsed: List[str] = []
+        if isinstance(raw, (list, tuple, set)):
+            parsed = [normalize_text_nfc(str(x)).strip() for x in raw if str(x).strip()]
+        elif isinstance(raw, str):
+            text_val = raw.strip()
+            try:
+                loaded = json.loads(text_val)
+                if isinstance(loaded, list):
+                    parsed = [normalize_text_nfc(str(x)).strip() for x in loaded if str(x).strip()]
+                elif loaded is not None and str(loaded).strip():
+                    parsed = [normalize_text_nfc(str(loaded)).strip()]
+            except Exception:
+                parsed = [normalize_text_nfc(t).strip() for t in text_val.split(",") if t.strip()]
+        else:
+            parsed = [normalize_text_nfc(str(raw)).strip()]
+        deduped = list(dict.fromkeys(parsed))
+        return json.dumps(deduped), deduped
+
+    @staticmethod
+    def _normalize_note_locale(raw_locale: Optional[Any]) -> str:
+        """Normalizes a context locale into a valid BCP 47 tag with default fallback."""
+        candidate = str(raw_locale or DEFAULT_LOCALE).strip() or DEFAULT_LOCALE
+        try:
+            return canonicalize_locale(candidate)
+        except Exception:
+            return DEFAULT_LOCALE
+
+    @staticmethod
+    async def _resolve_safe_user_id(
+        session: AsyncSession, raw_user_id: Optional[Any]
+    ) -> Optional[str]:
+        """Returns raw_user_id only if it references an existing user row (FK-safe)."""
+        candidate = str(raw_user_id or "").strip()
+        if not candidate or candidate == "default_user":
+            return None
+        try:
+            existing = (
+                await session.execute(select(User.id).where(User.id == candidate).limit(1))
+            ).scalar_one_or_none()
+            return str(existing) if existing else None
+        except Exception:
+            return None
+
+    @staticmethod
+    def _serialize_note_record(note_obj: Note) -> Dict[str, Any]:
+        """Serializes a Note ORM instance into a structured dictionary."""
+        try:
+            parsed_tags = json.loads(note_obj.tags_json) if note_obj.tags_json else []
+            if not isinstance(parsed_tags, list):
+                parsed_tags = [str(parsed_tags)]
+        except Exception:
+            parsed_tags = []
+        return {
+            "id": note_obj.id,
+            "slug": note_obj.slug,
+            "title": note_obj.title,
+            "content": note_obj.content,
+            "type": note_obj.type,
+            "tags": parsed_tags,
+            "tags_json": note_obj.tags_json,
+            "scope": note_obj.scope,
+            "profile_id": note_obj.profile_id,
+            "locale": note_obj.locale,
+            "linked_appointment_id": note_obj.linked_appointment_id,
+            "created_at": note_obj.created_at.isoformat() if note_obj.created_at else None,
+            "updated_at": note_obj.updated_at.isoformat() if note_obj.updated_at else None,
+        }
+
+    @staticmethod
+    async def _enqueue_note_index_job(
+        session: AsyncSession,
+        profile_id: str,
+        active_scope: str,
+        note_id: str,
+        content: str,
+        now_dt: datetime,
+    ) -> None:
+        """Queues a background index_doc job inside a savepoint without breaking minimal DB schemas."""
+        try:
+            content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()[:12]
+            async with session.begin_nested():
+                index_job = Job(
+                    id=str(uuid.uuid4()),
+                    profile_id=profile_id,
+                    scope=active_scope,
+                    kind="index_doc",
+                    payload=json.dumps(
+                        {
+                            "document_id": note_id,
+                            "entity_type": "note",
+                            "entity_id": note_id,
+                            "profile_id": profile_id,
+                            "doc_type": "note",
+                        }
+                    ),
+                    timezone="UTC",
+                    next_run_at=now_dt,
+                    idempotency_key=f"index:note:{note_id}:{content_hash}:{int(now_dt.timestamp())}",
+                    status="pending",
+                )
+                session.add(index_job)
+                await session.flush()
+        except Exception as exc:
+            logger.debug("Note index job enqueue skipped: %s", exc)
+
+    async def _find_scoped_note(
+        self,
+        session: AsyncSession,
+        profile_id: str,
+        active_scope: str,
+        *,
+        note_id: Optional[str] = None,
+        slug: Optional[str] = None,
+        identifier: Optional[str] = None,
+    ) -> Optional[Note]:
+        """Finds a single Note strictly scoped to (profile_id, active_scope)."""
+        clean_id = str(note_id or "").strip()
+        clean_slug = str(slug or "").strip()
+        clean_ident = str(identifier or "").strip()
+
+        base_filter = (Note.profile_id == profile_id, Note.scope == active_scope)
+        if clean_id:
+            res = await session.execute(
+                select(Note).where(*base_filter, Note.id == clean_id).limit(1)
+            )
+            found = res.scalar_one_or_none()
+            if found is not None:
+                return found
+
+        if clean_slug:
+            norm_slug = self._slugify_note_identifier(clean_slug)
+            slug_candidates = [clean_slug] if norm_slug == clean_slug else [clean_slug, norm_slug]
+            res = await session.execute(
+                select(Note)
+                .where(*base_filter, Note.slug.in_(slug_candidates))
+                .order_by(Note.updated_at.desc())
+                .limit(1)
+            )
+            found = res.scalar_one_or_none()
+            if found is not None:
+                return found
+
+        if clean_ident:
+            norm_ident = self._slugify_note_identifier(clean_ident)
+            slug_candidates = [clean_ident] if norm_ident == clean_ident else [clean_ident, norm_ident]
+            res = await session.execute(
+                select(Note)
+                .where(
+                    *base_filter,
+                    or_(
+                        Note.id == clean_ident,
+                        Note.slug.in_(slug_candidates),
+                        func.lower(Note.title) == clean_ident.lower(),
+                    ),
+                )
+                .order_by(Note.updated_at.desc())
+                .limit(1)
+            )
+            return res.scalar_one_or_none()
+
+        return None
+
+    async def _allocate_unique_slug(
+        self,
+        session: AsyncSession,
+        profile_id: str,
+        active_scope: str,
+        base_slug: str,
+        *,
+        exclude_note_id: Optional[str] = None,
+    ) -> str:
+        """Ensures slug uniqueness within (profile_id, active_scope) by suffixing -2, -3, ..."""
+        candidate = self._slugify_note_identifier(base_slug)
+        suffix = 1
+        while True:
+            check = candidate if suffix == 1 else f"{candidate[:72]}-{suffix}"
+            stmt = select(Note.id).where(
+                Note.profile_id == profile_id,
+                Note.scope == active_scope,
+                Note.slug == check,
+            )
+            if exclude_note_id:
+                stmt = stmt.where(Note.id != exclude_note_id)
+            existing_id = (await session.execute(stmt.limit(1))).scalar_one_or_none()
+            if existing_id is None:
+                return check
+            suffix += 1
+
+    async def _handle_create_workspace_note(
+        self,
+        session: AsyncSession,
+        tool_name: str,
+        cfg: DbToolConfig,
+        exec_params: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        profile_id = str(exec_params["profile_id"])
+        active_scope = str(exec_params.get("scope") or DEFAULT_SCOPE)
+
+        title = normalize_text_nfc(str(exec_params.get("title") or "")).strip()
+        content = normalize_text_nfc(str(exec_params.get("content") or "")).strip()
+        if not title:
+            raise ValueError("Parameter 'title' must be a non-empty string.")
+        if not content:
+            raise ValueError("Parameter 'content' must be a non-empty string.")
+
+        raw_slug = str(exec_params.get("slug") or "").strip()
+        base_slug = self._slugify_note_identifier(raw_slug or title)
+        unique_slug = await self._allocate_unique_slug(session, profile_id, active_scope, base_slug)
+
+        note_type = str(exec_params.get("type") or "general").strip() or "general"
+        tags_json, _ = self._normalize_tags_json(exec_params.get("tags_json"))
+        note_locale = self._normalize_note_locale(exec_params.get("locale"))
+        safe_user_id = await self._resolve_safe_user_id(session, exec_params.get("user_id"))
+        raw_linked = exec_params.get("linked_appointment_id")
+        linked_appt = str(raw_linked).strip() if raw_linked and str(raw_linked).strip() else None
+
+        now_dt = datetime.now(timezone.utc)
+        note_obj = Note(
+            id=exec_params["id"],
+            type=note_type,
+            user_id=safe_user_id,
+            profile_id=profile_id,
+            scope=active_scope,
+            slug=unique_slug,
+            title=title,
+            content=content,
+            tags_json=tags_json,
+            locale=note_locale,
+            linked_appointment_id=linked_appt,
+            created_at=now_dt,
+            updated_at=now_dt,
+        )
+        session.add(note_obj)
+        await session.flush()
+        await self._enqueue_note_index_job(
+            session, profile_id, active_scope, note_obj.id, content, now_dt
+        )
+        await session.commit()
+        await self._invalidate_note_search_index(profile_id, note_obj.id)
+
+        return {
+            "status": "ok",
+            "action": "created",
+            "tool": tool_name,
+            "entity": cfg.entity,
+            "record": self._serialize_note_record(note_obj),
+        }
+
+    async def _handle_get_workspace_note(
+        self,
+        session: AsyncSession,
+        tool_name: str,
+        cfg: DbToolConfig,
+        exec_params: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        profile_id = str(exec_params["profile_id"])
+        active_scope = str(exec_params.get("scope") or DEFAULT_SCOPE)
+        note_id = exec_params.get("note_id")
+        slug = exec_params.get("slug")
+        identifier = exec_params.get("identifier")
+
+        if not any(str(v or "").strip() for v in (note_id, slug, identifier)):
+            raise ValueError("At least one of 'note_id', 'slug', or 'identifier' is required.")
+
+        note_obj = await self._find_scoped_note(
+            session,
+            profile_id,
+            active_scope,
+            note_id=note_id,
+            slug=slug,
+            identifier=identifier,
+        )
+        if note_obj is None:
+            return {
+                "status": "not_found",
+                "tool": tool_name,
+                "entity": cfg.entity,
+                "found": False,
+                "record": None,
+            }
+
+        return {
+            "status": "ok",
+            "tool": tool_name,
+            "entity": cfg.entity,
+            "found": True,
+            "record": self._serialize_note_record(note_obj),
+        }
+
+    async def _handle_list_workspace_notes(
+        self,
+        session: AsyncSession,
+        tool_name: str,
+        cfg: DbToolConfig,
+        exec_params: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        profile_id = str(exec_params["profile_id"])
+        active_scope = str(exec_params.get("scope") or DEFAULT_SCOPE)
+        type_filter = str(exec_params.get("type") or "").strip()
+        tag_filter = str(exec_params.get("tag") or "").strip().lower()
+        query_filter = normalize_text_nfc(str(exec_params.get("query") or "")).strip()
+        raw_limit = exec_params.get("limit", 20)
+        raw_offset = exec_params.get("offset", 0)
+        limit = max(1, min(int(raw_limit if raw_limit is not None else 20), 100))
+        offset = max(0, int(raw_offset if raw_offset is not None else 0))
+
+        stmt = select(Note).where(
+            Note.profile_id == profile_id,
+            Note.scope == active_scope,
+        )
+        if type_filter:
+            stmt = stmt.where(Note.type == type_filter)
+        if query_filter:
+            pattern = f"%{query_filter}%"
+            stmt = stmt.where(
+                or_(
+                    Note.title.ilike(pattern),
+                    Note.content.ilike(pattern),
+                    Note.slug.ilike(pattern),
+                )
+            )
+        stmt = stmt.order_by(Note.updated_at.desc(), Note.created_at.desc())
+
+        all_notes = list((await session.execute(stmt)).scalars().all())
+        serialized: List[Dict[str, Any]] = []
+        for n in all_notes:
+            item = self._serialize_note_record(n)
+            if tag_filter:
+                item_tags = [str(t).strip().lower() for t in item.get("tags", [])]
+                if tag_filter not in item_tags:
+                    continue
+            serialized.append(item)
+
+        total = len(serialized)
+        paged = serialized[offset : offset + limit]
+        return {
+            "status": "ok",
+            "tool": tool_name,
+            "entity": cfg.entity,
+            "count": len(paged),
+            "total": total,
+            "records": paged,
+            "rows": paged,
+        }
+
+    async def _handle_update_workspace_note(
+        self,
+        session: AsyncSession,
+        tool_name: str,
+        cfg: DbToolConfig,
+        exec_params: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        profile_id = str(exec_params["profile_id"])
+        active_scope = str(exec_params.get("scope") or DEFAULT_SCOPE)
+        note_id = exec_params.get("note_id")
+        slug = exec_params.get("slug")
+        identifier = exec_params.get("identifier")
+
+        if not any(str(v or "").strip() for v in (note_id, slug, identifier)):
+            raise ValueError("At least one of 'note_id', 'slug', or 'identifier' is required.")
+
+        note_obj = await self._find_scoped_note(
+            session,
+            profile_id,
+            active_scope,
+            note_id=note_id,
+            slug=slug,
+            identifier=identifier,
+        )
+        if note_obj is None:
+            return {
+                "status": "not_found",
+                "tool": tool_name,
+                "entity": cfg.entity,
+                "found": False,
+                "error": "Workspace note not found for the active profile and scope.",
+            }
+
+        if exec_params.get("title") is not None:
+            new_title = normalize_text_nfc(str(exec_params["title"])).strip()
+            if not new_title:
+                raise ValueError("Updated 'title' cannot be empty.")
+            note_obj.title = new_title
+
+        if exec_params.get("content") is not None:
+            note_obj.content = normalize_text_nfc(str(exec_params["content"])).strip()
+
+        if exec_params.get("type") is not None:
+            new_type = str(exec_params["type"]).strip()
+            if new_type:
+                note_obj.type = new_type
+
+        if exec_params.get("tags_json") is not None:
+            tags_json, _ = self._normalize_tags_json(exec_params["tags_json"])
+            note_obj.tags_json = tags_json
+
+        if exec_params.get("linked_appointment_id") is not None:
+            raw_linked = str(exec_params["linked_appointment_id"]).strip()
+            note_obj.linked_appointment_id = raw_linked or None
+
+        if exec_params.get("new_slug") is not None and str(exec_params["new_slug"]).strip():
+            requested_slug = self._slugify_note_identifier(str(exec_params["new_slug"]))
+            if requested_slug != note_obj.slug:
+                note_obj.slug = await self._allocate_unique_slug(
+                    session,
+                    profile_id,
+                    active_scope,
+                    requested_slug,
+                    exclude_note_id=note_obj.id,
+                )
+
+        if exec_params.get("locale"):
+            note_obj.locale = self._normalize_note_locale(exec_params.get("locale"))
+
+        now_dt = datetime.now(timezone.utc)
+        note_obj.updated_at = now_dt
+        await session.flush()
+        await self._enqueue_note_index_job(
+            session, profile_id, active_scope, note_obj.id, note_obj.content, now_dt
+        )
+        await session.commit()
+        await self._invalidate_note_search_index(profile_id, note_obj.id)
+
+        return {
+            "status": "ok",
+            "action": "updated",
+            "tool": tool_name,
+            "entity": cfg.entity,
+            "record": self._serialize_note_record(note_obj),
+        }
+
     async def _handle_upsert_workspace_note(
         self,
         session: AsyncSession,
@@ -1109,94 +1643,130 @@ class McpDatabaseToolbox:
         cfg: DbToolConfig,
         exec_params: Dict[str, Any],
     ) -> Dict[str, Any]:
-        slug = str(exec_params.get("slug", "")).strip()
         profile_id = str(exec_params["profile_id"])
         active_scope = str(exec_params.get("scope") or DEFAULT_SCOPE)
 
-        existing = await session.execute(
-            text(
-                "SELECT id FROM notes WHERE profile_id = :profile_id AND slug = :slug LIMIT 1"
-            ),
-            {"profile_id": profile_id, "slug": slug},
+        title = normalize_text_nfc(str(exec_params.get("title") or "")).strip()
+        content = normalize_text_nfc(str(exec_params.get("content") or "")).strip()
+        if not title:
+            raise ValueError("Parameter 'title' must be a non-empty string.")
+
+        raw_slug = str(exec_params.get("slug") or "").strip()
+        slug = raw_slug or self._slugify_note_identifier(title)
+
+        existing_note = await self._find_scoped_note(
+            session, profile_id, active_scope, slug=slug
         )
-        existing_row = existing.mappings().first()
-        if existing_row and existing_row.get("id"):
-            exec_params["id"] = str(existing_row["id"])
-
-        tags_raw = exec_params.get("tags_json", "[]")
-        try:
-            parsed_tags = (
-                json.loads(tags_raw) if isinstance(tags_raw, str) else list(tags_raw)
-            )
-            if not isinstance(parsed_tags, list):
-                parsed_tags = [str(parsed_tags)]
-        except Exception:
-            parsed_tags = [
-                t.strip() for t in str(tags_raw).split(",") if t.strip()
-            ]
-        exec_params["tags_json"] = json.dumps(parsed_tags)
-
-        raw_locale = exec_params.get("locale") or DEFAULT_LOCALE
-        try:
-            exec_params["locale"] = canonicalize_locale(str(raw_locale))
-        except Exception:
-            exec_params["locale"] = DEFAULT_LOCALE
-
-        linked_appt = exec_params.get("linked_appointment_id")
-        exec_params["linked_appointment_id"] = (
-            str(linked_appt).strip() if linked_appt and str(linked_appt).strip() else None
-        )
-
         now_dt = datetime.now(timezone.utc)
-        existing_note = await session.get(Note, exec_params["id"])
+        note_locale = self._normalize_note_locale(exec_params.get("locale"))
+
         if existing_note is not None:
-            existing_note.type = exec_params.get("type", "scratchpad")
-            existing_note.title = exec_params["title"]
-            existing_note.content = exec_params["content"]
-            existing_note.tags_json = exec_params["tags_json"]
-            existing_note.locale = exec_params["locale"]
-            existing_note.linked_appointment_id = exec_params["linked_appointment_id"]
+            action = "updated"
+            existing_note.title = title
+            existing_note.content = content
+            if exec_params.get("type") is not None and str(exec_params["type"]).strip():
+                existing_note.type = str(exec_params["type"]).strip()
+            if exec_params.get("tags_json") is not None:
+                tags_json, _ = self._normalize_tags_json(exec_params["tags_json"])
+                existing_note.tags_json = tags_json
+            if exec_params.get("linked_appointment_id") is not None:
+                raw_linked = str(exec_params["linked_appointment_id"]).strip()
+                existing_note.linked_appointment_id = raw_linked or None
+            existing_note.locale = note_locale
             existing_note.updated_at = now_dt
             note_obj = existing_note
         else:
+            action = "created"
+            note_type = str(exec_params.get("type") or "scratchpad").strip() or "scratchpad"
+            tags_json, _ = self._normalize_tags_json(exec_params.get("tags_json"))
+            raw_linked = exec_params.get("linked_appointment_id")
+            linked_appt = str(raw_linked).strip() if raw_linked and str(raw_linked).strip() else None
+            safe_user_id = await self._resolve_safe_user_id(session, exec_params.get("user_id"))
             note_obj = Note(
                 id=exec_params["id"],
-                type=exec_params.get("type", "scratchpad"),
-                user_id=exec_params.get("user_id"),
+                type=note_type,
+                user_id=safe_user_id,
                 profile_id=profile_id,
                 scope=active_scope,
-                slug=slug,
-                title=exec_params["title"],
-                content=exec_params["content"],
-                tags_json=exec_params["tags_json"],
-                locale=exec_params["locale"],
-                linked_appointment_id=exec_params["linked_appointment_id"],
+                slug=self._slugify_note_identifier(slug) if not re.match(r"^[a-zA-Z0-9._-]+$", slug) else slug,
+                title=title,
+                content=content,
+                tags_json=tags_json,
+                locale=note_locale,
+                linked_appointment_id=linked_appt,
                 created_at=now_dt,
                 updated_at=now_dt,
             )
             session.add(note_obj)
 
+        await session.flush()
+        await self._enqueue_note_index_job(
+            session, profile_id, active_scope, note_obj.id, note_obj.content, now_dt
+        )
         await session.commit()
         await self._invalidate_note_search_index(profile_id, note_obj.id)
 
         return {
             "status": "ok",
+            "action": action,
             "tool": tool_name,
             "entity": cfg.entity,
+            "record": self._serialize_note_record(note_obj),
+        }
+
+    async def _handle_delete_workspace_note(
+        self,
+        session: AsyncSession,
+        tool_name: str,
+        cfg: DbToolConfig,
+        exec_params: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        profile_id = str(exec_params["profile_id"])
+        active_scope = str(exec_params.get("scope") or DEFAULT_SCOPE)
+        note_id = exec_params.get("note_id")
+        slug = exec_params.get("slug")
+        identifier = exec_params.get("identifier")
+
+        if not any(str(v or "").strip() for v in (note_id, slug, identifier)):
+            raise ValueError("At least one of 'note_id', 'slug', or 'identifier' is required.")
+
+        note_obj = await self._find_scoped_note(
+            session,
+            profile_id,
+            active_scope,
+            note_id=note_id,
+            slug=slug,
+            identifier=identifier,
+        )
+        if note_obj is None:
+            return {
+                "status": "not_found",
+                "tool": tool_name,
+                "entity": cfg.entity,
+                "deleted": False,
+                "deleted_count": 0,
+            }
+
+        deleted_id = note_obj.id
+        deleted_slug = note_obj.slug
+        deleted_title = note_obj.title
+        await session.delete(note_obj)
+        await session.commit()
+        await self._invalidate_note_search_index(profile_id, deleted_id)
+
+        return {
+            "status": "ok",
+            "action": "deleted",
+            "tool": tool_name,
+            "entity": cfg.entity,
+            "deleted": True,
+            "deleted_count": 1,
+            "deleted_id": deleted_id,
+            "deleted_slug": deleted_slug,
             "record": {
-                "id": note_obj.id,
-                "slug": note_obj.slug,
-                "title": note_obj.title,
-                "type": note_obj.type,
-                "scope": note_obj.scope,
-                "profile_id": note_obj.profile_id,
-                "locale": note_obj.locale,
-                "linked_appointment_id": note_obj.linked_appointment_id,
-                "updated_at": (
-                    note_obj.updated_at.isoformat()
-                    if note_obj.updated_at
-                    else exec_params["now"]
-                ),
+                "id": deleted_id,
+                "slug": deleted_slug,
+                "title": deleted_title,
             },
         }
 
@@ -1691,6 +2261,7 @@ def get_db_tools_for_agent(
 __all__ = [
     "DEFAULT_DB_TOOLS_YAML_PATH",
     "DYNAMIC_DB_TOOL_NAMES",
+    "WORKSPACE_NOTE_MCP_TOOLS",
     "DbExecuteQueryInput",
     "DbInspectSchemaInput",
     "DbMutateRecordsInput",
@@ -1701,6 +2272,7 @@ __all__ = [
     "DbToolboxManifest",
     "McpDatabaseToolbox",
     "RESERVED_CONTEXT_PARAMS",
+    "expand_workspace_note_tools",
     "get_db_toolbox",
     "get_db_tools_for_agent",
     "get_mcp_db_toolbox",

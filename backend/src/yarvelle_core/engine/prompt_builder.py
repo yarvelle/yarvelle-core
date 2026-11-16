@@ -69,6 +69,12 @@ def build_system_prompt(
     else:
         tools_summary = "Available Tools: None (Conversational Only)"
 
+    from yarvelle_core.tools.mcp_db_toolbox import WORKSPACE_NOTE_MCP_TOOLS
+
+    has_note_tools = bool(
+        set(effective_tools) & ({"workspace-note"} | set(WORKSPACE_NOTE_MCP_TOOLS))
+    )
+
     # Skills data
     if progressive:
         skill_items = [
@@ -106,6 +112,7 @@ def build_system_prompt(
         "risk_class": agent.risk_class.value if hasattr(agent.risk_class, "value") else str(agent.risk_class),
         "persona_text": persona_text,
         "tools_summary": tools_summary,
+        "has_note_tools": has_note_tools,
         "skills": skill_items,
         "has_skills": bool(skill_items),
         "safety_preamble": safety_preamble,
