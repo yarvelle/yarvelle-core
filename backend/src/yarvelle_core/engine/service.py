@@ -67,6 +67,7 @@ from yarvelle_core.constants.api import (
     SSE_EVENT_DELIBERATION_PROPOSAL,
     SSE_EVENT_DELIBERATION_REVISION,
     SSE_EVENT_DONE,
+    SSE_EVENT_ENTITY_CHANGED,
     SSE_EVENT_ERROR,
     SSE_EVENT_MESSAGE,
     SSE_EVENT_ORCHESTRATION_NOTICE,
@@ -861,7 +862,13 @@ class AgentExecutionService:
 
         # 1. Load agent and verify risk class gating
         try:
-            agent, effective_tools, skills = load_agent(agent_dir, skills_dir)
+            from yarvelle_core.agents.sources import _default_allowed_tools
+
+            agent, effective_tools, skills = load_agent(
+                agent_dir,
+                skills_dir,
+                allowed_tools=_default_allowed_tools(),
+            )
             from yarvelle_core.tools.mcp_db_toolbox import expand_workspace_note_tools
 
             effective_tools = expand_workspace_note_tools(list(effective_tools or []))
@@ -1225,6 +1232,16 @@ class AgentExecutionService:
                             )
                             yield data
                         elif name in (SSE_EVENT_TASK_STATUS, SSE_EVENT_ORCHESTRATION_NOTICE):
+                            yield data
+                        elif name in (SSE_EVENT_ENTITY_CHANGED, "entity_changed"):
+                            logger.info(
+                                "entity_changed_emitted",
+                                entity_type=data.get("entity_type"),
+                                action=data.get("action"),
+                                entity_id=data.get("entity_id"),
+                                tool=data.get("tool"),
+                                thread_id=thread_id,
+                            )
                             yield data
                         elif name == SSE_EVENT_REFUSAL:
                             refusal_triggered = True
@@ -1742,6 +1759,7 @@ class AgentExecutionService:
                             SSE_EVENT_SUGGESTIONS,
                             SSE_EVENT_TASK_STATUS,
                             SSE_EVENT_ORCHESTRATION_NOTICE,
+                            SSE_EVENT_ENTITY_CHANGED,
                         ):
                             yield data
                             if name == SSE_EVENT_SUGGESTIONS:
