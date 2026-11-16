@@ -82,7 +82,7 @@ def test_all_core_declarative_specs_validate_and_match_handlers_one_to_one():
     loader = ToolSpecLoader()
     core_items = loader.load_core_tools()
 
-    assert len(core_items) == 18
+    assert len(core_items) == 24
     loaded_names = [item.spec.name for item in core_items]
     assert set(loaded_names) == set(CORE_TOOL_NAMES)
 
