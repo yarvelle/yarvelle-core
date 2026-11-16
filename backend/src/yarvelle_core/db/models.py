@@ -1462,6 +1462,14 @@ class Note(ScopedMixin, Base):
         index=True,
         doc="Referenced appointment or entity identifier (optional string ID)",
     )
+    pinned: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        server_default="0",
+        index=True,
+        doc="Whether note is pinned to top of profile notes list",
+    )
 
     user: Mapped[Optional[User]] = relationship("User", back_populates="notes")
     profile: Mapped[Profile] = relationship("Profile", back_populates="notes")

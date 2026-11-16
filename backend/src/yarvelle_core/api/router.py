@@ -30,6 +30,7 @@ from yarvelle_core.api.i18n import router as i18n_router
 from yarvelle_core.api.me import router as me_router
 from yarvelle_core.api.memory import router as memory_router
 from yarvelle_core.api.models import router as models_router
+from yarvelle_core.api.notes import router as notes_router
 from yarvelle_core.api.profiles import router as profiles_router
 from yarvelle_core.api.reminders import router as reminders_router
 from yarvelle_core.api.routines import router as routines_router
@@ -53,6 +54,7 @@ def get_default_router_contributions() -> List[RouterContribution]:
         RouterContribution(audit_router, pack_id="core"),
         RouterContribution(approvals_router, prefix="/approvals", tags=["approvals"], pack_id="core"),
         RouterContribution(chat_router, pack_id="core"),
+        RouterContribution(notes_router, pack_id="core"),
         RouterContribution(models_router, pack_id="core"),
         RouterContribution(attachments_router, pack_id="core"),
         RouterContribution(me_router, prefix="/me", tags=["me"], pack_id="core"),

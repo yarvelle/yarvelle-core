@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 from yarvelle_core.scope.context import (
+    DEFAULT_GRANTED_SCOPES,
     DEFAULT_HEALTH_GRANTED_SCOPES,
     DEFAULT_SCOPE,
     ScopeAccessDeniedError,
@@ -33,6 +34,7 @@ from yarvelle_core.scope.mixin import ScopedMixin
 
 __all__ = [
     "DEFAULT_SCOPE",
+    "DEFAULT_GRANTED_SCOPES",
     "DEFAULT_HEALTH_GRANTED_SCOPES",
     "ScopeError",
     "ScopeAccessDeniedError",
