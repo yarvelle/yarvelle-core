@@ -17,7 +17,7 @@ import json
 import os
 from pathlib import Path
 import re
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 import yaml
 from pydantic import ValidationError
 
@@ -34,6 +34,7 @@ from yarvelle_core.loaders.skill_loader import ManifestValidationError, find_ski
 from yarvelle_core.loaders.union import (
     ToolValidationError,
     compute_effective_tools,
+    validate_tools_against_registry,
     validate_tools_in_phase0,
 )
 from yarvelle_core.schemas.manifest import (
@@ -158,6 +159,7 @@ def find_agent_dir(agents_dir: Union[Path, str], agent_id: str) -> Optional[Path
 def load_agent(
     agent_dir: Union[Path, str],
     skills_dir: Optional[Union[Path, str]] = None,
+    allowed_tools: Optional[Set[str]] = None,
 ) -> Tuple[AgentManifest, List[str], List[SkillManifest]]:
     """Loads and validates an agent directory containing agent.yaml and resolves declared skills.
 
@@ -318,7 +320,9 @@ def load_agent(
             resolved_skills_dir = (agent_path.parent.parent / SKILLS_DIR).resolve()
 
     explicit_keys = set(parsed_yaml.keys()) | set(meta_dict.keys())
-    effective_tools, loaded_skills = _resolve_agent_skills(agent, resolved_skills_dir, explicit_keys)
+    effective_tools, loaded_skills = _resolve_agent_skills(
+        agent, resolved_skills_dir, explicit_keys, allowed_tools=allowed_tools
+    )
     return agent, effective_tools, loaded_skills
 
 
@@ -326,10 +330,11 @@ def _resolve_agent_skills(
     agent: AgentManifest,
     resolved_skills_dir: Path,
     explicit_keys: set,
+    allowed_tools: Optional[Set[str]] = None,
 ) -> Tuple[List[str], List[SkillManifest]]:
     """Validates tools, loads declared skills and derives effective tools (shared by file and record loaders)."""
-    # Validate agent-declared tools against Phase 0 closed registry
-    validate_tools_in_phase0(agent.tools, f'agent "{agent.id}"')
+    # Validate agent-declared tools against allowed registry (or Phase 0 closed registry if None)
+    validate_tools_against_registry(agent.tools, allowed_tools=allowed_tools, source_name=f'agent "{agent.id}"')
 
     # Load and validate declared skills
     loaded_skills: List[SkillManifest] = []
@@ -344,11 +349,11 @@ def _resolve_agent_skills(
                 f'Missing declared skill: {skill_id} (looked in "{resolved_skills_dir}")'
             )
 
-        skill = load_skill(skill_path)
+        skill = load_skill(skill_path, allowed_tools=allowed_tools)
         loaded_skills.append(skill)
 
-    # Compute effective tools union: unique(agent.tools ∪ skill.tools) ∩ Phase0Registry
-    effective_tools = compute_effective_tools(agent.tools, loaded_skills)
+    # Compute effective tools union: unique(agent.tools ∪ skill.tools) ∩ allowed_tools
+    effective_tools = compute_effective_tools(agent.tools, loaded_skills, allowed_tools=allowed_tools)
 
     # Populate domain, category, risk_class from primary skill if not explicit
     primary_skill = loaded_skills[0] if loaded_skills else None
@@ -370,6 +375,7 @@ def _resolve_agent_skills(
 def load_agent_from_record(
     record: Dict[str, Any],
     skills_dir: Optional[Union[Path, str]] = None,
+    allowed_tools: Optional[Set[str]] = None,
 ) -> Tuple[AgentManifest, List[str], List[SkillManifest]]:
     """Validates a stored (non-file) agent definition, such as a database row, like an agent.yaml.
 
@@ -391,13 +397,16 @@ def load_agent_from_record(
             f'Stored agent "{agent.id}" declares skills but no skills directory was given'
         )
     resolved_skills_dir = Path(skills_dir).resolve() if skills_dir else Path()
-    effective_tools, loaded_skills = _resolve_agent_skills(agent, resolved_skills_dir, set(data.keys()))
+    effective_tools, loaded_skills = _resolve_agent_skills(
+        agent, resolved_skills_dir, set(data.keys()), allowed_tools=allowed_tools
+    )
     return agent, effective_tools, loaded_skills
 
 
 def load_all_agents(
     agents_dir: Union[Path, str],
     skills_dir: Optional[Union[Path, str]] = None,
+    allowed_tools: Optional[Set[str]] = None,
 ) -> List[AgentSummary]:
     """Discovers and summarizes all valid agents in agents_dir, including agents/_system."""
     agents_path = Path(agents_dir).resolve()
@@ -425,7 +434,7 @@ def load_all_agents(
     summaries: List[AgentSummary] = []
     for entry, is_system in candidates:
         try:
-            agent, effective_tools, _ = load_agent(entry, skills_dir)
+            agent, effective_tools, _ = load_agent(entry, skills_dir, allowed_tools=allowed_tools)
             if is_system:
                 agent.hidden = True
             starters = load_agent_starters(entry)
@@ -493,6 +502,7 @@ def load_all_agents(
 def load_subagent_from_yaml(
     agent_dir: Union[Path, str],
     resolve_tools: bool = False,
+    allowed_tools: Optional[Set[str]] = None,
 ) -> Dict[str, Any]:
     """Builds a native Deep Agents SubAgent dict from slim agent.yaml."""
     agent_path = Path(agent_dir).resolve()
@@ -518,7 +528,8 @@ def load_subagent_from_yaml(
     declared_tools = raw.get("tools", [])
     if not isinstance(declared_tools, list):
         declared_tools = []
-    valid_tools = [t for t in declared_tools if t in PHASE_0_REGISTRY]
+    effective_allowed = allowed_tools if allowed_tools is not None else PHASE_0_REGISTRY
+    valid_tools = [t for t in declared_tools if t in effective_allowed]
 
     if resolve_tools:
         from yarvelle_core.tools.registry import CLOSED_TOOL_DEFINITIONS

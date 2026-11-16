@@ -20,6 +20,7 @@ from yarvelle_core.loaders.frontmatter import (
 from yarvelle_core.loaders.union import (
     ToolValidationError,
     compute_effective_tools,
+    validate_tools_against_registry,
     validate_tools_in_phase0,
 )
 from yarvelle_core.loaders.skill_loader import (
@@ -43,6 +44,7 @@ __all__ = [
     "parse_frontmatter",
     "ToolValidationError",
     "compute_effective_tools",
+    "validate_tools_against_registry",
     "validate_tools_in_phase0",
     "ManifestValidationError",
     "load_all_skills",

@@ -16,7 +16,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import re
-from typing import Any, List, Optional, Union
+from typing import Any, List, Optional, Set, Union
 import yaml
 from pydantic import ValidationError
 
@@ -28,7 +28,11 @@ from yarvelle_core.constants.paths import (
     SKILL_MANIFEST_FILENAME,
 )
 from yarvelle_core.loaders.frontmatter import check_mandatory_intended_use, parse_frontmatter
-from yarvelle_core.loaders.union import ToolValidationError, validate_tools_in_phase0
+from yarvelle_core.loaders.union import (
+    ToolValidationError,
+    validate_tools_against_registry,
+    validate_tools_in_phase0,
+)
 from yarvelle_core.schemas.manifest import (
     AgentDomain,
     YarvelleYaml,
@@ -74,7 +78,10 @@ def find_skill_dir(skills_dir: Union[Path, str], skill_id: str) -> Optional[Path
     return None
 
 
-def load_skill(skill_dir: Union[Path, str]) -> SkillManifest:
+def load_skill(
+    skill_dir: Union[Path, str],
+    allowed_tools: Optional[Set[str]] = None,
+) -> SkillManifest:
     """Loads and validates a skill directory containing SKILL.md and optional yarvelle_core.yaml."""
     skill_path = Path(skill_dir).resolve()
     if not skill_path.is_dir():
@@ -177,7 +184,7 @@ def load_skill(skill_dir: Union[Path, str]) -> SkillManifest:
         tools = [t.strip() for t in fm.allowed_tools.split() if t.strip()]
 
     if tools:
-        validate_tools_in_phase0(tools, f'skill "{skill_id}"')
+        validate_tools_against_registry(tools, allowed_tools=allowed_tools, source_name=f'skill "{skill_id}"')
 
     # 6. Resolve taxonomy fields across yarvelle_core.yaml and SKILL.md frontmatter
     domain_val = None
@@ -307,7 +314,10 @@ def load_skill(skill_dir: Union[Path, str]) -> SkillManifest:
     )
 
 
-def load_all_skills(skills_dir: Union[Path, str]) -> List[SkillManifest]:
+def load_all_skills(
+    skills_dir: Union[Path, str],
+    allowed_tools: Optional[Set[str]] = None,
+) -> List[SkillManifest]:
     """Loads all valid skills from the given skills root directory."""
     skills_path = Path(skills_dir).resolve()
     if not skills_path.is_dir():
@@ -317,7 +327,7 @@ def load_all_skills(skills_dir: Union[Path, str]) -> List[SkillManifest]:
     for entry in sorted(skills_path.iterdir()):
         if entry.is_dir() and not entry.name.startswith((".", "_")):
             try:
-                skill = load_skill(entry)
+                skill = load_skill(entry, allowed_tools=allowed_tools)
                 skills.append(skill)
             except ManifestValidationError:
                 # Skip non-skill folders or report

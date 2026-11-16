@@ -17,11 +17,11 @@ import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Protocol, Sequence, Tuple, Union, runtime_checkable
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Protocol, Sequence, Set, Tuple, Union, runtime_checkable
 
 from yarvelle_core.constants.paths import SYSTEM_AGENTS_DIR
 from yarvelle_core.loaders.agent_loader import load_agent, load_agent_from_record
-from yarvelle_core.schemas.manifest import AgentManifest, SkillManifest
+from yarvelle_core.schemas.manifest import PHASE_0_REGISTRY, AgentManifest, SkillManifest
 
 logger = logging.getLogger(__name__)
 
@@ -94,23 +94,47 @@ def _candidate_dirs(agents_dir: Path) -> List[Tuple[Path, bool]]:
     return found
 
 
+def _default_allowed_tools() -> Set[str]:
+    """Returns Phase 0 tools plus currently registered core, DB, and enabled pack tools."""
+    from yarvelle_core.engine.tool_registry import create_default_registry
+
+    allowed: Set[str] = set(PHASE_0_REGISTRY)
+    try:
+        allowed.update(spec.name for spec in create_default_registry().list_all())
+    except Exception as err:
+        logger.debug("Default tool registry expansion skipped during agent load: %s", err)
+    return allowed
+
+
 class FilesystemAgentSource:
     """Loads agents from one agents/ directory (pack or workspace), including agents/_system."""
 
     kind = SOURCE_FILE
 
-    def __init__(self, agents_dir: Union[Path, str], skills_dir: Optional[Union[Path, str]] = None) -> None:
+    def __init__(
+        self,
+        agents_dir: Union[Path, str],
+        skills_dir: Optional[Union[Path, str]] = None,
+        *,
+        allowed_tools: Optional[Iterable[str]] = None,
+    ) -> None:
         self.agents_dir = Path(agents_dir).resolve()
         self.skills_dir = Path(skills_dir).resolve() if skills_dir else None
+        self.allowed_tools: Optional[Set[str]] = set(allowed_tools) if allowed_tools is not None else None
 
     def load(self) -> SourceResult:
         result = SourceResult()
         if not self.agents_dir.is_dir():
             logger.warning("Agents directory does not exist: %s", self.agents_dir)
             return result
+        effective_allowed = self.allowed_tools if self.allowed_tools is not None else _default_allowed_tools()
         for entry, is_system in _candidate_dirs(self.agents_dir):
             try:
-                manifest, effective_tools, skills = load_agent(entry, self.skills_dir)
+                manifest, effective_tools, skills = load_agent(
+                    entry,
+                    self.skills_dir,
+                    allowed_tools=effective_allowed,
+                )
             except Exception as err:  # one bad agent must not hide the others
                 logger.warning("Failed to load agent %s: %s", entry.name, err)
                 result.rejected.append(RejectedAgent(entry.name, self.kind, str(entry), str(err)))
@@ -212,10 +236,13 @@ class DbAgentSource:
         rows: Optional[Iterable[Any]] = None,
         skills_dir: Optional[Union[Path, str]] = None,
         types: Sequence[str] = DEFAULT_DB_AGENT_TYPES,
+        *,
+        allowed_tools: Optional[Iterable[str]] = None,
     ) -> None:
         self.skills_dir = Path(skills_dir).resolve() if skills_dir else None
         self.types = tuple(types)
         self._rows: List[Any] = list(rows or [])
+        self.allowed_tools: Optional[Set[str]] = set(allowed_tools) if allowed_tools is not None else None
 
     def set_rows(self, rows: Iterable[Any]) -> None:
         self._rows = list(rows)
@@ -225,6 +252,7 @@ class DbAgentSource:
 
     def load(self) -> SourceResult:
         result = SourceResult()
+        effective_allowed = self.allowed_tools if self.allowed_tools is not None else _default_allowed_tools()
         for row in self._rows:
             row_type = self._type_of(row)
             if self.types and row_type is not None and row_type not in self.types:
@@ -233,7 +261,11 @@ class DbAgentSource:
             agent_id = str(record.get("id") or "")
             origin = f"db:{agent_id}"
             try:
-                manifest, effective_tools, skills = load_agent_from_record(record, self.skills_dir)
+                manifest, effective_tools, skills = load_agent_from_record(
+                    record,
+                    self.skills_dir,
+                    allowed_tools=effective_allowed,
+                )
             except Exception as err:
                 logger.warning("Stored agent %r rejected: %s", agent_id, err)
                 result.rejected.append(RejectedAgent(agent_id, self.kind, origin, str(err)))
