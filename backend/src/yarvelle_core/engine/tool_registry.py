@@ -259,6 +259,12 @@ class ToolSpecRegistry:
 CORE_TOOL_NAMES: Tuple[str, ...] = (
     "attach-read",
     "workspace-note",
+    "create_workspace_note",
+    "get_workspace_note",
+    "list_workspace_notes",
+    "update_workspace_note",
+    "delete_workspace_note",
+    "upsert_workspace_note",
     "skill-docs",
     "delegate_to_agent",
     "list_agents",
@@ -283,6 +289,7 @@ def bound_declarative_to_tool_spec(bound: BoundDeclarativeTool) -> ToolSpec:
     decl = bound.spec
     meta: Dict[str, Any] = dict(decl.metadata)
     meta.setdefault("category", decl.category)
+    meta.setdefault("pack_id", decl.pack_id)
     if decl.capabilities and "required_capabilities" not in meta:
         meta["required_capabilities"] = list(decl.capabilities)
     if decl.output_schema is not None and "output_schema" not in meta:

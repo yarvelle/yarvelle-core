@@ -87,8 +87,31 @@ from yarvelle_core.constants.paths import (
 from yarvelle_core.engine.guards.policy import apply_env_guards
 from yarvelle_core.engine.safety_policy import SafetyPolicy, get_default_safety_policy
 from yarvelle_core.schemas.audit import AuditEvent
+from yarvelle_core.constants.agents import expand_workspace_note_tools
 from yarvelle_core.tools.registry import CLOSED_TOOL_DEFINITIONS
 from yarvelle_core.agents.registry import AgentRegistry
+
+
+def _extract_builder_tool_name(tool_obj: Any) -> str:
+    """Extracts a canonical tool name from a ToolSpec, OpenAI schema dict, BaseTool, or string."""
+    if hasattr(tool_obj, "name") and getattr(tool_obj, "name", None):
+        return str(tool_obj.name)
+    if isinstance(tool_obj, dict):
+        fn = tool_obj.get("function")
+        if isinstance(fn, dict) and fn.get("name"):
+            return str(fn["name"])
+        if tool_obj.get("name"):
+            return str(tool_obj["name"])
+        return ""
+    return str(tool_obj)
+
+
+def _serialize_builder_tool(tool_obj: Any) -> Any:
+    """Converts ToolSpec instances into OpenAI function definitions for model.bind_tools()."""
+    to_def = getattr(tool_obj, "to_tool_definition", None)
+    if callable(to_def):
+        return to_def()
+    return tool_obj
 if TYPE_CHECKING:
     from yarvelle_core.workflows.nodes import (
         AgentExecutionNode,
@@ -392,10 +415,27 @@ class GraphBuilder:
         # 1. Bind tools to model if supported
         bound_model = self.model
         if self.tools is not None:
-            tool_schemas = self.tools
+            tool_schemas = [_serialize_builder_tool(t) for t in self.tools]
         elif self.execution_context is not None and getattr(self.execution_context, "effective_tools", None) is not None:
-            eff = self.execution_context.effective_tools
-            tool_schemas = [CLOSED_TOOL_DEFINITIONS[t] for t in eff if t in CLOSED_TOOL_DEFINITIONS]
+            eff = expand_workspace_note_tools(list(self.execution_context.effective_tools))
+            default_reg = None
+            tool_schemas = []
+            for t in eff:
+                if t in CLOSED_TOOL_DEFINITIONS:
+                    tool_schemas.append(CLOSED_TOOL_DEFINITIONS[t])
+                    continue
+                if self.tool_registry and hasattr(self.tool_registry, "get"):
+                    spec_obj = self.tool_registry.get(t)
+                    if spec_obj is not None:
+                        tool_schemas.append(_serialize_builder_tool(spec_obj))
+                        continue
+                if default_reg is None:
+                    from yarvelle_core.engine.tool_registry import create_default_registry
+
+                    default_reg = create_default_registry()
+                spec_obj = default_reg.get(t)
+                if spec_obj is not None:
+                    tool_schemas.append(_serialize_builder_tool(spec_obj))
         else:
             tool_schemas = list(CLOSED_TOOL_DEFINITIONS.values())
 
@@ -447,6 +487,7 @@ class GraphBuilder:
                         audit_sink=self.orchestration_audit_sink or _record_orchestration_audit,
                         task_sink=self.turn_task_sink or _store_turn_tasks,
                         reminder=self.main_agent_reminder,
+                        tool_registry=self.tool_registry,
                     )
                 supervisor_node = OrchestratorNode(
                     model=self.model,
@@ -493,10 +534,12 @@ class GraphBuilder:
         )
         norm_allowed_tools = None
         if builder_allowed_tools is not None:
-            norm_allowed_tools = [
-                t["name"] if isinstance(t, dict) and "name" in t else (getattr(t, "name", str(t)))
-                for t in builder_allowed_tools
+            raw_allowed = [
+                name
+                for name in (_extract_builder_tool_name(t) for t in builder_allowed_tools)
+                if name
             ]
+            norm_allowed_tools = expand_workspace_note_tools(raw_allowed)
         tool_node = self._custom_nodes.get("tools") or ToolNode(
             allowed_tools=norm_allowed_tools,
             tools=self.tools,
@@ -640,9 +683,19 @@ class GraphBuilder:
                 )
             )
 
+            norm_effective: Optional[List[str]] = None
+            if effective_tools is not None:
+                norm_effective = expand_workspace_note_tools(
+                    [
+                        name
+                        for name in (_extract_builder_tool_name(t) for t in effective_tools)
+                        if name
+                    ]
+                )
+
             # Sync allowed_tools with ToolNode instance if applicable
-            if effective_tools is not None and hasattr(tool_node, "allowed_tools"):
-                tool_node.allowed_tools = set(effective_tools)
+            if norm_effective is not None and hasattr(tool_node, "allowed_tools"):
+                tool_node.allowed_tools = set(norm_effective)
 
             if hasattr(tool_node, "execute"):
                 sig = inspect.signature(tool_node.execute)
@@ -671,7 +724,7 @@ class GraphBuilder:
             all_traces = res.get("tool_traces", [])
             new_traces = all_traces[prior_count:]
 
-            effective_allowed_set = set(effective_tools) if effective_tools is not None else None
+            effective_allowed_set = set(norm_effective) if norm_effective is not None else None
 
             for tr in new_traces:
                 tool_name = tr.get("tool")

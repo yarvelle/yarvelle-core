@@ -545,6 +545,7 @@ class HybridRouter:
         explicit_agent: Optional[str] = None,
         turn_id: Optional[str] = None,
         thread_id: Optional[str] = None,
+        tool_resolver: Optional[ToolResolver] = None,
     ) -> Optional[TurnOutcome]:
         """Routes the turn; runs the main agent when it is chosen.
 
@@ -587,10 +588,11 @@ class HybridRouter:
             turn_id=turn_id,
             thread_id=thread_id,
         )
+        active_resolver = tool_resolver if tool_resolver is not None else self.tool_resolver
         try:
             agent = build_main_agent(
                 self.model, self.registry, guard,
-                system_prompt=self.system_prompt, tool_resolver=self.tool_resolver,
+                system_prompt=self.system_prompt, tool_resolver=active_resolver,
             )
             # The reminder (if any) changes only the model's copy; the slice
             # below keeps just the messages this run adds.

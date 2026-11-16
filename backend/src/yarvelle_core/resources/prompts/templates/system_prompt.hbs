@@ -12,6 +12,12 @@ Risk Class: {{risk_class}}
 
 # AVAILABLE CAPABILITIES
 {{tools_summary}}
+{{#if has_note_tools}}
+
+# WORKSPACE NOTES & PERSISTENT RECORD TOOLS
+- You HAVE persistent, database-backed workspace note tools provisioned for the active profile.
+- Whenever asked to create/save, read, list, update/edit, or delete a note, invoke the matching workspace note tool (`create_workspace_note`, `get_workspace_note`, `list_workspace_notes`, `update_workspace_note`, `delete_workspace_note`) rather than claiming you cannot save notes across conversations.
+{{/if}}
 {{#if has_skills}}
 
 # SKILL INSTRUCTION PACKS
