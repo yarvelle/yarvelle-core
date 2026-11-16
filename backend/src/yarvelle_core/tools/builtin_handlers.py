@@ -177,6 +177,20 @@ async def exec_list_reminders(args: Dict[str, Any], ctx: Any = None) -> Any:
     return await execute_list_reminders(args or {}, ctx)
 
 
+@builtin_tool_handler("update_reminder")
+async def exec_update_reminder(args: Dict[str, Any], ctx: Any = None) -> Any:
+    from yarvelle_core.tools.reminders import execute_update_reminder
+
+    return await execute_update_reminder(args or {}, ctx)
+
+
+@builtin_tool_handler("delete_reminder")
+async def exec_delete_reminder(args: Dict[str, Any], ctx: Any = None) -> Any:
+    from yarvelle_core.tools.reminders import execute_delete_reminder
+
+    return await execute_delete_reminder(args or {}, ctx)
+
+
 @builtin_tool_handler("web_search")
 async def exec_web_search(args: Dict[str, Any], ctx: Any = None) -> Any:
     from yarvelle_core.tools.web_search import execute_web_search
@@ -238,6 +252,20 @@ async def exec_create_email_draft(args: Dict[str, Any], ctx: Any = None) -> Any:
     if "recipient" not in payload and "recipient_email" in payload:
         payload["recipient"] = payload["recipient_email"]
     return await execute_create_email_draft(payload, ctx)
+
+
+@builtin_tool_handler("list_email_drafts")
+async def exec_list_email_drafts(args: Dict[str, Any], ctx: Any = None) -> Any:
+    from yarvelle_core.platform.email_drafts import execute_list_email_drafts
+
+    return await execute_list_email_drafts(args or {}, ctx)
+
+
+@builtin_tool_handler("delete_email_draft")
+async def exec_delete_email_draft(args: Dict[str, Any], ctx: Any = None) -> Any:
+    from yarvelle_core.platform.email_drafts import execute_delete_email_draft
+
+    return await execute_delete_email_draft(args or {}, ctx)
 
 
 async def _invoke_gmail_mcp(tool_name: str, args: Dict[str, Any], ctx: Any = None) -> Any:

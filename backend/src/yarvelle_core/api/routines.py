@@ -33,7 +33,7 @@ from yarvelle_core.platform.routines import (
     update_standing_routine_status,
 )
 from yarvelle_core.connectors.mcp_remote import reapprove_mcp_tool_pin
-from yarvelle_core.db.models import McpToolPin, Profile, Routine
+from yarvelle_core.db.models import Job, McpToolPin, Profile, Routine
 from yarvelle_core.logging import get_logger
 
 logger = get_logger("yarvelle_core.api.routines")
@@ -199,6 +199,78 @@ async def create_profile_routine(
         **serialized,
         "routine": serialized,
     }
+
+
+@router.get(
+    "/profiles/{profile_id}/routines/{routine_id}",
+    summary="Get single standing routine by ID",
+)
+async def get_profile_routine(
+    profile_id: str,
+    routine_id: str,
+    profile: Profile = Depends(require_profile_access("view_records")),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    """Fetches a single standing routine scoped to `profile_id`."""
+    stmt = select(Routine).where(
+        Routine.id == routine_id.strip(),
+        Routine.profile_id == profile.id,
+    )
+    res = await db.execute(stmt)
+    routine = res.scalar_one_or_none()
+    if routine is None:
+        raise YarvelleError(
+            "YRV-500-008",
+            context={"routine_id": routine_id, "profile_id": profile.id},
+        )
+    serialized = _serialize_routine(routine)
+    return {
+        **serialized,
+        "routine": serialized,
+    }
+
+
+@router.delete(
+    "/profiles/{profile_id}/routines/{routine_id}",
+    summary="Delete a standing routine",
+)
+async def delete_profile_routine(
+    profile_id: str,
+    routine_id: str,
+    profile: Profile = Depends(require_profile_access("manage")),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    """Deletes a standing routine and its scheduled recurring jobs."""
+    stmt = select(Routine).where(
+        Routine.id == routine_id.strip(),
+        Routine.profile_id == profile.id,
+    )
+    res = await db.execute(stmt)
+    routine = res.scalar_one_or_none()
+    if routine is None:
+        raise YarvelleError(
+            "YRV-500-008",
+            context={"routine_id": routine_id, "profile_id": profile.id},
+        )
+
+    # Delete associated recurring Job in jobs table
+    job_stmt = select(Job).where(Job.profile_id == profile.id, Job.idempotency_key == f"routine:{routine.id}")
+    job_res = await db.execute(job_stmt)
+    job = job_res.scalar_one_or_none()
+    if job:
+        await db.delete(job)
+
+    await db.delete(routine)
+    await db.commit()
+
+    return {
+        "success": True,
+        "id": routine_id,
+        "routine_id": routine_id,
+        "profile_id": profile.id,
+        "deleted": True,
+    }
+
 
 
 @router.patch(

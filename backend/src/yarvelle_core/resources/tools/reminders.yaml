@@ -99,3 +99,70 @@ tools:
     binding:
       kind: handler
       entrypoint: yarvelle_core.tools.builtin_handlers:exec_list_reminders
+
+  - name: update_reminder
+    category: reminders
+    risk_tier: write_local
+    trust: trusted
+    data_sensitivity: restricted
+    context_params: [profile_id, user_id, scope, now]
+    description: >-
+      Update an existing reminder and synchronize its scheduled Job.
+    input_schema:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Unique reminder identifier.
+        title:
+          type: string
+          description: Updated reminder title.
+        next_due_at:
+          type: string
+          description: Updated scheduled ISO-8601 due timestamp.
+        description:
+          type: string
+          description: Updated detailed instructions.
+        category:
+          type: string
+          enum: [task, event, prep, general, appointment]
+          description: Updated reminder category.
+        status:
+          type: string
+          enum: [pending, snoozed, completed, missed, cancelled]
+          description: Updated reminder status.
+      required:
+        - id
+    metadata:
+      action: update_reminder
+      entity: reminder
+      undoable: true
+      risk: write_local
+    binding:
+      kind: handler
+      entrypoint: yarvelle_core.tools.builtin_handlers:exec_update_reminder
+
+  - name: delete_reminder
+    category: reminders
+    risk_tier: write_local
+    trust: trusted
+    data_sensitivity: restricted
+    context_params: [profile_id, user_id, scope]
+    description: >-
+      Delete an existing reminder and cancel its scheduled Job.
+    input_schema:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Unique reminder identifier.
+      required:
+        - id
+    metadata:
+      action: delete_reminder
+      entity: reminder
+      undoable: true
+      risk: write_local
+    binding:
+      kind: handler
+      entrypoint: yarvelle_core.tools.builtin_handlers:exec_delete_reminder

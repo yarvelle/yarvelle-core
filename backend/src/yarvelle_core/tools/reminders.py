@@ -29,7 +29,7 @@ from yarvelle_core.schemas.tool import ToolResult
 
 logger = logging.getLogger("yarvelle_core.tools.reminders")
 
-VALID_REMINDER_CATEGORIES = {"task", "event", "prep", "general", "medication", "appointment"}
+VALID_REMINDER_CATEGORIES = {"task", "event", "prep", "general", "appointment"}
 
 
 def register_reminder_category(category: str) -> None:
@@ -264,9 +264,195 @@ async def execute_list_reminders(args: Dict[str, Any], ctx: Any = None) -> ToolR
     )
 
 
+async def execute_update_reminder(args: Dict[str, Any], ctx: Any = None) -> ToolResult:
+    """Updates an existing reminder scoped to `profile_id`."""
+    profile_id = getattr(ctx, "profile_id", None) if ctx is not None else None
+    if not profile_id or not isinstance(profile_id, str) or not profile_id.strip():
+        return ToolResult(
+            success=False,
+            output=None,
+            error="Security violation: profile_id is required in ToolContext for update_reminder.",
+        )
+    clean_profile_id = profile_id.strip()
+
+    rem_id = str(args.get("id") or args.get("reminder_id") or "").strip()
+    if not rem_id:
+        return ToolResult(
+            success=False,
+            output=None,
+            error="Parameter 'id' (or 'reminder_id') is required for update_reminder.",
+        )
+
+    factory = get_session_factory()
+    now_utc = datetime.now(timezone.utc)
+    updated_dict: Dict[str, Any] = {}
+
+    async with factory() as session:
+        stmt = select(Reminder).where(
+            Reminder.id == rem_id,
+            Reminder.profile_id == clean_profile_id,
+        )
+        res = await session.execute(stmt)
+        reminder = res.scalar_one_or_none()
+        if reminder is None:
+            return ToolResult(
+                success=False,
+                output=None,
+                error=f"Reminder '{rem_id}' not found for profile '{clean_profile_id}'.",
+            )
+
+        if "title" in args and args["title"]:
+            reminder.title = str(args["title"]).strip()
+        if "description" in args:
+            reminder.description = str(args["description"]).strip() if args["description"] else None
+        if "category" in args and args["category"]:
+            cat = str(args["category"]).strip().lower()
+            if cat in VALID_REMINDER_CATEGORIES:
+                reminder.category = cat
+        if "status" in args and args["status"]:
+            st = str(args["status"]).strip().lower()
+            if st in ("pending", "snoozed", "completed", "missed", "cancelled"):
+                reminder.status = st
+        if "next_due_at" in args and args["next_due_at"]:
+            try:
+                due_dt = datetime.fromisoformat(str(args["next_due_at"]))
+                if due_dt.tzinfo is None:
+                    due_dt = due_dt.replace(tzinfo=timezone.utc)
+                reminder.next_due_at = due_dt.astimezone(timezone.utc)
+            except Exception as exc:
+                return ToolResult(
+                    success=False,
+                    output=None,
+                    error=f"Invalid ISO-8601 next_due_at: {exc}",
+                )
+
+        reminder.updated_at = now_utc
+
+        # If next_due_at was updated, sync corresponding job
+        if reminder.next_due_at:
+            job_stmt = select(Job).where(
+                Job.profile_id == clean_profile_id,
+                Job.idempotency_key == f"reminder:{rem_id}",
+            )
+            job_res = await session.execute(job_stmt)
+            job = job_res.scalar_one_or_none()
+            if job:
+                job.next_run_at = reminder.next_due_at
+                job.updated_at = now_utc
+
+        await session.commit()
+        await session.refresh(reminder)
+
+        updated_dict = {
+            "id": reminder.id,
+            "profile_id": reminder.profile_id,
+            "title": reminder.title,
+            "description": reminder.description,
+            "category": reminder.category,
+            "rrule": reminder.rrule,
+            "timezone": reminder.timezone,
+            "next_due_at": reminder.next_due_at.isoformat() if reminder.next_due_at else None,
+            "status": reminder.status,
+            "updated_at": reminder.updated_at.isoformat() if reminder.updated_at else None,
+        }
+
+    actor_id = getattr(ctx, "user_id", "user") or "user"
+    try:
+        await record_audit(
+            {
+                "profile_id": clean_profile_id,
+                "action": "update",
+                "tool": "update_reminder",
+                "risk": "write_local",
+                "external_ref": f"reminder:{rem_id}",
+                "details": updated_dict,
+            },
+            actor_user_id=actor_id,
+            risk="write_local",
+        )
+    except Exception as audit_err:
+        logger.debug("Audit logging failed for reminder update %s: %s", rem_id, audit_err)
+
+    return ToolResult(success=True, output=updated_dict)
+
+
+async def execute_delete_reminder(args: Dict[str, Any], ctx: Any = None) -> ToolResult:
+    """Deletes an existing reminder and associated job scoped to `profile_id`."""
+    profile_id = getattr(ctx, "profile_id", None) if ctx is not None else None
+    if not profile_id or not isinstance(profile_id, str) or not profile_id.strip():
+        return ToolResult(
+            success=False,
+            output=None,
+            error="Security violation: profile_id is required in ToolContext for delete_reminder.",
+        )
+    clean_profile_id = profile_id.strip()
+
+    rem_id = str(args.get("id") or args.get("reminder_id") or "").strip()
+    if not rem_id:
+        return ToolResult(
+            success=False,
+            output=None,
+            error="Parameter 'id' (or 'reminder_id') is required for delete_reminder.",
+        )
+
+    factory = get_session_factory()
+    async with factory() as session:
+        stmt = select(Reminder).where(
+            Reminder.id == rem_id,
+            Reminder.profile_id == clean_profile_id,
+        )
+        res = await session.execute(stmt)
+        reminder = res.scalar_one_or_none()
+        if reminder is None:
+            return ToolResult(
+                success=False,
+                output=None,
+                error=f"Reminder '{rem_id}' not found for profile '{clean_profile_id}'.",
+            )
+
+        job_stmt = select(Job).where(
+            Job.profile_id == clean_profile_id,
+            Job.idempotency_key == f"reminder:{rem_id}",
+        )
+        job_res = await session.execute(job_stmt)
+        job = job_res.scalar_one_or_none()
+        if job:
+            await session.delete(job)
+
+        await session.delete(reminder)
+        await session.commit()
+
+    actor_id = getattr(ctx, "user_id", "user") or "user"
+    try:
+        await record_audit(
+            {
+                "profile_id": clean_profile_id,
+                "action": "delete",
+                "tool": "delete_reminder",
+                "risk": "write_local",
+                "external_ref": f"reminder:{rem_id}",
+            },
+            actor_user_id=actor_id,
+            risk="write_local",
+        )
+    except Exception as audit_err:
+        logger.debug("Audit logging failed for reminder delete %s: %s", rem_id, audit_err)
+
+    return ToolResult(
+        success=True,
+        output={
+            "id": rem_id,
+            "deleted": True,
+            "profile_id": clean_profile_id,
+        },
+    )
+
+
 __all__ = [
     "VALID_REMINDER_CATEGORIES",
     "register_reminder_category",
     "execute_create_reminder",
     "execute_list_reminders",
+    "execute_update_reminder",
+    "execute_delete_reminder",
 ]
